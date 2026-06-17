@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DeviceStatus {
+  ONLINE
+  IDLE
+  OFFLINE
+  WARNING
+}
+
+enum RobotMode {
+  COMPANION
+  LEARNING
+  PATROL
+  SLEEP
+}
+
+enum CommandStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum TaskType {
+  STORY
+  SONG
+  WORD_CARD
+  QUIZ
+  CAMPUS_QA
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  role      String   @default("teacher")
+  email     String   @unique
+  createdAt DateTime @default(now())
+
+  commands Command[]
+}
+
+model Device {
+  id            String       @id @default(cuid())
+  code          String       @unique
+  name          String
+  classroom     String
+  status        DeviceStatus @default(ONLINE)
+  mode          RobotMode    @default(COMPANION)
+  battery       Int          @default(86)
+  temperature   Float        @default(36.4)
+  lastHeartbeat DateTime     @default(now())
+  firmware      String       @default("kb-1.0.0")
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  commands      Command[]
+  logs          DeviceLog[]
+  conversations Conversation[]
+  tasks         LearningTask[]
+}
+
+model Command {
+  id        String        @id @default(cuid())
+  deviceId  String
+  teacherId String?
+  type      String
+  payload   Json
+  status    CommandStatus @default(PENDING)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  device  Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  teacher User?  @relation(fields: [teacherId], references: [id])
+}
+
+model DeviceLog {
+  id        String   @id @default(cuid())
+  deviceId  String
+  level     String   @default("info")
+  message   String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  deviceId  String?
+  speaker   String
+  message   String
+  reply     String
+  scene     String   @default("campus")
+  createdAt DateTime @default(now())
+
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+}
+
+model LearningTask {
+  id        String   @id @default(cuid())
+  deviceId  String?
+  title     String
+  type      TaskType
+  content   String
+  schedule  String
+  progress  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+}
