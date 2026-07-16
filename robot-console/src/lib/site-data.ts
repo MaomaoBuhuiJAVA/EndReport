@@ -1,5 +1,5 @@
-import campusManifest from "@/../public/gallery/manifest.json";
-import roomManifest from "@/../public/rooms/manifest.json";
+import campusManifest from "../../public/gallery/manifest.json";
+import roomManifest from "../../public/rooms/manifest.json";
 import { prisma } from "@/lib/prisma";
 
 export type SiteData = {
