@@ -2,7 +2,8 @@
 
 import Image from "next/image";
 import { AnimatePresence, motion } from "motion/react";
-import { Send, Sparkles, X } from "lucide-react";
+import { Send, X } from "lucide-react";
+import { GardenSeal } from "@/components/GardenSeal";
 import Markdown from "react-markdown";
 import {
   useEffect,
@@ -388,7 +389,7 @@ export function SciencePet() {
           >
             <header className="pet-chat__header">
               <span>
-                <Sparkles size={16} />
+                <GardenSeal glyph="贝" size="mini" tone="gold" />
                 科小贝
               </span>
               <button type="button" onClick={() => setOpen(false)} title="关闭对话">

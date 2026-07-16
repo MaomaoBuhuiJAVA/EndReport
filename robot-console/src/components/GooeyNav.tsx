@@ -161,7 +161,7 @@ export function GooeyNav({
           "--end-y": `${particleData.end[1]}px`,
           "--time": `${particleData.time}ms`,
           "--scale": `${particleData.scale}`,
-          "--color": `var(--gooey-color-${particleData.color}, #fff)`,
+          "--color": `var(--color-${particleData.color}, #111)`,
           "--rotate": `${particleData.rotate}deg`,
         };
 

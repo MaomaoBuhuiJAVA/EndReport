@@ -9,18 +9,16 @@ import {
   ArrowRight,
   ArrowUp,
   Bot,
-  CheckCircle2,
   ChevronRight,
   Eye,
   LogOut,
   Menu,
   Search,
   Settings,
-  Sparkles,
   SquareTerminal,
-  Trophy,
   X,
 } from "lucide-react";
+import { GardenSeal } from "@/components/GardenSeal";
 import { GooeyNav, type GooeyNavItem } from "@/components/GooeyNav";
 import { SciencePet } from "@/components/SciencePet";
 import { SpecularButton } from "@/components/SpecularButton";
@@ -98,10 +96,10 @@ const awardHighlights = [
 ];
 
 const textFeatures = [
-  { title: "园所资质", text: "资料库收录省二相关材料、基本情况与园所档案，可用于园所概览和资质展示。" },
-  { title: "课程建设", text: "围绕幼儿体验式学习、功能室课程、社团活动和科学启蒙，形成可检索的课程资料。" },
-  { title: "教师发展", text: "教职工名单、教师荣誉、课题论文、公开课和教育叙事资料已整理为展示内容。" },
-];
+  { title: "园所资质", text: "资料库收录省二相关材料、基本情况与园所档案，可用于园所概览和资质展示。", glyph: "园", tone: "teal" },
+  { title: "课程建设", text: "围绕幼儿体验式学习、功能室课程、社团活动和科学启蒙，形成可检索的课程资料。", glyph: "探", tone: "coral" },
+  { title: "教师发展", text: "教职工名单、教师荣誉、课题论文、公开课和教育叙事资料已整理为展示内容。", glyph: "师", tone: "sky" },
+] as const;
 
 export function SchoolPortal({ data, initialUser }: Props) {
   const [user, setUser] = useState(initialUser);
@@ -214,9 +212,7 @@ export function SchoolPortal({ data, initialUser }: Props) {
       <header className="fixed inset-x-0 top-0 z-40 px-3 pt-3">
         <div className="mx-auto flex max-w-7xl items-center gap-3 rounded-[8px] border border-white/72 bg-white/78 px-3 py-3 shadow-[0_14px_42px_rgba(38,58,54,0.10)] backdrop-blur-2xl">
           <Link className="flex min-w-0 items-center gap-3 rounded-[8px] px-2 py-1 transition hover:bg-[#f3efe4]" href="/auth">
-            <span className="grid size-10 shrink-0 place-items-center rounded-[8px] bg-[#1f6f62] text-white">
-              <Sparkles size={19} />
-            </span>
+            <GardenSeal glyph="芽" tone="teal" />
             <span className="hidden min-w-0 sm:block">
               <span className="block truncate text-sm font-semibold">{data.profile.shortName}</span>
               <span className="block text-xs text-[#64736f]">{user ? `${user.name} · ${user.role === "ADMIN" ? "管理员" : "普通用户"}` : "登录 / 注册"}</span>
@@ -352,9 +348,7 @@ export function SchoolPortal({ data, initialUser }: Props) {
                 {textFeatures.map((item) => (
                   <Card className="rounded-[8px] border-[#e7e1d5] bg-white shadow-none" key={item.title}>
                     <CardContent className="flex gap-4 p-5">
-                      <span className="mt-1 grid size-10 shrink-0 place-items-center rounded-[8px] bg-[#e9f2ed] text-[#1f6f62]">
-                        <CheckCircle2 size={18} />
-                      </span>
+                      <GardenSeal glyph={item.glyph} tone={item.tone} />
                       <div>
                         <h3 className="font-semibold text-[#243632]">{item.title}</h3>
                         <p className="mt-2 text-sm leading-7 text-[#64736f]">{item.text}</p>
@@ -374,9 +368,11 @@ export function SchoolPortal({ data, initialUser }: Props) {
               {awardHighlights.map((item, index) => (
                 <article className="rounded-[8px] border border-[#e5dccb] bg-white p-5 shadow-sm" key={item}>
                   <div className="mb-4 flex items-center gap-3">
-                    <span className="grid size-10 place-items-center rounded-[8px] bg-[#f5ead1] text-[#8c6a22]">
-                      <Trophy size={18} />
-                    </span>
+                    <GardenSeal
+                      glyph={["芽", "叶", "花", "果"][index] ?? "荣"}
+                      sequence={index + 1}
+                      tone="gold"
+                    />
                     <p className="text-sm font-semibold text-[#8c6a22]">荣誉记录 0{index + 1}</p>
                   </div>
                   <p className="text-sm leading-8 text-[#4f625d]">{item}</p>

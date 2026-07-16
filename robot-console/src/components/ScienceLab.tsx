@@ -13,9 +13,9 @@ import {
   LoaderCircle,
   PlayCircle,
   Search,
-  Sparkles,
   X,
 } from "lucide-react";
+import { GardenSeal } from "@/components/GardenSeal";
 import Markdown from "react-markdown";
 import {
   useCallback,
@@ -320,9 +320,7 @@ export function ScienceLab({
       <header className="lab-site-header">
         <div className="lab-site-header__inner">
           <Link className="lab-brand" href="/">
-            <span>
-              <Sparkles size={19} />
-            </span>
+            <GardenSeal glyph="芽" tone="teal" />
             <strong>国科温州二幼</strong>
           </Link>
           <GooeyNav items={labNavItems} activeKey="lab" />
