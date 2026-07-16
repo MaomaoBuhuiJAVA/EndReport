@@ -350,7 +350,18 @@ export function ScienceLab({
               <p className="lab-eyebrow">国科二幼园本资源中心</p>
               <h1>
                 科小贝
-                <RotatingText words={["实验室", "科学诗库", "亲子探索站"]} />
+                <RotatingText
+                  texts={["实验室", "科学诗库", "亲子探索站"]}
+                  mainClassName="rotating-text"
+                  splitLevelClassName="rotating-text__clip"
+                  staggerFrom="last"
+                  staggerDuration={0.025}
+                  initial={{ y: "100%" }}
+                  animate={{ y: 0 }}
+                  exit={{ y: "-120%" }}
+                  transition={{ type: "spring", damping: 30, stiffness: 400 }}
+                  rotationInterval={2600}
+                />
               </h1>
               <p>汇集园本科学诗、教师实验与家庭实验资料。</p>
               <div className="lab-hero__progress" aria-hidden="true">

@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type CSSProperties,
+  type KeyboardEvent,
+  type MouseEvent,
+} from "react";
 
 export interface GooeyNavItem {
   key: string;
@@ -9,145 +16,243 @@ export interface GooeyNavItem {
   href: string;
 }
 
-type Particle = {
-  id: number;
-  x: number;
-  y: number;
-  size: number;
-  color: string;
+type GooeyNavProps = {
+  items: GooeyNavItem[];
+  activeKey: string;
+  onSelect?: (item: GooeyNavItem) => void;
+  animationTime?: number;
+  particleCount?: number;
+  particleDistances?: [number, number];
+  particleR?: number;
+  timeVariance?: number;
+  colors?: number[];
 };
 
-const particleColors = ["#1f6f62", "#d8b45f", "#d36a4a", "#62a8bd"];
+type Particle = {
+  start: [number, number];
+  end: [number, number];
+  time: number;
+  scale: number;
+  color: number;
+  rotate: number;
+};
+
+type ParticleStyle = CSSProperties & {
+  "--start-x": string;
+  "--start-y": string;
+  "--end-x": string;
+  "--end-y": string;
+  "--time": string;
+  "--scale": string;
+  "--color": string;
+  "--rotate": string;
+};
+
+const defaultColors = [1, 2, 3, 1, 2, 3, 1, 4];
+
+function noise(range = 1) {
+  return range / 2 - Math.random() * range;
+}
+
+function getXY(distance: number, pointIndex: number, totalPoints: number) {
+  const angle = ((360 + noise(8)) / totalPoints) * pointIndex * (Math.PI / 180);
+  return [distance * Math.cos(angle), distance * Math.sin(angle)] as [number, number];
+}
+
+function createParticle({
+  index,
+  time,
+  distances,
+  radius,
+  particleCount,
+  colors,
+}: {
+  index: number;
+  time: number;
+  distances: [number, number];
+  radius: number;
+  particleCount: number;
+  colors: number[];
+}): Particle {
+  const rotate = noise(radius / 10);
+  return {
+    start: getXY(distances[0], particleCount - index, particleCount),
+    end: getXY(distances[1] + noise(7), particleCount - index, particleCount),
+    time,
+    scale: 1 + noise(0.2),
+    color: colors[Math.floor(Math.random() * colors.length)] ?? 1,
+    rotate: rotate > 0 ? (rotate + radius / 20) * 10 : (rotate - radius / 20) * 10,
+  };
+}
 
 export function GooeyNav({
   items,
   activeKey,
   onSelect,
-}: {
-  items: GooeyNavItem[];
-  activeKey: string;
-  onSelect?: (item: GooeyNavItem) => void;
-}) {
-  const filterId = useId().replaceAll(":", "");
-  const navRef = useRef<HTMLElement>(null);
-  const itemRefs = useRef<(HTMLAnchorElement | null)[]>([]);
-  const particleSeedRef = useRef(0);
-  const [pill, setPill] = useState({ left: 0, width: 0 });
-  const [particles, setParticles] = useState<Particle[]>([]);
+  animationTime = 600,
+  particleCount = 15,
+  particleDistances = [90, 10],
+  particleR = 100,
+  timeVariance = 300,
+  colors = defaultColors,
+}: GooeyNavProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const navRef = useRef<HTMLUListElement>(null);
+  const filterRef = useRef<HTMLSpanElement>(null);
+  const textRef = useRef<HTMLSpanElement>(null);
+  const timersRef = useRef<Set<number>>(new Set());
   const activeIndex = Math.max(0, items.findIndex((item) => item.key === activeKey));
 
-  useLayoutEffect(() => {
-    const nav = navRef.current;
-    const active = itemRefs.current[activeIndex];
-    if (!nav || !active) return;
-
-    const updatePill = () => {
-      const navBox = nav.getBoundingClientRect();
-      const activeBox = active.getBoundingClientRect();
-      setPill({
-        left: activeBox.left - navBox.left + nav.scrollLeft,
-        width: activeBox.width,
-      });
-    };
-
-    updatePill();
-    const observer = new ResizeObserver(updatePill);
-    observer.observe(nav);
-    observer.observe(active);
-    return () => observer.disconnect();
-  }, [activeIndex]);
-
-  function burst(index: number) {
-    const target = itemRefs.current[index];
-    const nav = navRef.current;
-    if (!target || !nav) return;
-
-    const navBox = nav.getBoundingClientRect();
-    const box = target.getBoundingClientRect();
-    const centerX = box.left - navBox.left + box.width / 2 + nav.scrollLeft;
-    const centerY = box.top - navBox.top + box.height / 2;
-    const stamp = particleSeedRef.current;
-    particleSeedRef.current += 10;
-
-    setParticles(
-      Array.from({ length: 7 }, (_, particleIndex) => {
-        const angle = (Math.PI * 2 * particleIndex) / 7;
-        const distance = 22 + (particleIndex % 3) * 7;
-        return {
-          id: stamp + particleIndex,
-          x: Math.cos(angle) * distance + centerX,
-          y: Math.sin(angle) * distance + centerY,
-          size: 5 + (particleIndex % 3) * 2,
-          color: particleColors[particleIndex % particleColors.length],
-        };
-      }),
-    );
-    window.setTimeout(() => setParticles([]), 650);
+  function queue(callback: () => void, delay: number) {
+    const timer = window.setTimeout(() => {
+      timersRef.current.delete(timer);
+      callback();
+    }, delay);
+    timersRef.current.add(timer);
   }
 
+  function updateEffectPosition(element: HTMLElement) {
+    const container = containerRef.current;
+    const filter = filterRef.current;
+    const text = textRef.current;
+    if (!container || !filter || !text) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const position = element.getBoundingClientRect();
+    const styles = {
+      left: `${position.x - containerRect.x}px`,
+      top: `${position.y - containerRect.y}px`,
+      width: `${position.width}px`,
+      height: `${position.height}px`,
+    };
+    Object.assign(filter.style, styles);
+    Object.assign(text.style, styles);
+    text.textContent = element.textContent;
+  }
+
+  function clearParticles() {
+    filterRef.current?.querySelectorAll(".particle").forEach((particle) => particle.remove());
+  }
+
+  function makeParticles(element: HTMLSpanElement) {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const bubbleTime = animationTime * 2 + timeVariance;
+    element.style.setProperty("--time", `${bubbleTime}ms`);
+
+    for (let index = 0; index < particleCount; index += 1) {
+      const time = animationTime * 2 + noise(timeVariance * 2);
+      const particleData = createParticle({
+        index,
+        time,
+        distances: particleDistances,
+        radius: particleR,
+        particleCount,
+        colors,
+      });
+
+      queue(() => {
+        const particle = document.createElement("span");
+        const point = document.createElement("span");
+        const style: ParticleStyle = {
+          "--start-x": `${particleData.start[0]}px`,
+          "--start-y": `${particleData.start[1]}px`,
+          "--end-x": `${particleData.end[0]}px`,
+          "--end-y": `${particleData.end[1]}px`,
+          "--time": `${particleData.time}ms`,
+          "--scale": `${particleData.scale}`,
+          "--color": `var(--gooey-color-${particleData.color}, #fff)`,
+          "--rotate": `${particleData.rotate}deg`,
+        };
+
+        particle.className = "particle";
+        point.className = "point";
+        Object.assign(particle.style, style);
+        particle.appendChild(point);
+        element.appendChild(particle);
+        window.requestAnimationFrame(() => element.classList.add("active"));
+        queue(() => particle.remove(), particleData.time);
+      }, 30);
+    }
+  }
+
+  function animateSelection(element: HTMLElement) {
+    updateEffectPosition(element);
+    clearParticles();
+
+    const text = textRef.current;
+    if (text) {
+      text.classList.remove("active");
+      void text.offsetWidth;
+      text.classList.add("active");
+    }
+
+    const filter = filterRef.current;
+    if (filter) {
+      filter.classList.remove("active");
+      void filter.offsetWidth;
+      makeParticles(filter);
+    }
+  }
+
+  function handleClick(event: MouseEvent<HTMLAnchorElement>, item: GooeyNavItem) {
+    const listItem = event.currentTarget.parentElement;
+    if (item.href.startsWith("#")) event.preventDefault();
+    if (listItem && item.key !== activeKey) animateSelection(listItem);
+    onSelect?.(item);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLAnchorElement>) {
+    if (event.key !== " ") return;
+    event.preventDefault();
+    event.currentTarget.click();
+  }
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const activeItem = navRef.current?.children.item(activeIndex);
+    if (!container || !(activeItem instanceof HTMLElement)) return;
+
+    updateEffectPosition(activeItem);
+    textRef.current?.classList.add("active");
+
+    const resizeObserver = new ResizeObserver(() => {
+      const currentItem = navRef.current?.children.item(activeIndex);
+      if (currentItem instanceof HTMLElement) updateEffectPosition(currentItem);
+    });
+    resizeObserver.observe(container);
+    resizeObserver.observe(activeItem);
+    return () => resizeObserver.disconnect();
+  }, [activeIndex]);
+
+  useEffect(
+    () => () => {
+      timersRef.current.forEach((timer) => window.clearTimeout(timer));
+      timersRef.current.clear();
+    },
+    [],
+  );
+
   return (
-    <nav ref={navRef} className="gooey-nav" aria-label="主导航">
-      <span
-        className="gooey-nav__pill"
-        style={{
-          filter: `url(#${filterId})`,
-          transform: `translateX(${pill.left}px)`,
-          width: pill.width,
-        }}
-        aria-hidden="true"
-      />
-      {items.map((item, index) => (
-        <Link
-          key={item.key}
-          ref={(node) => {
-            itemRefs.current[index] = node;
-          }}
-          href={item.href}
-          onClick={(event) => {
-            burst(index);
-            if (item.href.startsWith("#")) event.preventDefault();
-            onSelect?.(item);
-          }}
-          aria-current={item.key === activeKey ? "page" : undefined}
-          className={`gooey-nav__link${item.key === activeKey ? " is-active" : ""}`}
-        >
-          {item.label}
-        </Link>
-      ))}
-      <span
-        className="gooey-nav__particles"
-        style={{ filter: `url(#${filterId})` }}
-        aria-hidden="true"
-      >
-        {particles.map((particle) => (
-          <span
-            key={particle.id}
-            className="gooey-nav__particle"
-            style={
-              {
-                "--particle-x": `${particle.x}px`,
-                "--particle-y": `${particle.y}px`,
-                "--particle-size": `${particle.size}px`,
-                "--particle-color": particle.color,
-              } as CSSProperties
-            }
-          />
-        ))}
-      </span>
-      <svg className="gooey-nav__filter" aria-hidden="true">
-        <defs>
-          <filter id={filterId}>
-            <feGaussianBlur in="SourceGraphic" stdDeviation="7" result="blur" />
-            <feColorMatrix
-              in="blur"
-              mode="matrix"
-              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -9"
-              result="goo"
-            />
-            <feComposite in="SourceGraphic" in2="goo" operator="atop" />
-          </filter>
-        </defs>
-      </svg>
-    </nav>
+    <div className="gooey-nav-container" ref={containerRef}>
+      <nav className="gooey-nav" aria-label="主导航">
+        <ul ref={navRef}>
+          {items.map((item) => (
+            <li key={item.key} className={item.key === activeKey ? "active" : ""}>
+              <Link
+                href={item.href}
+                onClick={(event) => handleClick(event, item)}
+                onKeyDown={handleKeyDown}
+                aria-current={item.key === activeKey ? "page" : undefined}
+              >
+                {item.label}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </nav>
+      <span className="effect filter" ref={filterRef} aria-hidden="true" />
+      <span className="effect text" ref={textRef} aria-hidden="true" />
+    </div>
   );
 }
