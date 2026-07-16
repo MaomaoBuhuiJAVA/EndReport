@@ -47,6 +47,14 @@ const labNavItems: GooeyNavItem[] = [
   { key: "lab", label: "科小贝实验室", href: "/lab" },
 ];
 
+const labHeroPhotos = [
+  "/gallery/campus-04.webp",
+  "/gallery/campus-05.webp",
+  "/gallery/campus-06.webp",
+  "/gallery/campus-03.webp",
+  "/gallery/campus-07.webp",
+];
+
 function ResourceIcon({ type }: { type: string }) {
   if (type === "图片资源") return <ImageIcon size={14} />;
   if (type === "视频资源") return <PlayCircle size={14} />;
@@ -238,7 +246,16 @@ export function ScienceLab({
   const [selectedSummary, setSelectedSummary] = useState<ScienceKnowledgeSummary | null>(null);
   const [selectedItem, setSelectedItem] = useState<ScienceKnowledgeItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [heroIndex, setHeroIndex] = useState(0);
   const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase("zh-CN"));
+
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const timer = window.setInterval(() => {
+      setHeroIndex((current) => (current + 1) % labHeroPhotos.length);
+    }, 4600);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const filtered = useMemo(
     () =>
@@ -314,14 +331,33 @@ export function ScienceLab({
 
       <main>
         <section className="lab-hero">
+          <div className="lab-hero__photos" aria-hidden="true">
+            {labHeroPhotos.map((photo, index) => (
+              <Image
+                alt=""
+                className={index === heroIndex ? "is-active" : ""}
+                fill
+                key={photo}
+                priority={index === 0}
+                sizes="100vw"
+                src={photo}
+              />
+            ))}
+            <div className="lab-hero__shade" />
+          </div>
           <div className="lab-shell lab-hero__inner">
-            <div>
+            <div className="lab-hero__copy">
               <p className="lab-eyebrow">国科二幼园本资源中心</p>
               <h1>
                 科小贝
                 <RotatingText words={["实验室", "科学诗库", "亲子探索站"]} />
               </h1>
               <p>汇集园本科学诗、教师实验与家庭实验资料。</p>
+              <div className="lab-hero__progress" aria-hidden="true">
+                {labHeroPhotos.map((photo, index) => (
+                  <span className={index === heroIndex ? "is-active" : ""} key={photo} />
+                ))}
+              </div>
             </div>
             <label className="lab-search">
               <Search size={20} aria-hidden="true" />

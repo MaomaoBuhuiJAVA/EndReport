@@ -502,24 +502,58 @@ img {
 }
 
 .lab-hero {
+  position: relative;
+  min-height: 390px;
+  overflow: hidden;
   border-bottom: 1px solid #dfe7e3;
-  background: #fff;
+  background: #1f403a;
+}
+
+.lab-hero__photos {
+  position: absolute;
+  inset: 0;
+}
+
+.lab-hero__photos > img {
+  object-fit: cover;
+  object-position: center 44%;
+  opacity: 0;
+  transform: scale(1.035);
+  transition:
+    opacity 1100ms ease,
+    transform 5200ms ease;
+}
+
+.lab-hero__photos > img.is-active {
+  opacity: 1;
+  transform: scale(1.08);
+}
+
+.lab-hero__shade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(14, 42, 38, 0.88) 0%, rgba(14, 42, 38, 0.62) 48%, rgba(14, 42, 38, 0.3) 100%),
+    linear-gradient(0deg, rgba(12, 31, 29, 0.48), transparent 55%);
 }
 
 .lab-hero__inner {
+  position: relative;
+  z-index: 1;
   display: grid;
-  min-height: 300px;
+  min-height: 390px;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 410px);
-  align-items: end;
+  align-items: center;
   gap: 60px;
   padding-block: 52px;
 }
 
 .lab-eyebrow {
   margin: 0 0 16px;
-  color: #1f6f62;
+  color: #f3d989;
   font-size: 13px;
   font-weight: 750;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.28);
 }
 
 .lab-hero h1 {
@@ -528,16 +562,17 @@ img {
   align-items: baseline;
   gap: 12px;
   margin: 0;
-  color: #21312e;
+  color: #fff;
   font-size: 46px;
   line-height: 1.16;
   letter-spacing: 0;
+  text-shadow: 0 4px 28px rgba(0, 0, 0, 0.24);
 }
 
-.lab-hero__inner > div > p:last-child {
+.lab-hero__copy > p:last-of-type {
   max-width: 650px;
   margin: 18px 0 0;
-  color: #647772;
+  color: rgba(255, 255, 255, 0.84);
   line-height: 1.8;
 }
 
@@ -545,7 +580,15 @@ img {
   position: relative;
   display: inline-grid;
   min-width: 215px;
-  color: #c85f47;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(202, 89, 67, 0.98), rgba(222, 116, 75, 0.94));
+  padding: 0.08em 0.28em 0.14em;
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 12px 32px rgba(57, 20, 12, 0.2);
   perspective: 600px;
 }
 
@@ -556,14 +599,36 @@ img {
   white-space: nowrap;
 }
 
+.lab-hero__progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 24px;
+}
+
+.lab-hero__progress span {
+  width: 24px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.36);
+  transition:
+    width 300ms ease,
+    background 300ms ease;
+}
+
+.lab-hero__progress span.is-active {
+  width: 44px;
+  background: #f3d989;
+}
+
 .lab-search {
   display: flex;
   height: 54px;
   align-items: center;
   gap: 11px;
-  border: 1px solid #cfdcd8;
+  border: 1px solid rgba(255, 255, 255, 0.68);
   border-radius: 8px;
-  background: #f9fbfa;
+  background: rgba(255, 255, 255, 0.92);
   padding: 0 14px 0 17px;
   color: #81908c;
   box-shadow: 0 8px 24px rgba(31, 68, 64, 0.06);
@@ -1076,31 +1141,32 @@ img {
   border: 0;
   background: transparent;
   padding: 0;
-  cursor: pointer;
+  cursor: grab;
   filter: drop-shadow(0 10px 12px rgba(10, 45, 42, 0.18));
   pointer-events: auto;
+  touch-action: none;
+  user-select: none;
 }
 
 .science-pet__sprite {
   display: block;
-  width: 96px;
-  height: 104px;
-  margin: 6px auto 0;
-  background-image: url("/assets/codex-pet.webp");
+  width: 104px;
+  height: 112px;
+  margin: 4px auto 0;
+  background-image: url("/assets/seedy-spritesheet-v10.webp");
   background-repeat: no-repeat;
-  background-position: var(--pet-x) var(--pet-y);
+  background-position: var(--pet-x) 0%;
   background-size: 800% 1100%;
-  animation: pet-float 3.2s ease-in-out infinite;
+  image-rendering: pixelated;
+  pointer-events: none;
 }
 
-@keyframes pet-float {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-5px);
-  }
+.science-pet__button.is-dragging {
+  cursor: grabbing;
+}
+
+.science-pet__button.is-dragging .science-pet__sprite {
+  transform: scale(1.035);
 }
 
 .pet-chat {
@@ -1127,6 +1193,29 @@ img {
   background: #fff;
   content: "";
   transform: rotate(45deg);
+}
+
+.science-pet.is-left .pet-chat {
+  right: auto;
+  left: 2px;
+}
+
+.science-pet.is-left .pet-chat::after {
+  right: auto;
+  left: 42px;
+}
+
+.science-pet.is-top .pet-chat {
+  top: 112px;
+  bottom: auto;
+}
+
+.science-pet.is-top .pet-chat::after {
+  top: -7px;
+  bottom: auto;
+  border: 0;
+  border-top: 1px solid #cbdcd7;
+  border-left: 1px solid #cbdcd7;
 }
 
 .pet-chat__header {
@@ -1366,8 +1455,9 @@ img {
   }
 
   .lab-hero__inner {
+    min-height: 390px;
     grid-template-columns: 1fr;
-    align-items: start;
+    align-items: center;
     gap: 28px;
   }
 
@@ -1400,7 +1490,7 @@ img {
   }
 
   .lab-hero__inner {
-    min-height: 300px;
+    min-height: 360px;
     padding-block: 38px;
   }
 
@@ -1489,9 +1579,9 @@ img {
   }
 
   .pet-chat {
-    position: fixed;
-    right: 10px;
+    position: absolute;
+    right: 2px;
     bottom: 112px;
-    width: calc(100vw - 20px);
+    width: min(360px, calc(100vw - 20px));
   }
 }
