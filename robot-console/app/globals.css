@@ -379,6 +379,10 @@ img {
   --color-3: #173f39;
   --color-4: #070b0a;
   --gooey-ink: #070b0a;
+  --bubble-color-1: #101816;
+  --bubble-color-2: #1f6f62;
+  --bubble-color-3: #d8b45f;
+  --bubble-color-4: #d36a4a;
   --linear-ease: linear(
     0,
     0.068,
@@ -486,136 +490,86 @@ img {
   white-space: nowrap;
 }
 
-.gooey-nav-container .effect {
+.gooey-nav__burst {
   position: absolute;
-  z-index: 1;
+  z-index: 5;
   top: 0;
   left: 0;
-  display: grid;
+  display: block;
   width: 0;
   height: 0;
-  place-items: center;
+  overflow: visible;
   border-radius: 100vw;
-  opacity: 1;
   pointer-events: none;
 }
 
-.gooey-nav-container .effect.text {
-  color: #fff;
-  font-size: 13px;
-  font-weight: 650;
-  opacity: 0;
-}
-
-.gooey-nav-container .effect.text.active {
-  opacity: 1;
-}
-
-.gooey-nav-container .effect.filter {
-  filter: blur(7px) contrast(100) blur(0);
-  mix-blend-mode: darken;
-}
-
-.gooey-nav-container .effect.filter::before {
+.gooey-nav__burst::before {
   position: absolute;
-  z-index: -2;
-  inset: -75px;
-  background: #fff;
-  content: "";
-}
-
-.gooey-nav-container .effect.filter::after {
-  position: absolute;
-  z-index: -1;
-  inset: 0;
-  border-radius: 100vw;
-  background: var(--gooey-ink);
+  inset: 2px;
+  border: 1px solid transparent;
+  border-radius: inherit;
   content: "";
   opacity: 0;
-  transform: scale(0);
 }
 
-.gooey-nav-container .effect.active::after {
-  animation: gooey-pill 300ms ease both;
+.gooey-nav__burst.is-active::before {
+  animation: nav-bubble-ring 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-@keyframes gooey-pill {
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.gooey-nav-container .particle,
-.gooey-nav-container .point {
+.gooey-nav__bubble {
+  position: absolute;
+  top: 50%;
+  left: 50%;
   display: block;
-  width: 20px;
-  height: 20px;
+  width: var(--bubble-size);
+  height: var(--bubble-size);
+  border: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: 50%;
+  background: var(--bubble-color);
+  box-shadow: 0 3px 8px rgba(15, 44, 39, 0.18);
   opacity: 0;
-  transform-origin: center;
+  will-change: transform, opacity;
+  animation: nav-bubble-pop var(--bubble-time) cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--bubble-delay);
 }
 
-.gooey-nav-container .particle {
-  position: absolute;
-  top: calc(50% - 8px);
-  left: calc(50% - 8px);
-  animation: gooey-nav-particle calc(var(--time)) ease 1 -350ms;
-}
-
-.gooey-nav-container .point {
-  background: var(--color);
-  opacity: 1;
-  animation: gooey-nav-point calc(var(--time)) ease 1 -350ms;
-}
-
-@keyframes gooey-nav-particle {
+@keyframes nav-bubble-ring {
   0% {
-    opacity: 1;
-    transform: rotate(0deg) translate(var(--start-x), var(--start-y));
-    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
-  }
-  70% {
-    opacity: 1;
-    transform: rotate(calc(var(--rotate) * 0.5))
-      translate(calc(var(--end-x) * 1.2), calc(var(--end-y) * 1.2));
-    animation-timing-function: ease;
-  }
-  85% {
-    opacity: 1;
-    transform: rotate(calc(var(--rotate) * 0.66)) translate(var(--end-x), var(--end-y));
-  }
-  100% {
-    opacity: 1;
-    transform: rotate(calc(var(--rotate) * 1.2))
-      translate(calc(var(--end-x) * 0.5), calc(var(--end-y) * 0.5));
-  }
-}
-
-@keyframes gooey-nav-point {
-  0% {
+    border-color: rgba(31, 111, 98, 0);
     opacity: 0;
-    transform: scale(0);
-    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
-  }
-  25% {
-    transform: scale(calc(var(--scale) * 0.25));
+    transform: scale(0.76);
   }
   38% {
+    border-color: rgba(31, 111, 98, 0.72);
     opacity: 1;
+    transform: scale(1.12);
   }
-  65% {
-    opacity: 1;
-    transform: scale(var(--scale));
-    animation-timing-function: ease;
+  100% {
+    border-color: rgba(31, 111, 98, 0);
+    opacity: 0;
+    transform: scale(1.26);
   }
-  85% {
+}
+
+@keyframes nav-bubble-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translate(var(--near-x), var(--near-y)) scale(0.16);
+  }
+  18% {
+    opacity: 0.96;
+  }
+  48% {
     opacity: 1;
-    transform: scale(var(--scale));
+    transform: translate(-50%, -50%) translate(var(--middle-x), var(--middle-y)) scale(1.08);
+  }
+  76% {
+    opacity: 0.82;
+    transform: translate(-50%, -50%) translate(var(--far-x), var(--far-y)) scale(0.88);
   }
   100% {
     opacity: 0;
-    transform: scale(0);
+    transform: translate(-50%, -50%) translate(var(--far-x), var(--far-y)) scale(0);
   }
 }
 

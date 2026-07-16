@@ -28,24 +28,26 @@ type GooeyNavProps = {
   colors?: number[];
 };
 
-type Particle = {
-  start: [number, number];
-  end: [number, number];
+type Bubble = {
+  near: [number, number];
+  middle: [number, number];
+  far: [number, number];
   time: number;
-  scale: number;
+  size: number;
   color: number;
-  rotate: number;
 };
 
-type ParticleStyle = CSSProperties & {
-  "--start-x": string;
-  "--start-y": string;
-  "--end-x": string;
-  "--end-y": string;
-  "--time": string;
-  "--scale": string;
-  "--color": string;
-  "--rotate": string;
+type BubbleStyle = CSSProperties & {
+  "--near-x": string;
+  "--near-y": string;
+  "--middle-x": string;
+  "--middle-y": string;
+  "--far-x": string;
+  "--far-y": string;
+  "--bubble-time": string;
+  "--bubble-delay": string;
+  "--bubble-size": string;
+  "--bubble-color": string;
 };
 
 const defaultColors = [1, 2, 3, 1, 2, 3, 1, 4];
@@ -54,34 +56,38 @@ function noise(range = 1) {
   return range / 2 - Math.random() * range;
 }
 
-function getXY(distance: number, pointIndex: number, totalPoints: number) {
-  const angle = ((360 + noise(8)) / totalPoints) * pointIndex * (Math.PI / 180);
+function pointAt(distance: number, index: number, count: number, angleNoise = 0) {
+  const angle = ((Math.PI * 2) / count) * index + noise(angleNoise);
   return [distance * Math.cos(angle), distance * Math.sin(angle)] as [number, number];
 }
 
-function createParticle({
+function createBubble({
   index,
-  time,
+  count,
   distances,
   radius,
-  particleCount,
+  animationTime,
+  timeVariance,
   colors,
 }: {
   index: number;
-  time: number;
+  count: number;
   distances: [number, number];
   radius: number;
-  particleCount: number;
+  animationTime: number;
+  timeVariance: number;
   colors: number[];
-}): Particle {
-  const rotate = noise(radius / 10);
+}): Bubble {
+  const farDistance = distances[0] * (0.72 + Math.random() * 0.28);
+  const nearDistance = Math.max(4, distances[1] + noise(8));
+  const curve = Math.min(0.22, radius / 1000);
   return {
-    start: getXY(distances[0], particleCount - index, particleCount),
-    end: getXY(distances[1] + noise(7), particleCount - index, particleCount),
-    time,
-    scale: 1 + noise(0.2),
+    near: pointAt(nearDistance, index, count, 0.04),
+    middle: pointAt(farDistance * 0.72, index, count, curve),
+    far: pointAt(farDistance, index, count, curve * 1.5),
+    time: Math.max(420, animationTime + noise(timeVariance)),
+    size: 7 + (index % 4) * 2 + noise(2),
     color: colors[Math.floor(Math.random() * colors.length)] ?? 1,
-    rotate: rotate > 0 ? (rotate + radius / 20) * 10 : (rotate - radius / 20) * 10,
   };
 }
 
@@ -89,17 +95,17 @@ export function GooeyNav({
   items,
   activeKey,
   onSelect,
-  animationTime = 600,
+  animationTime = 680,
   particleCount = 15,
-  particleDistances = [90, 10],
+  particleDistances = [74, 9],
   particleR = 100,
-  timeVariance = 300,
+  timeVariance = 220,
   colors = defaultColors,
 }: GooeyNavProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLElement>(null);
   const navRef = useRef<HTMLUListElement>(null);
-  const filterRef = useRef<HTMLSpanElement>(null);
-  const textRef = useRef<HTMLSpanElement>(null);
+  const burstRef = useRef<HTMLSpanElement>(null);
   const timersRef = useRef<Set<number>>(new Set());
   const activeIndex = Math.max(0, items.findIndex((item) => item.key === activeKey));
 
@@ -111,94 +117,76 @@ export function GooeyNav({
     timersRef.current.add(timer);
   }
 
-  function updateEffectPosition(element: HTMLElement) {
+  function updateBurstPosition(element: HTMLElement) {
     const container = containerRef.current;
-    const filter = filterRef.current;
-    const text = textRef.current;
-    if (!container || !filter || !text) return;
+    const burst = burstRef.current;
+    if (!container || !burst) return;
 
     const containerRect = container.getBoundingClientRect();
     const position = element.getBoundingClientRect();
-    const styles = {
+    Object.assign(burst.style, {
       left: `${position.x - containerRect.x}px`,
       top: `${position.y - containerRect.y}px`,
       width: `${position.width}px`,
       height: `${position.height}px`,
-    };
-    Object.assign(filter.style, styles);
-    Object.assign(text.style, styles);
-    text.textContent = element.textContent;
+    });
   }
 
-  function clearParticles() {
-    filterRef.current?.querySelectorAll(".particle").forEach((particle) => particle.remove());
+  function clearBubbles() {
+    burstRef.current?.querySelectorAll(".gooey-nav__bubble").forEach((bubble) => bubble.remove());
   }
 
-  function makeParticles(element: HTMLSpanElement) {
+  function makeBubbles(element: HTMLSpanElement) {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
-    const bubbleTime = animationTime * 2 + timeVariance;
-    element.style.setProperty("--time", `${bubbleTime}ms`);
-
     for (let index = 0; index < particleCount; index += 1) {
-      const time = animationTime * 2 + noise(timeVariance * 2);
-      const particleData = createParticle({
+      const bubble = createBubble({
         index,
-        time,
+        count: particleCount,
         distances: particleDistances,
         radius: particleR,
-        particleCount,
+        animationTime,
+        timeVariance,
         colors,
       });
+      const node = document.createElement("span");
+      const style: BubbleStyle = {
+        "--near-x": `${bubble.near[0]}px`,
+        "--near-y": `${bubble.near[1]}px`,
+        "--middle-x": `${bubble.middle[0]}px`,
+        "--middle-y": `${bubble.middle[1]}px`,
+        "--far-x": `${bubble.far[0]}px`,
+        "--far-y": `${bubble.far[1]}px`,
+        "--bubble-time": `${bubble.time}ms`,
+        "--bubble-delay": `${(index % 4) * 18}ms`,
+        "--bubble-size": `${bubble.size}px`,
+        "--bubble-color": `var(--bubble-color-${bubble.color}, #1f6f62)`,
+      };
 
-      queue(() => {
-        const particle = document.createElement("span");
-        const point = document.createElement("span");
-        const style: ParticleStyle = {
-          "--start-x": `${particleData.start[0]}px`,
-          "--start-y": `${particleData.start[1]}px`,
-          "--end-x": `${particleData.end[0]}px`,
-          "--end-y": `${particleData.end[1]}px`,
-          "--time": `${particleData.time}ms`,
-          "--scale": `${particleData.scale}`,
-          "--color": `var(--color-${particleData.color}, #111)`,
-          "--rotate": `${particleData.rotate}deg`,
-        };
-
-        particle.className = "particle";
-        point.className = "point";
-        Object.assign(particle.style, style);
-        particle.appendChild(point);
-        element.appendChild(particle);
-        window.requestAnimationFrame(() => element.classList.add("active"));
-        queue(() => particle.remove(), particleData.time);
-      }, 30);
+      node.className = "gooey-nav__bubble";
+      Object.assign(node.style, style);
+      element.appendChild(node);
+      queue(() => node.remove(), bubble.time + 80);
     }
   }
 
   function animateSelection(element: HTMLElement) {
-    updateEffectPosition(element);
-    clearParticles();
+    const burst = burstRef.current;
+    if (!burst) return;
 
-    const text = textRef.current;
-    if (text) {
-      text.classList.remove("active");
-      void text.offsetWidth;
-      text.classList.add("active");
-    }
-
-    const filter = filterRef.current;
-    if (filter) {
-      filter.classList.remove("active");
-      void filter.offsetWidth;
-      makeParticles(filter);
-    }
+    updateBurstPosition(element);
+    clearBubbles();
+    burst.classList.remove("is-active");
+    void burst.offsetWidth;
+    makeBubbles(burst);
+    window.requestAnimationFrame(() => burst.classList.add("is-active"));
+    queue(() => burst.classList.remove("is-active"), animationTime + timeVariance + 160);
   }
 
   function handleClick(event: MouseEvent<HTMLAnchorElement>, item: GooeyNavItem) {
     const listItem = event.currentTarget.parentElement;
     if (item.href.startsWith("#")) event.preventDefault();
-    if (listItem && item.key !== activeKey) animateSelection(listItem);
+    if (listItem) animateSelection(listItem);
     onSelect?.(item);
   }
 
@@ -210,19 +198,20 @@ export function GooeyNav({
 
   useLayoutEffect(() => {
     const container = containerRef.current;
+    const scroller = scrollerRef.current;
     const activeItem = navRef.current?.children.item(activeIndex);
-    if (!container || !(activeItem instanceof HTMLElement)) return;
+    if (!container || !scroller || !(activeItem instanceof HTMLElement)) return;
 
-    updateEffectPosition(activeItem);
-    textRef.current?.classList.add("active");
-
-    const resizeObserver = new ResizeObserver(() => {
-      const currentItem = navRef.current?.children.item(activeIndex);
-      if (currentItem instanceof HTMLElement) updateEffectPosition(currentItem);
-    });
+    const update = () => updateBurstPosition(activeItem);
+    update();
+    const resizeObserver = new ResizeObserver(update);
     resizeObserver.observe(container);
     resizeObserver.observe(activeItem);
-    return () => resizeObserver.disconnect();
+    scroller.addEventListener("scroll", update, { passive: true });
+    return () => {
+      resizeObserver.disconnect();
+      scroller.removeEventListener("scroll", update);
+    };
   }, [activeIndex]);
 
   useEffect(
@@ -235,7 +224,7 @@ export function GooeyNav({
 
   return (
     <div className="gooey-nav-container" ref={containerRef}>
-      <nav className="gooey-nav" aria-label="主导航">
+      <nav className="gooey-nav" aria-label="主导航" ref={scrollerRef}>
         <ul ref={navRef}>
           {items.map((item) => (
             <li key={item.key} className={item.key === activeKey ? "active" : ""}>
@@ -251,8 +240,7 @@ export function GooeyNav({
           ))}
         </ul>
       </nav>
-      <span className="effect filter" ref={filterRef} aria-hidden="true" />
-      <span className="effect text" ref={textRef} aria-hidden="true" />
+      <span className="gooey-nav__burst" ref={burstRef} aria-hidden="true" />
     </div>
   );
 }
