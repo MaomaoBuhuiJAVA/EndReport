@@ -1132,6 +1132,12 @@ img {
   pointer-events: none;
 }
 
+.science-pet.is-auto-walking {
+  transition:
+    right 2200ms linear,
+    bottom 2200ms linear;
+}
+
 .science-pet__button {
   position: absolute;
   right: 0;
@@ -1155,7 +1161,7 @@ img {
   margin: 4px auto 0;
   background-image: url("/assets/seedy-spritesheet-v10.webp");
   background-repeat: no-repeat;
-  background-position: var(--pet-x) 0%;
+  background-position: var(--pet-x) var(--pet-y);
   background-size: 800% 1100%;
   image-rendering: pixelated;
   pointer-events: none;

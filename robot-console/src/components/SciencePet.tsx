@@ -41,11 +41,32 @@ type DragState = {
   moved: boolean;
 };
 
+type PetAnimationState =
+  | "idle"
+  | "running-left"
+  | "running-right"
+  | "waiting"
+  | "moving"
+  | "working";
+
+type WalkDirection = "left" | "right";
+
 const starters = ["推荐一个亲子实验", "找一首小班科学诗"];
 const petWidth = 116;
 const petHeight = 122;
 const viewportMargin = 6;
-const idleFrameDurations = [1680, 660, 660, 840, 840, 1920];
+const patrolDuration = 2200;
+const petAnimations: Record<
+  PetAnimationState,
+  { row: number; durations: readonly number[] }
+> = {
+  idle: { row: 0, durations: [1680, 660, 660, 840, 840, 1920] },
+  "running-right": { row: 1, durations: [120, 120, 120, 120, 120, 120, 120, 220] },
+  "running-left": { row: 2, durations: [120, 120, 120, 120, 120, 120, 120, 220] },
+  waiting: { row: 6, durations: [150, 150, 150, 150, 150, 260] },
+  moving: { row: 7, durations: [120, 120, 120, 120, 120, 220] },
+  working: { row: 8, durations: [150, 150, 150, 150, 150, 280] },
+};
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), Math.max(min, max));
@@ -56,7 +77,8 @@ export function SciencePet() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [idleFrame, setIdleFrame] = useState(0);
+  const [spriteFrame, setSpriteFrame] = useState(0);
+  const [autoWalk, setAutoWalk] = useState<WalkDirection | null>(null);
   const [position, setPosition] = useState<PetPosition>({ right: 18, bottom: 10 });
   const [dock, setDock] = useState({ left: false, top: false });
   const [messages, setMessages] = useState<PetMessage[]>([
@@ -69,8 +91,20 @@ export function SciencePet() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageIdRef = useRef(2);
   const dragRef = useRef<DragState | null>(null);
+  const petRootRef = useRef<HTMLDivElement>(null);
   const positionRef = useRef(position);
   const suppressClickRef = useRef(false);
+
+  const animationState: PetAnimationState = busy
+    ? "working"
+    : dragging
+      ? "moving"
+      : autoWalk
+        ? `running-${autoWalk}`
+        : open
+          ? "waiting"
+          : "idle";
+  const animation = petAnimations[animationState];
 
   useEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -79,15 +113,78 @@ export function SciencePet() {
     let timer = 0;
     const scheduleNextFrame = () => {
       timer = window.setTimeout(() => {
-        currentFrame = (currentFrame + 1) % idleFrameDurations.length;
-        setIdleFrame(currentFrame);
+        currentFrame = (currentFrame + 1) % animation.durations.length;
+        setSpriteFrame(currentFrame);
         scheduleNextFrame();
-      }, idleFrameDurations[currentFrame]);
+      }, animation.durations[currentFrame]);
     };
 
     scheduleNextFrame();
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [animation]);
+
+  useEffect(() => {
+    if (
+      open ||
+      busy ||
+      dragging ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return;
+    }
+
+    let startTimer = 0;
+    let stopTimer = 0;
+    let movementFrame = 0;
+
+    const schedulePatrol = () => {
+      startTimer = window.setTimeout(() => {
+        const current = positionRef.current;
+        const maxRight = window.innerWidth - petWidth - viewportMargin;
+        const availableWidth = Math.max(0, maxRight - viewportMargin);
+        if (availableWidth < 40) {
+          schedulePatrol();
+          return;
+        }
+
+        const direction: WalkDirection =
+          current.right >= maxRight - 36
+            ? "right"
+            : current.right <= viewportMargin + 36
+              ? "left"
+              : current.right < maxRight / 2
+                ? "left"
+                : "right";
+        const distance = Math.min(window.innerWidth < 640 ? 84 : 148, availableWidth);
+        const next = {
+          right: clamp(
+            current.right + (direction === "left" ? distance : -distance),
+            viewportMargin,
+            maxRight,
+          ),
+          bottom: current.bottom,
+        };
+
+        setAutoWalk(direction);
+        movementFrame = window.requestAnimationFrame(() => {
+          positionRef.current = next;
+          setPosition(next);
+        });
+
+        stopTimer = window.setTimeout(() => {
+          setAutoWalk(null);
+          schedulePatrol();
+        }, patrolDuration);
+      }, 4800);
+    };
+
+    schedulePatrol();
+    return () => {
+      window.clearTimeout(startTimer);
+      window.clearTimeout(stopTimer);
+      window.cancelAnimationFrame(movementFrame);
+    };
+  }, [busy, dragging, open]);
 
   useEffect(() => {
     if (open) {
@@ -184,6 +281,18 @@ export function SciencePet() {
 
   function handlePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
     if (event.button !== 0) return;
+
+    if (autoWalk && petRootRef.current) {
+      const bounds = petRootRef.current.getBoundingClientRect();
+      const current = {
+        right: window.innerWidth - bounds.right,
+        bottom: window.innerHeight - bounds.bottom,
+      };
+      positionRef.current = current;
+      setPosition(current);
+      setAutoWalk(null);
+    }
+
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = {
       pointerId: event.pointerId,
@@ -247,15 +356,19 @@ export function SciencePet() {
     setOpen((current) => !current);
   }
 
+  const visibleFrame = spriteFrame % animation.durations.length;
   const spriteStyle = {
-    "--pet-x": `${(idleFrame / 7) * 100}%`,
+    "--pet-x": `${(visibleFrame / 7) * 100}%`,
+    "--pet-y": `${(animation.row / 10) * 100}%`,
   } as CSSProperties;
 
   return (
     <div
+      ref={petRootRef}
       className={[
         "science-pet",
         open ? "is-open" : "",
+        autoWalk ? "is-auto-walking" : "",
         dock.left ? "is-left" : "",
         dock.top ? "is-top" : "",
       ]
@@ -360,6 +473,7 @@ export function SciencePet() {
           className="science-pet__sprite"
           role="img"
           aria-label="Seedy 小树芽科小贝"
+          data-pet-state={animationState}
           style={spriteStyle}
         />
       </button>
