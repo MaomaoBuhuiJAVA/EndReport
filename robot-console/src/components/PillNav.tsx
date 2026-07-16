@@ -1,14 +1,19 @@
-import gsap from 'gsap';
-import { useId, useLayoutEffect, useRef } from 'react';
+"use client";
 
-interface PillNavProps<T extends string> {
+import gsap from "gsap";
+import { useId, useLayoutEffect, useRef } from "react";
+
+export function PillNav<T extends string>({
+  label,
+  items,
+  value,
+  onChange,
+}: {
   label: string;
   items: readonly T[];
   value: T;
   onChange: (value: T) => void;
-}
-
-export function PillNav<T extends string>({ label, items, value, onChange }: PillNavProps<T>) {
+}) {
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const sliderRef = useRef<HTMLSpanElement>(null);
@@ -26,10 +31,11 @@ export function PillNav<T extends string>({ label, items, value, onChange }: Pil
         x: active.offsetLeft,
         width: active.offsetWidth,
         duration: 0.34,
-        ease: 'power3.out',
+        ease: "power3.out",
       });
     };
     update();
+
     const observer = new ResizeObserver(update);
     observer.observe(root);
     return () => observer.disconnect();
@@ -49,7 +55,7 @@ export function PillNav<T extends string>({ label, items, value, onChange }: Pil
               buttonRefs.current[index] = node;
             }}
             type="button"
-            className={`pill-nav__button${value === item ? ' is-active' : ''}`}
+            className={`pill-nav__button${value === item ? " is-active" : ""}`}
             aria-pressed={value === item}
             onClick={() => onChange(item)}
           >

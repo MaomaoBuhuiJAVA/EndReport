@@ -1,0 +1,58 @@
+[
+  {
+    "title": "全景图",
+    "src": "/rooms/room-01.webp",
+    "original": "全景图.png",
+    "width": 720,
+    "height": 675
+  },
+  {
+    "title": "全景图2",
+    "src": "/rooms/room-02.webp",
+    "original": "全景图2.png",
+    "width": 1080,
+    "height": 588
+  },
+  {
+    "title": "大厅",
+    "src": "/rooms/room-03.webp",
+    "original": "大厅.JPG",
+    "width": 5000,
+    "height": 3328
+  },
+  {
+    "title": "建构空间坊",
+    "src": "/rooms/room-04.webp",
+    "original": "建构空间坊.JPG",
+    "width": 5000,
+    "height": 3332
+  },
+  {
+    "title": "未来工作坊",
+    "src": "/rooms/room-05.webp",
+    "original": "未来工作坊.JPG",
+    "width": 5000,
+    "height": 3334
+  },
+  {
+    "title": "纵深科学廊",
+    "src": "/rooms/room-06.webp",
+    "original": "纵深科学廊.JPG",
+    "width": 5000,
+    "height": 3333
+  },
+  {
+    "title": "纵深科学廊2",
+    "src": "/rooms/room-07.webp",
+    "original": "纵深科学廊2.JPG",
+    "width": 5000,
+    "height": 3333
+  },
+  {
+    "title": "绘本阅读坊",
+    "src": "/rooms/room-08.webp",
+    "original": "绘本阅读坊.JPG",
+    "width": 5000,
+    "height": 3332
+  }
+]

@@ -1,0 +1,11 @@
+images/
+rooms/
+ziliao/
+.deploy/
+.next/
+node_modules/
+*.doc
+*.docx
+*.xlsx
+*.zip
+*.et

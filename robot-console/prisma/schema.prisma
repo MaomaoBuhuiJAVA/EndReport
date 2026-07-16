@@ -1,0 +1,272 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum AssetKind {
+  CAMPUS
+  ROOM
+  ROBOT
+  DOCUMENT
+}
+
+enum DocumentCategory {
+  BASIC_INFO
+  QUALIFICATION
+  HONOR
+  COURSE
+  STAFF
+  SPEECH
+  POLICY
+  ARCHIVE
+}
+
+enum DeviceStatus {
+  ONLINE
+  IDLE
+  OFFLINE
+  WARNING
+}
+
+enum RobotMode {
+  COMPANION
+  LEARNING
+  PATROL
+  SLEEP
+}
+
+enum CommandStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum TaskType {
+  STORY
+  SONG
+  WORD_CARD
+  QUIZ
+  CAMPUS_QA
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  role         UserRole @default(USER)
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  commands  Command[]
+  documents KnowledgeDocument[] @relation("DocumentUploader")
+  assets    MediaAsset[]        @relation("AssetUploader")
+}
+
+model SchoolProfile {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  shortName   String
+  slogan      String
+  summary     String   @db.Text
+  address     String?
+  phone       String?
+  credentials Json?
+  highlights  Json?
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+}
+
+model FunctionRoom {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  summary     String   @db.Text
+  description String   @db.Text
+  features    Json?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  assets MediaAsset[]
+}
+
+model MediaAsset {
+  id          String    @id @default(cuid())
+  title       String
+  description String?   @db.Text
+  kind        AssetKind
+  url         String    @unique
+  sourcePath  String?  @unique
+  mimeType    String?
+  width       Int?
+  height      Int?
+  roomId      String?
+  uploadedBy  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  room     FunctionRoom? @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  uploader User?         @relation("AssetUploader", fields: [uploadedBy], references: [id], onDelete: SetNull)
+
+  @@index([kind])
+  @@index([roomId])
+}
+
+model KnowledgeDocument {
+  id          String           @id @default(cuid())
+  title       String
+  category    DocumentCategory @default(ARCHIVE)
+  summary     String           @db.Text
+  content     String           @db.Text
+  sourcePath  String?
+  fileType    String?
+  uploadedBy  String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  uploader User?             @relation("DocumentUploader", fields: [uploadedBy], references: [id], onDelete: SetNull)
+  chunks   KnowledgeChunk[]
+
+  @@index([category])
+}
+
+model KnowledgeChunk {
+  id         String   @id @default(cuid())
+  documentId String
+  title      String
+  content    String   @db.Text
+  keywords   String?
+  createdAt  DateTime @default(now())
+
+  document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+}
+
+model Device {
+  id             String       @id @default(cuid())
+  code           String       @unique
+  name           String
+  classroom      String
+  status         DeviceStatus @default(ONLINE)
+  mode           RobotMode    @default(COMPANION)
+  battery        Int          @default(86)
+  temperature    Float        @default(36.4)
+  streamUrl      String?
+  description    String       @default("云宝小陪伴机器人用于园所问答、活动陪伴、安全提醒与课程互动。") @db.Text
+  lastOnlineAt   DateTime     @default(now())
+  firmware       String       @default("yb-1.0.0")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  commands      Command[]
+  logs          DeviceLog[]
+  conversations Conversation[]
+  tasks         LearningTask[]
+}
+
+model Command {
+  id        String        @id @default(cuid())
+  deviceId  String
+  teacherId String?
+  type      String
+  payload   Json
+  status    CommandStatus @default(PENDING)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  device  Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  teacher User?  @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+}
+
+model DeviceLog {
+  id        String   @id @default(cuid())
+  deviceId  String
+  level     String   @default("info")
+  message   String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  deviceId  String?
+  speaker   String
+  message   String
+  reply     String
+  scene     String   @default("campus")
+  createdAt DateTime @default(now())
+
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+}
+
+model LearningTask {
+  id        String   @id @default(cuid())
+  deviceId  String?
+  title     String
+  type      TaskType
+  content   String
+  schedule  String
+  progress  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+}
+model ScienceKnowledgeItem {
+  id              String   @id
+  baseId          String   @map("base_id")
+  semester        String
+  category        String
+  title           String
+  ageLabel        String   @default("") @map("age_label")
+  topic           String   @default("")
+  author          String   @default("")
+  sourceFile      String   @default("") @map("source_file")
+  sourcePage      String   @default("") @map("source_page")
+  allocationBasis String   @default("") @map("allocation_basis")
+  tags            String[] @default([])
+  ingestStatus    String   @default("") @map("ingest_status")
+  duplicateOf     String   @default("") @map("duplicate_of")
+  knowledgeFile   String   @default("") @map("knowledge_file")
+  imageCount      Int      @default(0) @map("image_count")
+  videoUrl        String   @default("") @map("video_url")
+  excerpt         String   @default("") @db.Text
+  body            String   @default("") @db.Text
+  sortOrder       Int      @default(0) @map("sort_order")
+  updatedAt       DateTime @default(now()) @map("updated_at")
+
+  @@index([semester, category], map: "knowledge_items_filters_idx")
+  @@map("knowledge_items")
+}
+
+model ScienceKnowledgeResource {
+  id              String   @id
+  resourceType    String   @map("resource_type")
+  knowledgeBaseId String   @map("knowledge_base_id")
+  semester        String
+  title           String
+  filePath        String   @default("") @map("file_path")
+  publicPath      String   @default("") @map("public_path")
+  externalUrl     String   @default("") @map("external_url")
+  source          String   @default("")
+  isPublic        Boolean  @default(true) @map("is_public")
+  sortOrder       Int      @default(0) @map("sort_order")
+  updatedAt       DateTime @default(now()) @map("updated_at")
+
+  @@index([knowledgeBaseId, resourceType, isPublic], map: "knowledge_resources_lookup_idx")
+  @@map("knowledge_resources")
+}
