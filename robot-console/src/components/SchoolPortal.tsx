@@ -114,6 +114,9 @@ export function SchoolPortal({ data, initialUser }: Props) {
   const isAdmin = user?.role === "ADMIN";
   const heroPhoto = data.rooms[2]?.assets[0]?.url ?? data.rooms[0]?.assets[0]?.url ?? data.campusPhotos[3]?.url ?? "";
   const portraitHero = data.campusPhotos[0]?.url ?? heroPhoto;
+  const profileSummary = data.profile.summary
+    .replace(/[、与]?云宝机器人能力/g, "")
+    .replace(/[、与]?云宝机器人/g, "");
   const visiblePhotos = data.campusPhotos;
   const filteredDocs = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -283,7 +286,7 @@ export function SchoolPortal({ data, initialUser }: Props) {
                 龙湾区国科温州第二幼儿园
               </Badge>
               <h1 className="home-hero__title mt-5 font-semibold leading-tight tracking-normal text-[#1e2e2b] md:mt-7">{data.profile.slogan}</h1>
-              <p className="home-hero__summary mt-4 max-w-xl text-sm leading-7 text-[#5f6f6a] md:mt-7 md:text-base md:leading-8">{data.profile.summary}</p>
+              <p className="home-hero__summary mt-4 max-w-xl text-sm leading-7 text-[#5f6f6a] md:mt-7 md:text-base md:leading-8">{profileSummary}</p>
               <div className="home-hero__actions mt-6 grid grid-cols-2 gap-2 md:mt-8 md:flex md:flex-wrap md:gap-3">
                 <SpecularButton
                   icon={<ChevronRight size={16} />}
@@ -338,7 +341,7 @@ export function SchoolPortal({ data, initialUser }: Props) {
             <div className="grid gap-8 lg:grid-cols-[0.86fr_1.14fr]">
               <div className="rounded-[8px] border border-[#e7e1d5] bg-[#fcfaf5] p-6">
                 <h3 className="text-2xl font-semibold text-[#1e2e2b]">园所概览</h3>
-                <p className="mt-4 text-sm leading-8 text-[#5f6f6a]">{data.profile.summary}</p>
+                <p className="mt-4 text-sm leading-8 text-[#5f6f6a]">{profileSummary}</p>
                 <Separator className="my-6 bg-[#e3dccf]" />
                 <div className="grid gap-4">
                   {overviewFacts.map((item) => (
