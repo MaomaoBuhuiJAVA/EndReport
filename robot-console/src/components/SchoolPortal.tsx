@@ -114,9 +114,7 @@ export function SchoolPortal({ data, initialUser }: Props) {
   const isAdmin = user?.role === "ADMIN";
   const heroPhoto = data.rooms[2]?.assets[0]?.url ?? data.rooms[0]?.assets[0]?.url ?? data.campusPhotos[3]?.url ?? "";
   const portraitHero = data.campusPhotos[0]?.url ?? heroPhoto;
-  const profileSummary = data.profile.summary
-    .replace(/[、与]?云宝机器人能力/g, "")
-    .replace(/[、与]?云宝机器人/g, "");
+  const profileSummary = data.profile.summary;
   const visiblePhotos = data.campusPhotos;
   const filteredDocs = useMemo(() => {
     const q = query.trim().toLowerCase();
