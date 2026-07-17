@@ -5,6 +5,12 @@ import { SchoolPortal } from "@/components/SchoolPortal";
 export default async function Home() {
   const user = await getSessionUser();
   const data = await getSiteData(user?.role);
+  const portalData = {
+    profile: data.profile,
+    campusPhotos: data.campusPhotos,
+    rooms: data.rooms,
+    documents: data.documents,
+  };
 
-  return <SchoolPortal data={data} initialUser={user} />;
+  return <SchoolPortal data={portalData} initialUser={user} />;
 }
