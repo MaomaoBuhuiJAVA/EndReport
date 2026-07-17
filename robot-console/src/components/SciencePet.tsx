@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { AnimatePresence, motion } from "motion/react";
-import { Send, X } from "lucide-react";
+import { Mic, Send, X } from "lucide-react";
 import { GardenSeal } from "@/components/GardenSeal";
 import Markdown from "react-markdown";
 import {
@@ -42,6 +42,40 @@ type DragState = {
   moved: boolean;
 };
 
+type VoiceStatus = "idle" | "starting" | "listening" | "processing" | "error" | "unsupported";
+
+type SpeechRecognitionResultLike = {
+  isFinal: boolean;
+  length: number;
+  [index: number]: { transcript: string; confidence: number };
+};
+
+type SpeechRecognitionEventLike = Event & {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: SpeechRecognitionResultLike;
+  };
+};
+
+type SpeechRecognitionErrorEventLike = Event & { error: string };
+
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  onstart: (() => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+};
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
 type PetAnimationState =
   | "idle"
   | "running-left"
@@ -77,6 +111,8 @@ export function SciencePet() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("idle");
+  const [voiceNotice, setVoiceNotice] = useState("");
   const [dragging, setDragging] = useState(false);
   const [spriteFrame, setSpriteFrame] = useState(0);
   const [autoWalk, setAutoWalk] = useState<WalkDirection | null>(null);
@@ -95,6 +131,10 @@ export function SciencePet() {
   const petRootRef = useRef<HTMLDivElement>(null);
   const positionRef = useRef(position);
   const suppressClickRef = useRef(false);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const voicePressedRef = useRef(false);
+  const voiceBaseInputRef = useRef("");
+  const voiceTranscriptRef = useRef("");
 
   const animationState: PetAnimationState = busy
     ? "working"
@@ -187,6 +227,15 @@ export function SciencePet() {
     };
   }, [busy, dragging, open]);
 
+  useEffect(
+    () => () => {
+      voicePressedRef.current = false;
+      recognitionRef.current?.abort();
+      recognitionRef.current = null;
+    },
+    [],
+  );
+
   useEffect(() => {
     if (open) {
       scrollRef.current?.scrollTo({
@@ -278,6 +327,104 @@ export function SciencePet() {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void sendMessage(input);
+  }
+
+  function startVoiceInput(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (busy || voiceStatus === "starting" || voiceStatus === "listening") return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    const voiceWindow = window as typeof window & {
+      SpeechRecognition?: SpeechRecognitionConstructor;
+      webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    };
+    const Recognition = voiceWindow.SpeechRecognition ?? voiceWindow.webkitSpeechRecognition;
+    if (!Recognition) {
+      setVoiceStatus("unsupported");
+      setVoiceNotice("当前浏览器不支持语音识别，请使用系统键盘的麦克风。");
+      return;
+    }
+
+    const recognition = new Recognition();
+    let failed = false;
+    voicePressedRef.current = true;
+    voiceBaseInputRef.current = input.trim();
+    voiceTranscriptRef.current = "";
+    recognitionRef.current = recognition;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "zh-CN";
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      if (!voicePressedRef.current) {
+        recognition.stop();
+        return;
+      }
+      setVoiceStatus("listening");
+      setVoiceNotice("正在聆听，松开后完成输入");
+    };
+    recognition.onresult = (resultEvent) => {
+      let transcript = "";
+      for (let index = 0; index < resultEvent.results.length; index += 1) {
+        transcript += resultEvent.results[index]?.[0]?.transcript ?? "";
+      }
+      const spokenText = transcript.trim();
+      voiceTranscriptRef.current = spokenText;
+      if (spokenText) {
+        const base = voiceBaseInputRef.current;
+        setInput(`${base}${base ? " " : ""}${spokenText}`);
+      }
+    };
+    recognition.onerror = (errorEvent) => {
+      if (errorEvent.error === "aborted" && !voicePressedRef.current) return;
+      failed = true;
+      const errorMessages: Record<string, string> = {
+        "not-allowed": "麦克风权限未开启，请在浏览器设置中允许访问。",
+        "service-not-allowed": "浏览器已禁用语音识别服务。",
+        "audio-capture": "没有检测到可用的麦克风。",
+        "no-speech": "没有听到声音，请按住后再说一次。",
+        network: "语音服务暂时无法连接，请稍后重试。",
+      };
+      setVoiceStatus("error");
+      setVoiceNotice(errorMessages[errorEvent.error] ?? "语音识别失败，请重新尝试。");
+    };
+    recognition.onend = () => {
+      recognitionRef.current = null;
+      voicePressedRef.current = false;
+      if (failed) return;
+      setVoiceStatus("idle");
+      setVoiceNotice(
+        voiceTranscriptRef.current ? "语音已转成文字，可以继续编辑或发送。" : "没有听清，请按住麦克风再试一次。",
+      );
+    };
+
+    setVoiceStatus("starting");
+    setVoiceNotice("正在启动麦克风...");
+    try {
+      recognition.start();
+    } catch {
+      recognitionRef.current = null;
+      voicePressedRef.current = false;
+      setVoiceStatus("error");
+      setVoiceNotice("麦克风启动失败，请重新按住尝试。");
+    }
+  }
+
+  function stopVoiceInput(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    voicePressedRef.current = false;
+    const recognition = recognitionRef.current;
+    if (!recognition) return;
+    setVoiceStatus("processing");
+    setVoiceNotice("正在整理语音...");
+    try {
+      recognition.stop();
+    } catch {
+      recognition.abort();
+    }
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -443,18 +590,43 @@ export function SciencePet() {
               </div>
             ) : null}
 
-            <form className="pet-chat__form" onSubmit={handleSubmit}>
-              <input
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                placeholder="问问科小贝..."
-                aria-label="向科小贝提问"
-                disabled={busy}
-              />
-              <button type="submit" disabled={!input.trim() || busy} title="发送">
-                <Send size={17} />
-              </button>
-            </form>
+            <div className="pet-chat__composer">
+              {voiceNotice ? (
+                <p className="pet-chat__voice-feedback" role="status">
+                  {voiceNotice}
+                </p>
+              ) : null}
+              <form className="pet-chat__form" onSubmit={handleSubmit}>
+                <input
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  placeholder={voiceStatus === "listening" ? "正在聆听..." : "问问科小贝..."}
+                  aria-label="向科小贝提问"
+                  disabled={busy}
+                />
+                <button
+                  type="button"
+                  className={`pet-chat__voice${voiceStatus === "listening" || voiceStatus === "starting" ? " is-listening" : ""}`}
+                  disabled={busy || voiceStatus === "processing"}
+                  onContextMenu={(event) => event.preventDefault()}
+                  onPointerCancel={stopVoiceInput}
+                  onPointerDown={startVoiceInput}
+                  onPointerUp={stopVoiceInput}
+                  aria-label="按住进行语音输入"
+                  aria-pressed={voiceStatus === "listening"}
+                  title="按住说话，松开完成"
+                >
+                  <Mic size={17} />
+                </button>
+                <button
+                  type="submit"
+                  disabled={!input.trim() || busy || voiceStatus === "listening" || voiceStatus === "starting" || voiceStatus === "processing"}
+                  title="发送"
+                >
+                  <Send size={17} />
+                </button>
+              </form>
+            </div>
           </motion.section>
         ) : null}
       </AnimatePresence>

@@ -4,18 +4,10 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  Bot,
   ChevronRight,
   Eye,
   LogOut,
-  Menu,
   Search,
-  Settings,
-  SquareTerminal,
   X,
 } from "lucide-react";
 import { GardenSeal } from "@/components/GardenSeal";
@@ -54,8 +46,6 @@ type SiteData = {
     assets: Array<{ id: string; title: string; url: string; description?: string | null }>;
   }>;
   documents: Array<{ id: string; title: string; category: string; summary: string }>;
-  devices: Array<{ id: string; code?: string; name: string; classroom?: string; status?: string; mode?: string; battery?: number; temperature?: number; streamUrl?: string | null; description: string }>;
-  logs: Array<{ id: string; level: string; message: string; createdAt: string }>;
 };
 
 type Props = { data: SiteData; initialUser: SessionUser | null };
@@ -65,11 +55,17 @@ const navItems: GooeyNavItem[] = [
   { key: "growth", label: "成长照片", href: "#growth" },
   { key: "rooms", label: "功能室", href: "#rooms" },
   { key: "docs", label: "园所资料", href: "#docs" },
-  { key: "yunbao", label: "云宝", href: "#yunbao" },
   { key: "lab", label: "科小贝实验室", href: "/lab" },
 ];
 
-const statusCopy: Record<string, string> = { ONLINE: "在线", IDLE: "待命", OFFLINE: "离线", WARNING: "预警" };
+const mobileNavLabels: Record<string, string> = {
+  overview: "概览",
+  growth: "成长",
+  rooms: "功能室",
+  docs: "资料",
+  lab: "实验室",
+};
+
 const categoryCopy: Record<string, string> = {
   BASIC_INFO: "基本情况",
   QUALIFICATION: "资质信息",
@@ -103,7 +99,7 @@ const textFeatures = [
 
 export function SchoolPortal({ data, initialUser }: Props) {
   const [user, setUser] = useState(initialUser);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [activeNav, setActiveNav] = useState("overview");
   const [activeRoom, setActiveRoom] = useState(data.rooms[0]);
   const [activePhoto, setActivePhoto] = useState<string | null>(null);
@@ -147,7 +143,7 @@ export function SchoolPortal({ data, initialUser }: Props) {
   function scrollTo(id: string) {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
     setActiveNav(id);
-    setMenuOpen(false);
+    setMobileSearchOpen(false);
   }
 
   function pushToast(message: string) {
@@ -159,16 +155,6 @@ export function SchoolPortal({ data, initialUser }: Props) {
     await fetch("/api/auth/logout", { method: "POST" });
     setUser(null);
     pushToast("已退出登录");
-  }
-
-  async function sendWasd(key: string) {
-    if (!isAdmin || !data.devices[0]) return;
-    const response = await fetch("/api/commands", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deviceId: data.devices[0].id, type: `wasd_${key}`, label: `WASD ${key}` }),
-    });
-    pushToast(response.ok ? `已发送 ${key.toUpperCase()} 指令` : "指令发送失败，请确认管理员权限");
   }
 
   async function openDocument(doc: SiteData["documents"][number]) {
@@ -208,14 +194,14 @@ export function SchoolPortal({ data, initialUser }: Props) {
   }
 
   return (
-    <div className="min-h-screen bg-[#f8f5ed] text-[#21312e]">
-      <header className="fixed inset-x-0 top-0 z-40 px-3 pt-3">
-        <div className="mx-auto flex max-w-7xl items-center gap-3 rounded-[8px] border border-white/72 bg-white/78 px-3 py-3 shadow-[0_14px_42px_rgba(38,58,54,0.10)] backdrop-blur-2xl">
-          <Link className="flex min-w-0 items-center gap-3 rounded-[8px] px-2 py-1 transition hover:bg-[#f3efe4]" href="/auth">
+    <div className="home-app min-h-screen bg-[#f8f5ed] text-[#21312e]">
+      <header className="home-app-header fixed inset-x-0 top-0 z-40 px-2 pt-2 md:px-3 md:pt-3">
+        <div className="home-app-header__bar mx-auto flex max-w-7xl items-center gap-2 rounded-[8px] border border-white/72 bg-white/88 px-2 py-2 shadow-[0_14px_42px_rgba(38,58,54,0.10)] backdrop-blur-2xl md:gap-3 md:px-3 md:py-3">
+          <Link className="home-app-brand flex min-w-0 flex-1 items-center gap-2 rounded-[8px] px-1 py-1 transition hover:bg-[#f3efe4] md:flex-none md:gap-3 md:px-2" href="/auth">
             <GardenSeal glyph="芽" tone="teal" />
-            <span className="hidden min-w-0 sm:block">
+            <span className="min-w-0">
               <span className="block truncate text-sm font-semibold">{data.profile.shortName}</span>
-              <span className="block text-xs text-[#64736f]">{user ? `${user.name} · ${user.role === "ADMIN" ? "管理员" : "普通用户"}` : "登录 / 注册"}</span>
+              <span className="home-app-brand__meta block truncate text-[11px] text-[#64736f]">{user ? `${user.name} · ${user.role === "ADMIN" ? "管理员" : "普通用户"}` : "登录 / 注册"}</span>
             </span>
           </Link>
 
@@ -234,51 +220,71 @@ export function SchoolPortal({ data, initialUser }: Props) {
             />
           </div>
 
+          <Button
+            className="rounded-[8px] md:hidden"
+            onClick={() => setMobileSearchOpen((current) => !current)}
+            size="icon"
+            title={mobileSearchOpen ? "关闭搜索" : "搜索园所资料"}
+            type="button"
+            variant="ghost"
+          >
+            {mobileSearchOpen ? <X size={18} /> : <Search size={18} />}
+          </Button>
           {user ? (
             <Button className="rounded-[8px]" onClick={() => void logout()} size="icon" title="退出登录" type="button" variant="ghost">
               <LogOut size={17} />
             </Button>
           ) : null}
-          <Button className="rounded-[8px] lg:hidden" onClick={() => setMenuOpen((value) => !value)} size="icon" type="button" variant="ghost">
-            {menuOpen ? <X size={19} /> : <Menu size={19} />}
-          </Button>
         </div>
+        {mobileSearchOpen ? (
+          <div className="home-mobile-search mx-auto mt-2 flex max-w-7xl items-center gap-2 rounded-[8px] border border-[#dfe7e3] bg-white/96 p-2 shadow-lg md:hidden">
+            <Search className="ml-2 shrink-0 text-[#7b8984]" size={17} />
+            <Input
+              autoFocus
+              className="h-10 min-w-0 flex-1 border-0 bg-transparent px-1 shadow-none focus-visible:ring-0"
+              placeholder="搜索园所资料"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            {query ? (
+              <Button onClick={() => setQuery("")} size="icon-sm" title="清空搜索" type="button" variant="ghost">
+                <X size={16} />
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
-      {menuOpen ? (
-        <div className="fixed left-3 right-3 top-20 z-40 grid gap-1 rounded-[8px] border border-white/70 bg-white/94 p-2 shadow-xl backdrop-blur-2xl lg:hidden">
-          {navItems.map((item) =>
-            item.href.startsWith("#") ? (
-              <Button
-                className="justify-start rounded-[8px]"
-                key={item.key}
-                onClick={() => scrollTo(item.key)}
-                type="button"
-                variant="ghost"
-              >
-                {item.label}
-              </Button>
-            ) : (
-              <Button asChild className="justify-start rounded-[8px]" key={item.key} variant="ghost">
-                <Link href={item.href} onClick={() => setMenuOpen(false)}>
-                  {item.label}
-                </Link>
-              </Button>
-            ),
-          )}
-        </div>
-      ) : null}
+      <nav className="home-bottom-nav lg:hidden" aria-label="移动端主导航">
+        {navItems.map((item) =>
+          item.href.startsWith("#") ? (
+            <button
+              type="button"
+              key={item.key}
+              className={`home-bottom-nav__item${activeNav === item.key ? " is-active" : ""}`}
+              onClick={() => scrollTo(item.key)}
+              aria-current={activeNav === item.key ? "page" : undefined}
+            >
+              {mobileNavLabels[item.key] ?? item.label}
+            </button>
+          ) : (
+            <Link className="home-bottom-nav__item" href={item.href} key={item.key}>
+              {mobileNavLabels[item.key] ?? item.label}
+            </Link>
+          ),
+        )}
+      </nav>
 
-      <main>
-        <section className="relative overflow-hidden pt-24" id="overview">
-          <div className="mx-auto grid min-h-[calc(100vh-32px)] max-w-7xl gap-8 px-4 pb-16 pt-10 sm:px-6 lg:grid-cols-[0.94fr_1.06fr] lg:items-center lg:px-8">
+      <main className="home-main">
+        <section className="home-hero relative overflow-hidden pt-20 md:pt-24" id="overview">
+          <div className="home-hero__inner mx-auto grid max-w-7xl gap-6 px-4 pb-10 pt-6 sm:px-6 md:gap-8 md:pb-16 md:pt-10 lg:min-h-[calc(100vh-32px)] lg:grid-cols-[0.94fr_1.06fr] lg:items-center lg:px-8">
             <div className="relative z-10 max-w-2xl">
               <Badge className="rounded-[8px] bg-[#e9f2ed] px-3 py-1 text-[#1f6f62]" variant="secondary">
                 龙湾区国科温州第二幼儿园
               </Badge>
-              <h1 className="mt-7 text-5xl font-semibold leading-tight tracking-normal text-[#1e2e2b] sm:text-7xl">{data.profile.slogan}</h1>
-              <p className="mt-7 max-w-xl text-base leading-8 text-[#5f6f6a]">{data.profile.summary}</p>
-              <div className="mt-8 flex flex-wrap gap-3">
+              <h1 className="home-hero__title mt-5 font-semibold leading-tight tracking-normal text-[#1e2e2b] md:mt-7">{data.profile.slogan}</h1>
+              <p className="home-hero__summary mt-4 max-w-xl text-sm leading-7 text-[#5f6f6a] md:mt-7 md:text-base md:leading-8">{data.profile.summary}</p>
+              <div className="home-hero__actions mt-6 grid grid-cols-2 gap-2 md:mt-8 md:flex md:flex-wrap md:gap-3">
                 <SpecularButton
                   icon={<ChevronRight size={16} />}
                   onClick={() => scrollTo("growth")}
@@ -297,14 +303,14 @@ export function SchoolPortal({ data, initialUser }: Props) {
               </div>
             </div>
 
-            <div className="relative min-h-[560px]">
-              <div className="absolute right-0 top-0 h-[78%] w-[82%] overflow-hidden rounded-[8px] shadow-[0_24px_80px_rgba(36,50,45,0.18)]">
+            <div className="home-hero__media relative min-h-[390px] md:min-h-[560px]">
+              <div className="home-hero__primary-photo absolute right-0 top-0 h-[78%] w-[82%] overflow-hidden rounded-[8px] shadow-[0_24px_80px_rgba(36,50,45,0.18)]">
                 {heroPhoto ? <Image alt="幼儿园功能室环境" className="object-cover" fill priority src={heroPhoto} sizes="(min-width:1024px) 50vw, 100vw" /> : null}
               </div>
-              <div className="absolute bottom-0 left-0 h-[48%] w-[48%] overflow-hidden rounded-[8px] border-[10px] border-[#f8f5ed] bg-white shadow-[0_20px_60px_rgba(36,50,45,0.16)]">
+              <div className="home-hero__portrait absolute bottom-0 left-0 h-[48%] w-[48%] overflow-hidden rounded-[8px] border-[10px] border-[#f8f5ed] bg-white shadow-[0_20px_60px_rgba(36,50,45,0.16)]">
                 {portraitHero ? <Image alt="幼儿成长活动照片" className="object-cover" fill src={portraitHero} sizes="30vw" /> : null}
               </div>
-              <div className="absolute bottom-12 right-8 max-w-[270px] rounded-[8px] bg-white/86 p-4 shadow-xl backdrop-blur-xl">
+              <div className="home-hero__note absolute bottom-12 right-8 max-w-[270px] rounded-[8px] bg-white/86 p-4 shadow-xl backdrop-blur-xl">
                 <p className="text-sm font-semibold text-[#1f6f62]">在真实活动中成长</p>
                 <p className="mt-2 text-sm leading-6 text-[#5f6f6a]">以空间为课程，以体验为路径，让儿童在探究、表达与合作中被看见。</p>
               </div>
@@ -312,21 +318,21 @@ export function SchoolPortal({ data, initialUser }: Props) {
           </div>
         </section>
 
-        <section className="bg-white py-16" id="growth">
+        <section className="home-section bg-white py-16" id="growth">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <SectionTitle kicker="成长影像" title="每一次探索，都值得被好好收藏" subtitle="照片来自园所成长相册，点击即可放大查看。" />
             <GrowthPhotoShowcase photos={visiblePhotos} onOpen={(url) => setActivePhoto(url)} />
           </div>
         </section>
 
-        <section className="bg-[#f8f5ed] py-16" id="rooms">
+        <section className="home-section bg-[#f8f5ed] py-16" id="rooms">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <SectionTitle kicker="空间课程" title="功能室照片展示" subtitle="用照片呈现不同功能室的环境、材料与儿童活动可能。" />
             <RoomGallery activeRoom={activeRoom} rooms={data.rooms} onOpenPhoto={setActivePhoto} onSelectRoom={setActiveRoom} />
           </div>
         </section>
 
-        <section className="bg-white py-16">
+        <section className="home-section bg-white py-16">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <SectionTitle kicker="园所信息" title="以文字沉淀园所建设脉络" subtitle="资料内容以正式栏目呈现，减少装饰，让信息更清楚。" />
             <div className="grid gap-8 lg:grid-cols-[0.86fr_1.14fr]">
@@ -361,7 +367,7 @@ export function SchoolPortal({ data, initialUser }: Props) {
           </div>
         </section>
 
-        <section className="bg-[#f8f5ed] py-16">
+        <section className="home-section bg-[#f8f5ed] py-16">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <SectionTitle kicker="教师发展" title="教师获奖情况" subtitle="根据获奖汇总表与教师荣誉资料整理。" />
             <div className="grid gap-4 md:grid-cols-2">
@@ -382,7 +388,7 @@ export function SchoolPortal({ data, initialUser }: Props) {
           </div>
         </section>
 
-        <section className="bg-white py-16" id="docs">
+        <section className="home-section bg-white py-16" id="docs">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <SectionTitle kicker="资料库" title="园所资料" subtitle="点击资料可查看数据库正文，管理员可新增资料。" />
             {isAdmin ? (
@@ -434,58 +440,6 @@ export function SchoolPortal({ data, initialUser }: Props) {
           </div>
         </section>
 
-        <section className="bg-[#f8f5ed] py-16" id="yunbao">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <SectionTitle kicker="云宝" title={isAdmin ? "教师端设备控制" : "小陪伴机器人"} subtitle={isAdmin ? "管理员可查看监控画面、设备状态、运行日志并用 WASD 控制。" : "普通用户展示机器人简介和公开展示画面。"} />
-            <div className="grid gap-6 lg:grid-cols-[0.66fr_0.34fr]">
-              <div className="overflow-hidden rounded-[8px] border border-[#e4ddd1] bg-white shadow-sm">
-                <div className="relative h-[420px] bg-[#20312d]">
-                  <Image alt="云宝展示画面" className="object-cover opacity-90" fill src={data.devices[0]?.streamUrl ?? heroPhoto} sizes="65vw" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/58 to-transparent" />
-                  <Badge className="absolute left-5 top-5 rounded-[8px] bg-white/20 text-white backdrop-blur-xl">{isAdmin ? "监控画面" : "展示画面"}</Badge>
-                  <div className="absolute bottom-5 left-5 right-5 text-white">
-                    <h3 className="text-3xl font-semibold">{data.devices[0]?.name ?? "云宝"}</h3>
-                    <p className="mt-2 max-w-2xl text-sm leading-7 text-white/82">{data.devices[0]?.description}</p>
-                  </div>
-                </div>
-              </div>
-              <div className="grid gap-4">
-                {isAdmin ? (
-                  <>
-                    <Panel title="设备状态" icon={Settings}>
-                      <p>状态：{statusCopy[data.devices[0]?.status ?? "ONLINE"]}</p>
-                      <p>电量：{data.devices[0]?.battery ?? 0}%</p>
-                      <p>班级空间：{data.devices[0]?.classroom ?? "未绑定"}</p>
-                    </Panel>
-                    <Panel title="WASD 控制" icon={SquareTerminal}>
-                      <div className="grid grid-cols-3 gap-2">
-                        <span />
-                        <ControlKey label="W" icon={ArrowUp} onClick={() => void sendWasd("W")} />
-                        <span />
-                        <ControlKey label="A" icon={ArrowLeft} onClick={() => void sendWasd("A")} />
-                        <ControlKey label="S" icon={ArrowDown} onClick={() => void sendWasd("S")} />
-                        <ControlKey label="D" icon={ArrowRight} onClick={() => void sendWasd("D")} />
-                      </div>
-                    </Panel>
-                    <Panel title="运行日志" icon={SquareTerminal}>
-                      <div className="space-y-2">
-                        {data.logs.slice(0, 4).map((log) => (
-                          <p className="rounded-[8px] bg-[#f7f3ea] px-3 py-2 text-xs leading-6" key={log.id}>
-                            {log.message}
-                          </p>
-                        ))}
-                      </div>
-                    </Panel>
-                  </>
-                ) : (
-                  <Panel title="云宝简介" icon={Bot}>
-                    <p>{data.devices[0]?.description}</p>
-                  </Panel>
-                )}
-              </div>
-            </div>
-          </div>
-        </section>
       </main>
 
       <Dialog open={Boolean(activePhoto)} onOpenChange={(open) => !open && setActivePhoto(null)}>
@@ -518,7 +472,7 @@ export function SchoolPortal({ data, initialUser }: Props) {
         </DialogContent>
       </Dialog>
 
-      {toast ? <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-[8px] bg-[#21312e] px-5 py-3 text-sm text-white shadow-xl">{toast}</div> : null}
+      {toast ? <div className="home-toast fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-[8px] bg-[#21312e] px-5 py-3 text-sm text-white shadow-xl">{toast}</div> : null}
       <SciencePet />
     </div>
   );
@@ -526,9 +480,9 @@ export function SchoolPortal({ data, initialUser }: Props) {
 
 function SectionTitle({ kicker, title, subtitle }: { kicker: string; title: string; subtitle: string }) {
   return (
-    <div className="mb-8 max-w-3xl">
+    <div className="home-section-title mb-8 max-w-3xl">
       <p className="text-sm font-semibold tracking-[0.2em] text-[#8c7540]">{kicker}</p>
-      <h2 className="mt-3 text-4xl font-semibold leading-tight tracking-normal text-[#1e2e2b]">{title}</h2>
+      <h2 className="home-section-title__heading mt-3 font-semibold leading-tight tracking-normal text-[#1e2e2b]">{title}</h2>
       <p className="mt-3 text-sm leading-7 text-[#64736f]">{subtitle}</p>
     </div>
   );
@@ -540,7 +494,7 @@ function GrowthPhotoShowcase({ photos, onOpen }: { photos: SiteData["campusPhoto
   const rows = [photos.filter((_, index) => index % 3 === 0), photos.filter((_, index) => index % 3 === 1), photos.filter((_, index) => index % 3 === 2)].filter((row) => row.length);
 
   return (
-    <div className="relative overflow-hidden rounded-[8px] border border-[#e4ddd1] bg-[#f8f5ed] py-5 shadow-[0_24px_70px_rgba(45,60,52,0.10)]">
+    <div className="growth-showcase relative overflow-hidden rounded-[8px] border border-[#e4ddd1] bg-[#f8f5ed] py-5 shadow-[0_24px_70px_rgba(45,60,52,0.10)]">
       <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-24 bg-gradient-to-r from-[#f8f5ed] to-transparent" />
       <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-24 bg-gradient-to-l from-[#f8f5ed] to-transparent" />
       <div className="grid gap-4">
@@ -588,9 +542,9 @@ function RoomGallery({
   if (!activeRoom) return <EmptyState text="暂无功能室资料。" />;
 
   return (
-    <div className="overflow-hidden rounded-[8px] border border-[#e4ddd1] bg-white shadow-sm">
+    <div className="room-gallery overflow-hidden rounded-[8px] border border-[#e4ddd1] bg-white shadow-sm">
       <div className="grid gap-0 lg:grid-cols-[0.58fr_0.42fr]">
-        <button className="group relative min-h-[520px] overflow-hidden bg-[#e7e1d5] text-left" onClick={() => hero && onOpenPhoto(hero.url)} type="button">
+        <button className="room-gallery__hero group relative min-h-[520px] overflow-hidden bg-[#e7e1d5] text-left" onClick={() => hero && onOpenPhoto(hero.url)} type="button">
           {hero ? <Image alt={hero.title} className="object-cover transition duration-700 group-hover:scale-105" fill src={hero.url} sizes="(min-width:1024px) 56vw, 100vw" /> : null}
           <div className="absolute inset-0 bg-gradient-to-t from-black/64 via-black/8 to-transparent" />
           <div className="absolute bottom-0 left-0 right-0 p-6 text-white">
@@ -600,7 +554,7 @@ function RoomGallery({
           </div>
         </button>
 
-        <div className="flex min-h-[520px] flex-col justify-between bg-[#fbfaf5] p-5">
+        <div className="room-gallery__details flex min-h-[520px] flex-col justify-between bg-[#fbfaf5] p-5">
           <div>
             <div className="flex flex-wrap gap-2">
               {rooms.map((room) => (
@@ -656,26 +610,5 @@ function EmptyState({ text }: { text: string }) {
     <div className="rounded-[8px] border border-[#e4ddd1] bg-white p-8 text-sm text-[#64736f]">
       {text}
     </div>
-  );
-}
-
-function Panel({ title, icon: Icon, children }: { title: string; icon: typeof Settings; children: React.ReactNode }) {
-  return (
-    <div className="rounded-[8px] border border-[#e4ddd1] bg-white p-5 text-sm leading-7 text-[#64736f] shadow-sm">
-      <div className="mb-4 flex items-center gap-3 text-[#21312e]">
-        <Icon size={18} className="text-[#1f6f62]" />
-        <h3 className="font-semibold">{title}</h3>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function ControlKey({ label, icon: Icon, onClick }: { label: string; icon: typeof ArrowUp; onClick: () => void }) {
-  return (
-    <Button className="h-12 rounded-[8px] border-[#e4ddd1] bg-white" onClick={onClick} type="button" variant="outline">
-      <Icon size={15} />
-      {label}
-    </Button>
   );
 }

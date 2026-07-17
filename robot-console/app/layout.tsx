@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "龙湾区国科温州第二幼儿园",
-  description: "龙湾区国科温州第二幼儿园官方网站，展示园所概览、成长照片、功能室、园所资料与云宝机器人信息。",
+  description: "龙湾区国科温州第二幼儿园官方网站，展示园所概览、成长照片、功能室、园所资料与科小贝实验室。",
 };
 
 export default function RootLayout({
