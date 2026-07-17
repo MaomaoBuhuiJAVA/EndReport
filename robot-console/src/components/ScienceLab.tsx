@@ -21,10 +21,12 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
 } from "react";
 import { GooeyNav, type GooeyNavItem } from "@/components/GooeyNav";
+import { MobileAppNav, type MobileAppNavItem } from "@/components/MobileAppNav";
 import { PillNav } from "@/components/PillNav";
 import { RotatingText } from "@/components/RotatingText";
 import { SciencePet } from "@/components/SciencePet";
@@ -45,6 +47,14 @@ const labNavItems: GooeyNavItem[] = [
   { key: "rooms", label: "功能室", href: "/#rooms" },
   { key: "docs", label: "园所资料", href: "/#docs" },
   { key: "lab", label: "科小贝实验室", href: "/lab" },
+];
+
+const labMobileNavItems: MobileAppNavItem[] = [
+  { key: "overview", label: "概览", href: "/" },
+  { key: "growth", label: "成长", href: "/#growth" },
+  { key: "rooms", label: "功能室", href: "/#rooms" },
+  { key: "docs", label: "资料", href: "/#docs" },
+  { key: "lab", label: "实验室", href: "/lab" },
 ];
 
 const labHeroPhotos = [
@@ -249,6 +259,10 @@ export function ScienceLab({
   const [heroIndex, setHeroIndex] = useState(0);
   const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase("zh-CN"));
 
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
   useEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const timer = window.setInterval(() => {
@@ -326,6 +340,14 @@ export function ScienceLab({
           <GooeyNav items={labNavItems} activeKey="lab" />
         </div>
       </header>
+
+      <MobileAppNav
+        items={labMobileNavItems}
+        activeKey="lab"
+        onSelect={(item) => {
+          if (item.key === "lab") window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+        }}
+      />
 
       <main>
         <section className="lab-hero">

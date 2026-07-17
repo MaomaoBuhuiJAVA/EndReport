@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { GardenSeal } from "@/components/GardenSeal";
 import { GooeyNav, type GooeyNavItem } from "@/components/GooeyNav";
+import { MobileAppNav, type MobileAppNavItem } from "@/components/MobileAppNav";
 import { SciencePet } from "@/components/SciencePet";
 import { SpecularButton } from "@/components/SpecularButton";
 import { Badge } from "@/components/ui/badge";
@@ -58,13 +59,13 @@ const navItems: GooeyNavItem[] = [
   { key: "lab", label: "科小贝实验室", href: "/lab" },
 ];
 
-const mobileNavLabels: Record<string, string> = {
-  overview: "概览",
-  growth: "成长",
-  rooms: "功能室",
-  docs: "资料",
-  lab: "实验室",
-};
+const mobileNavItems: MobileAppNavItem[] = [
+  { key: "overview", label: "概览", href: "#overview" },
+  { key: "growth", label: "成长", href: "#growth" },
+  { key: "rooms", label: "功能室", href: "#rooms" },
+  { key: "docs", label: "资料", href: "#docs" },
+  { key: "lab", label: "实验室", href: "/lab" },
+];
 
 const categoryCopy: Record<string, string> = {
   BASIC_INFO: "基本情况",
@@ -256,25 +257,13 @@ export function SchoolPortal({ data, initialUser }: Props) {
         ) : null}
       </header>
 
-      <nav className="home-bottom-nav lg:hidden" aria-label="移动端主导航">
-        {navItems.map((item) =>
-          item.href.startsWith("#") ? (
-            <button
-              type="button"
-              key={item.key}
-              className={`home-bottom-nav__item${activeNav === item.key ? " is-active" : ""}`}
-              onClick={() => scrollTo(item.key)}
-              aria-current={activeNav === item.key ? "page" : undefined}
-            >
-              {mobileNavLabels[item.key] ?? item.label}
-            </button>
-          ) : (
-            <Link className="home-bottom-nav__item" href={item.href} key={item.key}>
-              {mobileNavLabels[item.key] ?? item.label}
-            </Link>
-          ),
-        )}
-      </nav>
+      <MobileAppNav
+        items={mobileNavItems}
+        activeKey={activeNav}
+        onSelect={(item) => {
+          if (item.href.startsWith("#")) scrollTo(item.key);
+        }}
+      />
 
       <main className="home-main">
         <section className="home-hero relative overflow-hidden pt-20 md:pt-24" id="overview">

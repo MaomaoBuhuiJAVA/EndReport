@@ -8,6 +8,21 @@ import type {
 
 const fallbackItems = fallbackPayload as unknown as ScienceKnowledgeItem[];
 
+const knowledgeVersionSuffix = /\s*(?:[-_—]\s*\d+|[（(]\s*(?:\d+|[一二三四五六七八九十]+|初稿|初版|定稿|最终稿|终稿|修改稿|修订稿|送审稿)\s*[）)])\s*$/i;
+
+function cleanKnowledgeName(value: string) {
+  const extension = value.match(/\.[a-z0-9]{1,8}$/i)?.[0] ?? "";
+  let stem = extension ? value.slice(0, -extension.length) : value;
+  let previous = "";
+
+  while (previous !== stem) {
+    previous = stem;
+    stem = stem.replace(knowledgeVersionSuffix, "").trim();
+  }
+
+  return `${stem}${extension}`;
+}
+
 function normalizeResources(
   item: Pick<ScienceKnowledgeItem, "id" | "baseId" | "semester" | "title" | "category" | "sourceFile">,
   resources: ScienceResource[],
@@ -33,13 +48,18 @@ function normalizeResources(
 }
 
 function toSummary(item: ScienceKnowledgeItem): ScienceKnowledgeSummary {
-  const resources = normalizeResources(item, item.resources);
+  const normalizedItem = {
+    ...item,
+    title: cleanKnowledgeName(item.title),
+    sourceFile: cleanKnowledgeName(item.sourceFile),
+  };
+  const resources = normalizeResources(normalizedItem, item.resources);
   return {
     id: item.id,
     baseId: item.baseId,
     semester: item.semester,
     category: item.category,
-    title: item.title,
+    title: normalizedItem.title,
     ageLabel: item.ageLabel,
     topic: item.topic,
     author: item.author,
@@ -66,7 +86,7 @@ function mapResource(resource: {
     type: resource.resourceType as ScienceResource["type"],
     knowledgeBaseId: resource.knowledgeBaseId,
     semester: resource.semester,
-    title: resource.title,
+    title: cleanKnowledgeName(resource.title),
     publicPath: resource.publicPath,
     externalUrl: resource.externalUrl,
     source: resource.source,
@@ -78,12 +98,31 @@ function mapItem(
   item: Omit<ScienceKnowledgeItem, "resources" | "resourceTypes">,
   resources: ScienceResource[],
 ): ScienceKnowledgeItem {
-  const normalizedResources = normalizeResources(item, resources);
-  return {
+  const normalizedItem = {
     ...item,
+    title: cleanKnowledgeName(item.title),
+    sourceFile: cleanKnowledgeName(item.sourceFile),
+  };
+  const normalizedResources = normalizeResources(normalizedItem, resources);
+  return {
+    ...normalizedItem,
     category: item.category as ScienceKnowledgeItem["category"],
     resources: normalizedResources,
     resourceTypes: Array.from(new Set(normalizedResources.map((resource) => resource.type))),
+  };
+}
+
+function normalizeFallbackItem(item: ScienceKnowledgeItem) {
+  const normalizedItem = {
+    ...item,
+    title: cleanKnowledgeName(item.title),
+    sourceFile: cleanKnowledgeName(item.sourceFile),
+  };
+  const resources = normalizeResources(normalizedItem, item.resources);
+  return {
+    ...normalizedItem,
+    resources,
+    resourceTypes: Array.from(new Set(resources.map((resource) => resource.type))),
   };
 }
 
@@ -145,7 +184,10 @@ export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSu
 export async function getScienceKnowledgeItem(id: string): Promise<ScienceKnowledgeItem | null> {
   try {
     const item = await prisma.scienceKnowledgeItem.findUnique({ where: { id } });
-    if (!item) return fallbackItems.find((entry) => entry.id === id) ?? null;
+    if (!item) {
+      const fallback = fallbackItems.find((entry) => entry.id === id);
+      return fallback ? normalizeFallbackItem(fallback) : null;
+    }
 
     const resources = await prisma.scienceKnowledgeResource.findMany({
       where: { knowledgeBaseId: item.baseId, isPublic: true },
@@ -176,6 +218,7 @@ export async function getScienceKnowledgeItem(id: string): Promise<ScienceKnowle
       resources.map(mapResource),
     );
   } catch {
-    return fallbackItems.find((entry) => entry.id === id) ?? null;
+    const fallback = fallbackItems.find((entry) => entry.id === id);
+    return fallback ? normalizeFallbackItem(fallback) : null;
   }
 }
