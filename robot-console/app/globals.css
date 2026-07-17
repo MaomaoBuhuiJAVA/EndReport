@@ -1746,7 +1746,8 @@ img {
   border: 0;
   outline: 0;
   color: #21312e;
-  font-size: 12px;
+  font-size: 16px;
+  line-height: 1.35;
 }
 
 .pet-chat__form input::placeholder {
