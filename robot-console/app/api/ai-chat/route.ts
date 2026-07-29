@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { ConversationMessage } from "@/lib/types";
 import { generateDeepSeekReply } from "@/lib/deepseek";
+import { buildScienceLabLinks } from "@/lib/science-lab-links";
 import { searchKnowledge, wantsPhotoResults } from "@/lib/search";
 
 const systemPrompt = `你是“龙湾区国科温州第二幼儿园”的园所信息问答助手。
@@ -44,6 +45,7 @@ export async function POST(request: Request) {
   const sources = search.chunks.map((chunk) => chunk.document.title);
   const photos = wantsPhotoResults(message) ? search.photos : [];
   const uniqueSources = Array.from(new Set(sources)).slice(0, 5);
+  const labLinks = buildScienceLabLinks(search.chunks);
 
   const reply = await generateDeepSeekReply({
     apiKey: process.env.DEEPSEEK_API_KEY,
@@ -59,5 +61,6 @@ export async function POST(request: Request) {
     provider: reply ? "deepseek" : "fallback",
     photos,
     sources: uniqueSources,
+    labLinks,
   });
 }

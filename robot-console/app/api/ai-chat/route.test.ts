@@ -41,6 +41,7 @@ describe("POST /api/ai-chat", () => {
       reply: "这是自然的园所介绍。",
       provider: "deepseek",
       sources: ["园所简介", "课程"],
+      labLinks: [],
     });
     expect(generateDeepSeekReply).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -75,6 +76,7 @@ describe("POST /api/ai-chat", () => {
       provider: "deepseek",
       photos,
       sources: ["空间"],
+      labLinks: [],
     });
   });
 
@@ -96,6 +98,42 @@ describe("POST /api/ai-chat", () => {
     await expect(response.json()).resolves.toMatchObject({
       provider: "fallback",
       sources: ["园所简介"],
+      labLinks: [],
+    });
+  });
+
+  it("为打包实验室资料返回确定性的详情链接", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-exp-1",
+          documentId: "exp-1",
+          title: "水会跳舞",
+          document: { title: "科小贝实验室：水会跳舞" },
+          content: "水滴实验",
+        },
+        {
+          id: "doc-school",
+          documentId: "school",
+          title: "园所概览",
+          document: { title: "园所概览" },
+          content: "园所资料",
+        },
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue("可以试试这个实验。");
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "推荐一个水实验" }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      labLinks: [{ id: "exp-1", title: "水会跳舞", href: "/lab?item=exp-1" }],
     });
   });
 });
