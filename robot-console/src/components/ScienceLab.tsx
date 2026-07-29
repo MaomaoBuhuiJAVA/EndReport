@@ -23,6 +23,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { GooeyNav, type GooeyNavItem } from "@/components/GooeyNav";
@@ -30,6 +31,7 @@ import { MobileAppNav, type MobileAppNavItem } from "@/components/MobileAppNav";
 import { PillNav } from "@/components/PillNav";
 import { RotatingText } from "@/components/RotatingText";
 import { SciencePet } from "@/components/SciencePet";
+import { findScienceSummaryFromSearch } from "@/lib/science-lab-links";
 import {
   SCIENCE_CATEGORIES,
   SCIENCE_RESOURCE_TYPES,
@@ -257,6 +259,7 @@ export function ScienceLab({
   const [selectedItem, setSelectedItem] = useState<ScienceKnowledgeItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [heroIndex, setHeroIndex] = useState(0);
+  const openedFromUrlRef = useRef<string | null>(null);
   const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase("zh-CN"));
 
   useLayoutEffect(() => {
@@ -310,7 +313,7 @@ export function ScienceLab({
     setDetailLoading(false);
   }, []);
 
-  async function openDetail(summary: ScienceKnowledgeSummary) {
+  const openDetail = useCallback(async (summary: ScienceKnowledgeSummary) => {
     setSelectedSummary(summary);
     setSelectedItem(null);
     setDetailLoading(true);
@@ -327,7 +330,15 @@ export function ScienceLab({
     } finally {
       setDetailLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    const summary = findScienceSummaryFromSearch(window.location.search, initialItems);
+    if (!summary || openedFromUrlRef.current === summary.id) return;
+
+    openedFromUrlRef.current = summary.id;
+    void openDetail(summary);
+  }, [initialItems, openDetail]);
 
   return (
     <div className="lab-page">
