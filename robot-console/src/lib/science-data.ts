@@ -110,6 +110,19 @@ function normalizeFallbackItem(item: ScienceKnowledgeItem) {
   };
 }
 
+export function mergeScienceKnowledgeSummaries(
+  packagedItems: ScienceKnowledgeSummary[],
+  databaseItems: ScienceKnowledgeSummary[],
+): ScienceKnowledgeSummary[] {
+  const databaseById = new Map(databaseItems.map((item) => [item.id, item]));
+  const packagedIds = new Set(packagedItems.map((item) => item.id));
+
+  return [
+    ...packagedItems.map((item) => databaseById.get(item.id) ?? item),
+    ...databaseItems.filter((item) => !packagedIds.has(item.id)),
+  ];
+}
+
 function groupResources(resources: ScienceResource[]) {
   const groups = new Map<string, ScienceResource[]>();
   for (const resource of resources) {
@@ -121,11 +134,13 @@ function groupResources(resources: ScienceResource[]) {
 }
 
 export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSummary[]> {
+  const packagedSummaries = fallbackItems.map(toSummary);
+
   try {
     const items = await prisma.scienceKnowledgeItem.findMany({
       orderBy: { sortOrder: "asc" },
     });
-    if (!items.length) return fallbackItems.map(toSummary);
+    if (!items.length) return packagedSummaries;
 
     const resources = await prisma.scienceKnowledgeResource.findMany({
       where: { isPublic: true },
@@ -133,7 +148,7 @@ export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSu
     });
     const groups = groupResources(resources.map(mapResource));
 
-    return items.map((item) =>
+    const databaseSummaries = items.map((item) =>
       toSummary(
         mapItem(
           {
@@ -160,8 +175,10 @@ export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSu
         ),
       ),
     );
+
+    return mergeScienceKnowledgeSummaries(packagedSummaries, databaseSummaries);
   } catch {
-    return fallbackItems.map(toSummary);
+    return packagedSummaries;
   }
 }
 
