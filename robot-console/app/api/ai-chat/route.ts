@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { ConversationMessage } from "@/lib/types";
+import { generateDeepSeekReply } from "@/lib/deepseek";
 import { searchKnowledge, wantsPhotoResults } from "@/lib/search";
 
 const systemPrompt = `你是“龙湾区国科温州第二幼儿园”的园所信息问答助手。
@@ -44,73 +45,19 @@ export async function POST(request: Request) {
   const photos = wantsPhotoResults(message) ? search.photos : [];
   const uniqueSources = Array.from(new Set(sources)).slice(0, 5);
 
-  if (search.chunks.length >= 2 || photos.length >= 3) {
-    return NextResponse.json({
-      reply: `${fallbackReply(context, sources)}${photos.length ? "\n\n页面下方已为你匹配相关照片，可以直接点开查看。" : ""}`,
-      provider: "database",
-      photos,
-      sources: uniqueSources,
-    });
-  }
+  const reply = await generateDeepSeekReply({
+    apiKey: process.env.DEEPSEEK_API_KEY,
+    apiUrl: process.env.DEEPSEEK_API_URL ?? "https://api.deepseek.com/chat/completions",
+    systemPrompt,
+    context,
+    history: body.history ?? [],
+    message,
+  });
 
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  const apiUrl = process.env.DEEPSEEK_API_URL ?? "https://api.deepseek.com/chat/completions";
-
-  if (!apiKey) {
-    return NextResponse.json({
-      reply: fallbackReply(context, sources),
-      provider: "fallback",
-      photos,
-      sources: uniqueSources,
-    });
-  }
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8500);
-
-  try {
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "deepseek-chat",
-        messages: [
-          { role: "system", content: systemPrompt },
-          {
-            role: "system",
-            content: context ? `资料库检索内容如下：\n${context.slice(0, 8000)}` : "资料库检索内容：未找到直接相关资料。",
-          },
-          ...(body.history ?? []).slice(-6),
-          { role: "user", content: message },
-        ],
-        temperature: 0.2,
-        max_tokens: 900,
-      }),
-    });
-
-    if (!response.ok) throw new Error(`DeepSeek request failed: ${response.status}`);
-
-    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const reply = data.choices?.[0]?.message?.content?.trim();
-    clearTimeout(timeout);
-
-    return NextResponse.json({
-      reply: reply || fallbackReply(context, sources),
-      provider: "deepseek",
-      photos,
-      sources: uniqueSources,
-    });
-  } catch {
-    clearTimeout(timeout);
-    return NextResponse.json({
-      reply: fallbackReply(context, sources),
-      provider: "fallback",
-      photos,
-      sources: uniqueSources,
-    });
-  }
+  return NextResponse.json({
+    reply: reply ?? fallbackReply(context, sources),
+    provider: reply ? "deepseek" : "fallback",
+    photos,
+    sources: uniqueSources,
+  });
 }
