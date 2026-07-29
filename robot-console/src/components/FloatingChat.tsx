@@ -2,11 +2,13 @@
 
 import Image from "next/image";
 import { FormEvent, useMemo, useState } from "react";
-import { Bot, CornerDownLeft, MessageCircle, Minus, Sparkles } from "lucide-react";
+import { ArrowUpRight, Bot, CornerDownLeft, MessageCircle, Minus, Sparkles } from "lucide-react";
+import type { ScienceLabLink } from "@/lib/science-lab-links";
 import type { ConversationMessage } from "@/lib/types";
 
 type ChatMessage = ConversationMessage & {
   photos?: Array<{ id: string; title: string; url: string; description?: string | null }>;
+  labLinks?: ScienceLabLink[];
 };
 
 const starters = [
@@ -45,6 +47,7 @@ export function FloatingChat() {
       const data = (await response.json()) as {
         reply?: string;
         photos?: Array<{ id: string; title: string; url: string; description?: string | null }>;
+        labLinks?: ScienceLabLink[];
       };
 
       setMessages((current) => [
@@ -53,6 +56,7 @@ export function FloatingChat() {
           role: "assistant",
           content: data.reply ?? "暂时没有拿到回复，请稍后再试。",
           photos: data.photos,
+          labLinks: data.labLinks,
         },
       ]);
     } catch {
@@ -97,6 +101,20 @@ export function FloatingChat() {
                         <a className="group block overflow-hidden rounded-[8px] border border-white/40 bg-white" href={photo.url} key={photo.id} target="_blank" rel="noreferrer">
                           <Image alt={photo.title} className="h-24 w-full object-cover transition group-hover:scale-105" height={96} src={photo.url} width={180} />
                           <span className="block truncate px-2 py-1 text-xs text-[#36575b]">{photo.title}</span>
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
+                  {message.labLinks?.length ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {message.labLinks.map((link) => (
+                        <a
+                          className="inline-flex max-w-full items-center gap-1 rounded-[8px] border border-[#a8c9c1] bg-[#eef8f5] px-2.5 py-1.5 text-xs font-medium text-[#176b5d] transition hover:border-[#176b5d] hover:bg-[#dff1ec]"
+                          href={link.href}
+                          key={link.id}
+                        >
+                          <span className="truncate">查看《{link.title}》</span>
+                          <ArrowUpRight aria-hidden="true" size={14} />
                         </a>
                       ))}
                     </div>

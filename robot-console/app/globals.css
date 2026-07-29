@@ -1674,6 +1674,33 @@ img {
   color: #fff;
 }
 
+.pet-message__lab-links {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.pet-message__lab-link {
+  display: block;
+  overflow: hidden;
+  border: 1px solid #b4d7ce;
+  border-radius: 8px;
+  background: #fff;
+  padding: 7px 8px;
+  color: #176b5d;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pet-message__lab-link:hover {
+  border-color: #176b5d;
+  background: #e3f3ee;
+}
+
 .pet-message__photos {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

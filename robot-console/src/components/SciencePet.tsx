@@ -4,6 +4,7 @@ import Image from "next/image";
 import { AnimatePresence, motion } from "motion/react";
 import { Mic, Send, X } from "lucide-react";
 import { GardenSeal } from "@/components/GardenSeal";
+import type { ScienceLabLink } from "@/lib/science-lab-links";
 import Markdown from "react-markdown";
 import {
   useEffect,
@@ -26,6 +27,7 @@ type PetMessage = {
   role: "user" | "assistant";
   text: string;
   photos?: PetPhoto[];
+  labLinks?: ScienceLabLink[];
 };
 
 type PetPosition = {
@@ -300,6 +302,7 @@ export function SciencePet() {
       const data = (await response.json()) as {
         reply?: string;
         photos?: PetPhoto[];
+        labLinks?: ScienceLabLink[];
       };
       setMessages((current) => [
         ...current,
@@ -308,6 +311,7 @@ export function SciencePet() {
           role: "assistant",
           text: data.reply?.trim() || "资料库暂时没有返回内容，请换个问法试试。",
           photos: data.photos,
+          labLinks: data.labLinks,
         },
       ]);
     } catch {
@@ -563,6 +567,15 @@ export function SciencePet() {
                             <Image alt={photo.title} fill sizes="132px" src={photo.url} />
                           </span>
                           <span>{photo.title}</span>
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
+                  {message.labLinks?.length ? (
+                    <div className="pet-message__lab-links">
+                      {message.labLinks.map((link) => (
+                        <a className="pet-message__lab-link" href={link.href} key={link.id}>
+                          查看《{link.title}》
                         </a>
                       ))}
                     </div>
