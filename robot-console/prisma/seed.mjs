@@ -95,6 +95,18 @@ function cleanText(text) {
     .trim();
 }
 
+function cleanDocumentDisplayText(text) {
+  const displaySuffix = String.raw`(?:\(\s*(?:\d+|定稿)\s*\)|（\s*(?:\d+|定稿)\s*）)`;
+  const terminalSuffixPattern = new RegExp(`(?:\\s*${displaySuffix})+\\s*$`, "u");
+  const quotedSuffixPattern = new RegExp(`(?:\\s*${displaySuffix})+(?=\\s*》)`, "gu");
+
+  return text
+    .replace(quotedSuffixPattern, "")
+    .split("\n")
+    .map((line) => line.replace(terminalSuffixPattern, "").trimEnd())
+    .join("\n");
+}
+
 function extractReadableTextFromBinary(filePath) {
   const buffer = fs.readFileSync(filePath);
   const candidates = [buffer.toString("utf16le"), buffer.toString("latin1"), buffer.toString("utf8")];
@@ -195,11 +207,11 @@ async function upsertDocumentFromFile(file) {
   const stat = fs.statSync(filePath);
   if (!stat.isFile()) return null;
 
-  const title = path.parse(file).name;
+  const title = cleanDocumentDisplayText(path.parse(file).name);
   const fileType = path.extname(file).replace(".", "").toLowerCase() || "file";
-  const content = await readDocumentText(filePath, file);
+  const content = cleanDocumentDisplayText(await readDocumentText(filePath, file));
   const category = categoryFor(file);
-  const summary = cleanText(content).slice(0, 420) || `${title} 资料索引`;
+  const summary = cleanDocumentDisplayText(cleanText(content).slice(0, 420)) || `${title} 资料索引`;
 
   const existingDocument = await prisma.knowledgeDocument.findFirst({ where: { sourcePath: file } });
   const document = existingDocument

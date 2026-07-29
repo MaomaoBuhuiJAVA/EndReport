@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { cleanDocumentText, cleanDocumentTitle } from "@/lib/document-text";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
@@ -161,16 +162,16 @@ export function SchoolPortal({ data, initialUser }: Props) {
 
   async function openDocument(doc: SiteData["documents"][number]) {
     setActiveDoc(doc);
-    setDocContent(doc.summary);
+    setDocContent(cleanDocumentText(doc.summary));
     setDocLoading(true);
 
     try {
       const response = await fetch(`/api/documents/${doc.id}`);
       const payload = (await response.json()) as { document?: { content?: string }; error?: string };
       if (!response.ok) throw new Error(payload.error ?? "load failed");
-      setDocContent(payload.document?.content?.trim() || doc.summary);
+      setDocContent(cleanDocumentText(payload.document?.content?.trim() || doc.summary));
     } catch {
-      setDocContent(`${doc.summary}\n\n资料正文暂时无法读取，请稍后重试。`);
+      setDocContent(`${cleanDocumentText(doc.summary)}\n\n资料正文暂时无法读取，请稍后重试。`);
     } finally {
       setDocLoading(false);
     }
@@ -422,8 +423,8 @@ export function SchoolPortal({ data, initialUser }: Props) {
                   <Badge className="rounded-[8px] bg-[#e9f2ed] text-[#1f6f62]" variant="secondary">
                     {categoryCopy[doc.category] ?? doc.category}
                   </Badge>
-                  <h3 className="mt-4 font-semibold text-[#253834]">{doc.title}</h3>
-                  <p className="mt-2 line-clamp-4 text-sm leading-7 text-[#64736f]">{doc.summary}</p>
+                  <h3 className="mt-4 font-semibold text-[#253834]">{cleanDocumentTitle(doc.title)}</h3>
+                  <p className="mt-2 line-clamp-4 text-sm leading-7 text-[#64736f]">{cleanDocumentText(doc.summary)}</p>
                 </button>
               ))}
             </div>
@@ -452,8 +453,8 @@ export function SchoolPortal({ data, initialUser }: Props) {
                 <Badge className="w-fit rounded-[8px] bg-[#e9f2ed] text-[#1f6f62]" variant="secondary">
                   {categoryCopy[activeDoc.category] ?? activeDoc.category}
                 </Badge>
-                <DialogTitle className="mt-3 text-2xl">{activeDoc.title}</DialogTitle>
-                <DialogDescription>{activeDoc.summary}</DialogDescription>
+                <DialogTitle className="mt-3 text-2xl">{cleanDocumentTitle(activeDoc.title)}</DialogTitle>
+                <DialogDescription>{cleanDocumentText(activeDoc.summary)}</DialogDescription>
               </DialogHeader>
               {docLoading ? <p className="rounded-[8px] bg-[#f7f3ea] px-4 py-3 text-sm text-[#64736f]">正在读取资料正文...</p> : null}
               <p className="whitespace-pre-wrap text-sm leading-8 text-[#4d625d]">{docContent}</p>

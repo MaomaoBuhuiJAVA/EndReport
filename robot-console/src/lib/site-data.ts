@@ -1,5 +1,6 @@
 import campusManifest from "@/data/gallery-manifest.json";
 import roomManifest from "@/data/room-manifest.json";
+import { cleanDocumentText, cleanDocumentTitle } from "@/lib/document-text";
 import { prisma } from "@/lib/prisma";
 
 export type SiteData = {
@@ -79,9 +80,9 @@ export async function getSiteData(viewerRole?: "USER" | "ADMIN"): Promise<SiteDa
       rooms,
       documents: documents.map((document) => ({
         id: document.id,
-        title: document.title,
+        title: cleanDocumentTitle(document.title),
         category: document.category.toString(),
-        summary: document.summary || document.content.slice(0, 900),
+        summary: cleanDocumentText(document.summary || document.content.slice(0, 900)),
       })),
       devices: devices.map((device) =>
         isAdmin

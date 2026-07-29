@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cleanDocumentText, cleanDocumentTitle } from "@/lib/document-text";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(
@@ -27,6 +28,9 @@ export async function GET(
   return NextResponse.json({
     document: {
       ...document,
+      title: cleanDocumentTitle(document.title),
+      summary: document.summary ? cleanDocumentText(document.summary) : document.summary,
+      content: cleanDocumentText(document.content),
       category: document.category.toString(),
       updatedAt: document.updatedAt.toISOString(),
     },
