@@ -1,51 +1,41 @@
-# DeepSeek Conversational RAG Design
+# DeepSeek 对话式资料检索设计
 
-## Goal
+## 目标
 
-Make the school assistant answer naturally with DeepSeek while retaining the
-existing knowledge search, source citations, photo results, access filtering,
-and fallback behavior.
+在保留现有资料检索、来源标注、图片匹配、访问限制和兜底回复的基础上，
+让园所智能体通过 DeepSeek 生成自然、连贯的对话回答。
 
-## Request Flow
+## 请求流程
 
-1. Validate the incoming message and retain the recent conversation history.
-2. Run the existing `searchKnowledge` lookup for every request.
-3. Build a bounded context from the matched knowledge chunks and source titles.
-4. Send the system instructions, retrieved context, recent history, and current
-   message to DeepSeek for every valid request, including requests with multiple
-   matching documents.
-5. Return the generated reply together with the existing `sources` and optional
-   `photos` payloads so both chat entry points keep their current behavior.
-6. If the model call times out, returns an invalid response, or the model is not
-   configured, return the existing database-derived fallback reply.
+1. 校验用户消息，并保留最近的对话历史。
+2. 每次提问都执行现有的 `searchKnowledge` 资料检索。
+3. 从匹配的知识分块和资料标题中构建长度受控的上下文。
+4. 无论资料命中数量多少，都将系统规则、检索上下文、近期历史和当前问题
+   一并发送给 DeepSeek。
+5. 返回模型生成的回复，同时保留现有的 `sources` 和可选 `photos` 数据，
+   使两个现有聊天入口继续保持原有功能。
+6. 当模型调用超时、返回无效结果或未配置模型时，继续返回现有的资料库兜底回复。
 
-## Model Contract
+## 模型约束
 
-- The API key remains server-side in `DEEPSEEK_API_KEY` and is never exposed to
-  the browser.
-- `DEEPSEEK_API_URL` remains configurable and keeps the current DeepSeek chat
-  completions endpoint as its default.
-- The model must treat retrieved material as the authoritative source for school
-  facts. When no supporting material exists, it can still converse naturally but
-  must say that the knowledge base has no confirmed information for that point.
-- Existing rules that exclude private device status, monitoring, logs, and
-  control details for ordinary users remain in force.
+- API 密钥仅通过服务端环境变量 `DEEPSEEK_API_KEY` 使用，不会发送到浏览器。
+- `DEEPSEEK_API_URL` 保持可配置，默认仍使用现有的 DeepSeek 对话接口。
+- 对园所事实，模型必须以检索到的资料为准；没有支持资料时，仍可自然对话，
+  但须明确说明资料库没有可确认的信息。
+- 现有面向普通用户的限制继续有效：不返回设备状态、实时监控、日志和控制细节。
 
-## Code Boundaries
+## 代码边界
 
-- Extract DeepSeek request construction and response parsing into a focused
-  server helper so the route remains responsible for HTTP validation and payload
-  formatting.
-- Keep `searchKnowledge`, `wantsPhotoResults`, `FloatingChat`, and `SciencePet`
-  contracts unchanged.
-- Preserve the current response shape: `reply`, `provider`, `photos`, and
-  `sources`.
+- 将 DeepSeek 请求构建和响应解析提取为独立的服务端辅助函数；路由只负责
+  HTTP 参数校验和响应格式化。
+- `searchKnowledge`、`wantsPhotoResults`、`FloatingChat` 和 `SciencePet` 的
+  既有调用方式不变。
+- 保持当前响应结构：`reply`、`provider`、`photos` 和 `sources`。
 
-## Verification
+## 验证
 
-- Add focused tests for a multi-result query reaching the model, source/photo
-  preservation, and fallback behavior on a failed model request.
-- Run the test suite, lint, and production build.
-- Configure the provided key in Vercel production and preview environments,
-  deploy, and verify an online multi-result question produces `provider:
-  "deepseek"` while retaining sources.
+- 为“多条资料命中仍调用模型”“资料来源与图片保持返回”“模型请求失败后兜底”
+  添加针对性测试。
+- 运行测试、Lint 和生产构建。
+- 将提供的密钥配置到 Vercel 的生产和预览环境，部署后验证：多资料命中问题
+  返回的 `provider` 为 `deepseek`，并仍保留资料来源。
