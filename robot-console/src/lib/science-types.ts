@@ -1,38 +1,28 @@
-export const SCIENCE_SEMESTERS = [
-  "全部学期",
-  "小班上册",
-  "小班下册",
-  "中班上册",
-  "中班下册",
-  "大班上册",
-  "大班下册",
-] as const;
-
 export const SCIENCE_CATEGORIES = [
-  "全部内容",
   "科学诗",
   "科学故事",
-  "科学实验（教师版）",
-  "科学实验（家长版）",
+  "科学实验",
 ] as const;
 
+export const SCIENCE_AGE_GROUPS = ["托班", "小班", "中班", "大班"] as const;
+
 export const SCIENCE_RESOURCE_TYPES = [
-  "全部资源",
   "图片资源",
   "教案资源",
   "视频资源",
+  "文档资源",
 ] as const;
 
-export type ScienceSemester = (typeof SCIENCE_SEMESTERS)[number];
 export type ScienceCategory = (typeof SCIENCE_CATEGORIES)[number];
 export type ScienceResourceType = (typeof SCIENCE_RESOURCE_TYPES)[number];
 
 export interface ScienceResource {
   id: string;
-  type: Exclude<ScienceResourceType, "全部资源">;
+  type: ScienceResourceType;
   knowledgeBaseId: string;
   semester: string;
   title: string;
+  filePath: string;
   publicPath: string;
   externalUrl: string;
   source: string;
@@ -43,7 +33,7 @@ export interface ScienceKnowledgeSummary {
   id: string;
   baseId: string;
   semester: string;
-  category: Exclude<ScienceCategory, "全部内容">;
+  category: ScienceCategory;
   title: string;
   ageLabel: string;
   topic: string;

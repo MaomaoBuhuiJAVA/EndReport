@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "motion/react";
 import {
   ArrowRight,
   BookOpen,
+  Clapperboard,
   ExternalLink,
   FileText,
   FlaskConical,
@@ -28,20 +29,20 @@ import {
 } from "react";
 import { GooeyNav, type GooeyNavItem } from "@/components/GooeyNav";
 import { MobileAppNav, type MobileAppNavItem } from "@/components/MobileAppNav";
-import { PillNav } from "@/components/PillNav";
 import { RotatingText } from "@/components/RotatingText";
 import { SciencePet } from "@/components/SciencePet";
-import { findScienceSummaryFromSearch } from "@/lib/science-lab-links";
 import {
-  SCIENCE_CATEGORIES,
-  SCIENCE_RESOURCE_TYPES,
-  SCIENCE_SEMESTERS,
-  type ScienceCategory,
   type ScienceKnowledgeItem,
   type ScienceKnowledgeSummary,
-  type ScienceResourceType,
-  type ScienceSemester,
 } from "@/lib/science-types";
+import {
+  availableAges,
+  availableTopics,
+  availableTypes,
+  filterScienceItems,
+  normalizeScienceSelection,
+  type ScienceSelection,
+} from "@/lib/science-navigation";
 
 const labNavItems: GooeyNavItem[] = [
   { key: "overview", label: "园所首页", href: "/" },
@@ -73,6 +74,84 @@ function ResourceIcon({ type }: { type: string }) {
   return <FileText size={14} />;
 }
 
+const categoryVisuals = {
+  科学诗: {
+    icon: BookOpen,
+    image: "/lab-category-buttons/poetry.png",
+  },
+  科学故事: {
+    icon: Clapperboard,
+    image: "/lab-category-buttons/story.png",
+  },
+  科学实验: {
+    icon: FlaskConical,
+    image: "/lab-category-buttons/experiment.png",
+  },
+} as const;
+
+function CompactFilterRow({
+  label,
+  items,
+  value,
+  onChange,
+  counts,
+}: {
+  label: string;
+  items: readonly string[];
+  value: string;
+  onChange: (value: string) => void;
+  counts?: ReadonlyMap<string, number>;
+}) {
+  const rowClassName =
+    label === "类型"
+      ? "compact-filter-row compact-filter-row--type"
+      : label === "主题"
+        ? "compact-filter-row compact-filter-row--topic"
+        : "compact-filter-row";
+
+  return (
+    <div className={rowClassName}>
+      <span className="compact-filter-row__label">{label}</span>
+      <div className="compact-filter-row__choices" role="radiogroup" aria-label={`选择${label}`}>
+        {items.map((item) => {
+          const categoryVisual =
+            label === "类型" ? categoryVisuals[item as keyof typeof categoryVisuals] : null;
+          const Icon = categoryVisual?.icon;
+          const count = counts?.get(item);
+
+          return (
+            <button
+              key={item}
+              type="button"
+              className={`compact-filter-choice${value === item ? " is-active" : ""}${label === "年龄段" ? " is-age" : ""}${categoryVisual ? " is-type" : ""}`}
+              role="radio"
+              aria-checked={value === item}
+              aria-label={categoryVisual ? item : undefined}
+              onClick={() => onChange(item)}
+              title={categoryVisual ? item : undefined}
+            >
+              {categoryVisual ? (
+                <Image
+                  className="compact-filter-choice__illustration"
+                  src={categoryVisual.image}
+                  alt=""
+                  width={56}
+                  height={56}
+                  sizes="56px"
+                  aria-hidden="true"
+                />
+              ) : null}
+              {Icon ? <Icon size={18} strokeWidth={2.25} aria-hidden="true" /> : null}
+              <span className={categoryVisual ? "compact-filter-choice__label" : undefined}>{item}</span>
+              {typeof count === "number" ? <small>{count}</small> : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function publicImages(item: ScienceKnowledgeSummary) {
   return item.resources.filter(
     (resource) => resource.type === "图片资源" && resource.isPublic && resource.publicPath,
@@ -100,10 +179,16 @@ function KnowledgeCard({
           />
         ) : (
           <span className="knowledge-card__placeholder" aria-hidden="true">
-            {item.category === "科学诗" ? <BookOpen size={34} /> : <FlaskConical size={34} />}
+            {item.category === "科学诗" ? (
+              <BookOpen size={34} />
+            ) : item.category === "科学故事" ? (
+              <Clapperboard size={34} />
+            ) : (
+              <FlaskConical size={34} />
+            )}
           </span>
         )}
-        <span className="knowledge-card__semester">{item.semester}</span>
+        <span className="knowledge-card__semester">{item.ageLabel}</span>
       </span>
       <span className="knowledge-card__body">
         <span className="knowledge-card__category">{item.category}</span>
@@ -183,7 +268,7 @@ function KnowledgeDetail({
         <header className="knowledge-detail__header">
           <div>
             <span>
-              {display.semester} · {display.category}
+              {display.category} · {display.topic} · {display.ageLabel}
             </span>
             <h2 id="knowledge-detail-title">{display.title}</h2>
           </div>
@@ -224,9 +309,14 @@ function KnowledgeDetail({
           {videoUrl ? (
             <a className="video-link" href={videoUrl} target="_blank" rel="noreferrer">
               <PlayCircle size={19} />
-              播放实验视频
+              播放视频
               <ExternalLink size={15} />
             </a>
+          ) : display.resources.some((resource) => resource.type === "视频资源") ? (
+            <div className="video-source-note">
+              <PlayCircle size={18} />
+              <span>视频素材已归档：{display.resources.find((resource) => resource.type === "视频资源")?.source}</span>
+            </div>
           ) : null}
 
           {loading ? (
@@ -247,20 +337,22 @@ function KnowledgeDetail({
 
 export function ScienceLab({
   initialItems,
+  initialResourceId,
 }: {
   initialItems: ScienceKnowledgeSummary[];
+  initialResourceId?: string;
 }) {
-  const [semester, setSemester] = useState<ScienceSemester>("全部学期");
-  const [category, setCategory] = useState<ScienceCategory>("全部内容");
-  const [resourceType, setResourceType] = useState<ScienceResourceType>("全部资源");
+  const [selection, setSelection] = useState<ScienceSelection>(() =>
+    normalizeScienceSelection(initialItems, { category: "科学诗", topic: "", ageLabel: "" }),
+  );
   const [query, setQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(12);
   const [selectedSummary, setSelectedSummary] = useState<ScienceKnowledgeSummary | null>(null);
   const [selectedItem, setSelectedItem] = useState<ScienceKnowledgeItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [heroIndex, setHeroIndex] = useState(0);
-  const openedFromUrlRef = useRef<string | null>(null);
-  const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase("zh-CN"));
+  const autoOpenedResourceId = useRef<string | null>(null);
+  const deferredQuery = useDeferredValue(query);
 
   useLayoutEffect(() => {
     window.scrollTo(0, 0);
@@ -274,36 +366,48 @@ export function ScienceLab({
     return () => window.clearInterval(timer);
   }, []);
 
-  const filtered = useMemo(
+  const categories = useMemo(() => availableTypes(initialItems), [initialItems]);
+  const topics = useMemo(
+    () => availableTopics(initialItems, selection.category),
+    [initialItems, selection.category],
+  );
+  const ages = useMemo(
+    () => availableAges(initialItems, selection.category, selection.topic),
+    [initialItems, selection.category, selection.topic],
+  );
+  const ageCounts = useMemo(
     () =>
-      initialItems.filter((item) => {
-        if (semester !== "全部学期" && item.semester !== semester) return false;
-        if (category !== "全部内容" && item.category !== category) return false;
-        if (resourceType !== "全部资源" && !item.resourceTypes.includes(resourceType)) {
-          return false;
-        }
-        if (!deferredQuery) return true;
-
-        return [item.title, item.author, item.topic, item.excerpt, ...item.tags]
-          .join(" ")
-          .toLocaleLowerCase("zh-CN")
-          .includes(deferredQuery);
-      }),
-    [category, deferredQuery, initialItems, resourceType, semester],
+      new Map(
+        ages.map((age) => [
+          age,
+          initialItems.filter(
+            (item) =>
+              item.category === selection.category &&
+              item.topic === selection.topic &&
+              item.ageLabel === age,
+          ).length,
+        ]),
+      ),
+    [ages, initialItems, selection.category, selection.topic],
   );
 
-  function changeSemester(value: ScienceSemester) {
-    setSemester(value);
+  const filtered = useMemo(
+    () => filterScienceItems(initialItems, { ...selection, query: deferredQuery }),
+    [deferredQuery, initialItems, selection],
+  );
+
+  function changeCategory(category: string) {
+    setSelection(normalizeScienceSelection(initialItems, { category, topic: "", ageLabel: "" }));
     setVisibleCount(12);
   }
 
-  function changeCategory(value: ScienceCategory) {
-    setCategory(value);
+  function changeTopic(topic: string) {
+    setSelection(normalizeScienceSelection(initialItems, { ...selection, topic, ageLabel: "" }));
     setVisibleCount(12);
   }
 
-  function changeResourceType(value: ScienceResourceType) {
-    setResourceType(value);
+  function changeAge(ageLabel: string) {
+    setSelection({ ...selection, ageLabel });
     setVisibleCount(12);
   }
 
@@ -333,12 +437,14 @@ export function ScienceLab({
   }, []);
 
   useEffect(() => {
-    const summary = findScienceSummaryFromSearch(window.location.search, initialItems);
-    if (!summary || openedFromUrlRef.current === summary.id) return;
+    if (!initialResourceId || autoOpenedResourceId.current === initialResourceId) return;
 
-    openedFromUrlRef.current = summary.id;
+    const summary = initialItems.find((item) => item.id === initialResourceId);
+    if (!summary) return;
+
+    autoOpenedResourceId.current = initialResourceId;
     void openDetail(summary);
-  }, [initialItems, openDetail]);
+  }, [initialItems, initialResourceId, openDetail]);
 
   return (
     <div className="lab-page">
@@ -426,23 +532,24 @@ export function ScienceLab({
 
         <section className="lab-shell lab-content">
           <div className="filter-panel">
-            <PillNav
-              label="学期"
-              items={SCIENCE_SEMESTERS}
-              value={semester}
-              onChange={changeSemester}
-            />
-            <PillNav
-              label="内容"
-              items={SCIENCE_CATEGORIES}
-              value={category}
+            <CompactFilterRow
+              label="类型"
+              items={categories}
+              value={selection.category}
               onChange={changeCategory}
             />
-            <PillNav
-              label="资源"
-              items={SCIENCE_RESOURCE_TYPES}
-              value={resourceType}
-              onChange={changeResourceType}
+            <CompactFilterRow
+              label="主题"
+              items={topics}
+              value={selection.topic}
+              onChange={changeTopic}
+            />
+            <CompactFilterRow
+              label="年龄段"
+              items={ages}
+              value={selection.ageLabel}
+              onChange={changeAge}
+              counts={ageCounts}
             />
           </div>
 
@@ -451,7 +558,7 @@ export function ScienceLab({
               <strong>{filtered.length}</strong>
               <span> 条匹配资料</span>
             </div>
-            <span>资料来自国科二幼园本知识库</span>
+            <span>{selection.category} / {selection.topic} / {selection.ageLabel}</span>
           </div>
 
           {filtered.length ? (

@@ -6,7 +6,7 @@ import { searchKnowledge, wantsPhotoResults } from "@/lib/search";
 
 const systemPrompt = `你是“龙湾区国科温州第二幼儿园”的园所信息问答助手。
 回答规则：
-1. 优先依据园所资料库与科小贝实验室中的科学诗、教师实验、家庭实验内容回答。
+1. 优先依据园所资料库与科小贝资源库中的科学诗、科学故事、科学实验内容回答。
 2. 如果资料库没有明确内容，不要编造，请说明“资料库暂未收录明确内容”。
 3. 回答要适合家长、访客和教师阅读，简洁、温和、可信。
 4. 当用户问功能室、空间、环境、有没有照片、图片、参观等内容时，提醒用户可以查看下方相关照片。
@@ -14,7 +14,7 @@ const systemPrompt = `你是“龙湾区国科温州第二幼儿园”的园所�
 
 function fallbackReply(context: string, sources: string[]) {
   if (!context) {
-    return "资料库暂未检索到明确内容。你可以问我科学诗、亲子实验、教师教案、园所概览、功能室、荣誉资质或云宝简介。";
+    return "资料库暂未检索到明确内容。你可以问我科学诗、科学故事、实验教案、园所概览、功能室、荣誉资质或云宝简介。";
   }
 
   const sourceText = sources.length ? `\n\n参考资料：${Array.from(new Set(sources)).slice(0, 4).join("、")}` : "";

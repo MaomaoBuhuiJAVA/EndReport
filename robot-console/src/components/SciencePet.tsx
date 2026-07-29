@@ -88,7 +88,7 @@ type PetAnimationState =
 
 type WalkDirection = "left" | "right";
 
-const starters = ["推荐一个亲子实验", "找一首小班科学诗"];
+const starters = ["推荐一个小班科学实验", "找一首小班科学诗"];
 const petWidth = 116;
 const petHeight = 122;
 const viewportMargin = 6;
@@ -124,7 +124,7 @@ export function SciencePet() {
     {
       id: 1,
       role: "assistant",
-      text: "你好，我是科小贝。想找科学诗、实验教案、亲子玩法或园所资料，都可以问我。",
+      text: "你好，我是科小贝。想找科学诗、科学故事、实验教案或园所资料，都可以问我。",
     },
   ]);
   const scrollRef = useRef<HTMLDivElement>(null);

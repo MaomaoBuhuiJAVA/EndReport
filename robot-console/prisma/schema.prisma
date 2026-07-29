@@ -250,6 +250,7 @@ model ScienceKnowledgeItem {
   updatedAt       DateTime @default(now()) @map("updated_at")
 
   @@index([semester, category], map: "knowledge_items_filters_idx")
+  @@index([category, topic, ageLabel], map: "knowledge_items_navigation_idx")
   @@map("knowledge_items")
 }
 

@@ -5,11 +5,19 @@ import { getScienceKnowledgeSummaries } from "@/lib/science-data";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "科小贝实验室 | 龙湾区国科温州第二幼儿园",
-  description: "国科二幼园本科学诗、教师实验与家庭实验资源中心。",
+  title: "科小贝资源库 | 龙湾区国科温州第二幼儿园",
+  description: "国科二幼园本科学诗、科学故事与科学实验资源库。",
 };
 
-export default async function LabPage() {
+export default async function LabPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ item?: string | string[]; resource?: string | string[] }>;
+}) {
+  const { item, resource } = await searchParams;
   const items = await getScienceKnowledgeSummaries();
-  return <ScienceLab initialItems={items} />;
+  const initialResourceId =
+    typeof item === "string" ? item : typeof resource === "string" ? resource : undefined;
+
+  return <ScienceLab initialItems={items} initialResourceId={initialResourceId} />;
 }

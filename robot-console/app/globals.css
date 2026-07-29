@@ -2366,3 +2366,209 @@ img {
     margin-left: 0;
   }
 }
+
+.compact-filter-row {
+  display: grid;
+  min-height: 66px;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid #ebf0ee;
+  padding: 8px 16px;
+}
+
+.compact-filter-row:last-child {
+  border-bottom: 0;
+}
+
+.compact-filter-row__label {
+  color: #71827e;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.compact-filter-row__choices {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  overflow-x: auto;
+  padding: 1px 0;
+  scrollbar-width: none;
+}
+
+.compact-filter-row__choices::-webkit-scrollbar {
+  display: none;
+}
+
+.compact-filter-choice {
+  display: inline-flex;
+  height: 34px;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: #f1f5f3;
+  padding: 0 12px;
+  color: #516663;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease;
+}
+
+.compact-filter-choice__illustration {
+  display: none;
+}
+
+.compact-filter-choice:hover {
+  border-color: #95c9bf;
+  background: #f5fbf9;
+  color: #07524c;
+}
+
+.compact-filter-choice.is-active {
+  border-color: #0c6b63;
+  background: #0c6b63;
+  color: #fff;
+}
+
+.compact-filter-choice.is-age {
+  background: #fff8dc;
+  color: #69500a;
+}
+
+.compact-filter-choice.is-age:hover {
+  border-color: #dfbd49;
+  background: #fff8dc;
+  color: #4b3900;
+}
+
+.compact-filter-choice.is-age.is-active {
+  border-color: #c99f1a;
+  background: #e9bf43;
+  color: #4b3900;
+}
+
+.compact-filter-choice small {
+  display: grid;
+  min-width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #07524c;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.compact-filter-choice.is-active small {
+  background: rgba(255, 255, 255, 0.78);
+  color: #0c6b63;
+}
+
+.video-source-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 18px 0;
+  border-left: 3px solid #e9bf43;
+  background: #fff8dc;
+  padding: 10px 12px;
+  color: #596d68;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.video-source-note svg {
+  flex: none;
+  margin-top: 1px;
+  color: #0c6b63;
+}
+
+@media (max-width: 720px) {
+  .compact-filter-row {
+    min-height: 54px;
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 5px;
+    padding: 9px 12px;
+  }
+
+  .compact-filter-row__label {
+    font-size: 13px;
+  }
+
+  .compact-filter-row__choices {
+    gap: 6px;
+  }
+
+  .compact-filter-row--type {
+    min-height: 86px;
+  }
+
+  .compact-filter-row--type .compact-filter-row__choices {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    overflow: visible;
+  }
+
+  .compact-filter-row--type .compact-filter-choice {
+    width: 100%;
+    height: 68px;
+    min-width: 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1px;
+    border-color: #dcebe5;
+    background: #f7fbf9;
+    padding: 3px 2px;
+  }
+
+  .compact-filter-row--type .compact-filter-choice.is-active {
+    border-color: #0c6b63;
+    background: #e6f4ef;
+    box-shadow: inset 0 0 0 1px rgba(12, 107, 99, 0.1);
+  }
+
+  .compact-filter-row--type .compact-filter-choice > svg {
+    display: none;
+  }
+
+  .compact-filter-row--type .compact-filter-choice__illustration {
+    display: block;
+    width: 42px;
+    height: 42px;
+    object-fit: contain;
+  }
+
+  .compact-filter-row--type .compact-filter-choice__label {
+    display: block;
+    color: #49625d;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  .compact-filter-row--type .compact-filter-choice.is-active .compact-filter-choice__label {
+    color: #07524c;
+  }
+
+  .compact-filter-row--topic .compact-filter-row__choices {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+
+  .compact-filter-choice {
+    height: 31px;
+    padding-inline: 10px;
+    font-size: 12px;
+  }
+}

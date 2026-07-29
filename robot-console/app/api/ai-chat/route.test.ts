@@ -80,6 +80,35 @@ describe("POST /api/ai-chat", () => {
     });
   });
 
+  it("返回命中的科小贝资料 ID，供对话中的详情入口直接打开", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-air-car",
+          documentId: "air-car",
+          title: "空气动力小汽车",
+          document: { title: "科小贝实验室：空气动力小汽车" },
+          content: "用气球驱动小车的科学实验。",
+        },
+        chunk("园所简介", "省二级"),
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue("可以查看空气动力小汽车的实验详情。");
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "推荐一个小班科学实验" }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      labLinks: [{ id: "air-car", title: "空气动力小汽车", href: "/lab?item=air-car" }],
+    });
+  });
+
   it("模型无可用回复时返回资料库兜底", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({
       chunks: [chunk("园所简介", "省二级幼儿园")],

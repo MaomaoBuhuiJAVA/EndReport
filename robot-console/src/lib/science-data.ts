@@ -24,27 +24,9 @@ function cleanKnowledgeName(value: string) {
 }
 
 function normalizeResources(
-  item: Pick<ScienceKnowledgeItem, "id" | "baseId" | "semester" | "title" | "category" | "sourceFile">,
   resources: ScienceResource[],
 ) {
-  const publicResources = resources.filter((resource) => resource.isPublic);
-  const hasGuide = publicResources.some((resource) => resource.type === "教案资源");
-
-  if (item.category === "科学实验（教师版）" && !hasGuide) {
-    publicResources.push({
-      id: item.id + "-GUIDE",
-      type: "教案资源",
-      knowledgeBaseId: item.baseId,
-      semester: item.semester,
-      title: item.title + " - 教师教案",
-      publicPath: "",
-      externalUrl: "",
-      source: item.sourceFile,
-      isPublic: true,
-    });
-  }
-
-  return publicResources;
+  return resources.filter((resource) => resource.isPublic);
 }
 
 function toSummary(item: ScienceKnowledgeItem): ScienceKnowledgeSummary {
@@ -53,7 +35,7 @@ function toSummary(item: ScienceKnowledgeItem): ScienceKnowledgeSummary {
     title: cleanKnowledgeName(item.title),
     sourceFile: cleanKnowledgeName(item.sourceFile),
   };
-  const resources = normalizeResources(normalizedItem, item.resources);
+  const resources = normalizeResources(item.resources);
   return {
     id: item.id,
     baseId: item.baseId,
@@ -76,6 +58,7 @@ function mapResource(resource: {
   knowledgeBaseId: string;
   semester: string;
   title: string;
+  filePath: string;
   publicPath: string;
   externalUrl: string;
   source: string;
@@ -87,6 +70,7 @@ function mapResource(resource: {
     knowledgeBaseId: resource.knowledgeBaseId,
     semester: resource.semester,
     title: cleanKnowledgeName(resource.title),
+    filePath: resource.filePath,
     publicPath: resource.publicPath,
     externalUrl: resource.externalUrl,
     source: resource.source,
@@ -103,7 +87,7 @@ function mapItem(
     title: cleanKnowledgeName(item.title),
     sourceFile: cleanKnowledgeName(item.sourceFile),
   };
-  const normalizedResources = normalizeResources(normalizedItem, resources);
+  const normalizedResources = normalizeResources(resources);
   return {
     ...normalizedItem,
     category: item.category as ScienceKnowledgeItem["category"],
@@ -118,7 +102,7 @@ function normalizeFallbackItem(item: ScienceKnowledgeItem) {
     title: cleanKnowledgeName(item.title),
     sourceFile: cleanKnowledgeName(item.sourceFile),
   };
-  const resources = normalizeResources(normalizedItem, item.resources);
+  const resources = normalizeResources(item.resources);
   return {
     ...normalizedItem,
     resources,
