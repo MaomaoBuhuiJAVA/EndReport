@@ -43,6 +43,7 @@ import {
   normalizeScienceSelection,
   type ScienceSelection,
 } from "@/lib/science-navigation";
+import { orderedExperimentImages } from "@/lib/science-step-images";
 
 const labNavItems: GooeyNavItem[] = [
   { key: "overview", label: "园所首页", href: "/" },
@@ -153,9 +154,7 @@ function CompactFilterRow({
 }
 
 function publicImages(item: ScienceKnowledgeSummary) {
-  return item.resources.filter(
-    (resource) => resource.type === "图片资源" && resource.isPublic && resource.publicPath,
-  );
+  return orderedExperimentImages(item.resources);
 }
 
 function KnowledgeCard({
@@ -288,7 +287,7 @@ function KnowledgeDetail({
             ) : null}
           </div>
 
-          {images.length ? (
+          {images.length && display.category !== "科学实验" ? (
             <div className="knowledge-detail__gallery">
               {images.map((image) => (
                 <figure key={image.id}>
@@ -325,9 +324,34 @@ function KnowledgeDetail({
               正在读取资料正文
             </div>
           ) : (
-            <div className="markdown-content knowledge-detail__content">
-              <Markdown>{item?.body || display.excerpt}</Markdown>
-            </div>
+            <>
+              <div className="markdown-content knowledge-detail__content">
+                <Markdown>{item?.body || display.excerpt}</Markdown>
+              </div>
+
+              {display.category === "科学实验" && images.length ? (
+                <section className="knowledge-detail__steps" aria-labelledby="experiment-step-images">
+                  <h3 id="experiment-step-images">实验步骤图片</h3>
+                  <ol className="knowledge-detail__gallery">
+                    {images.map((image, index) => (
+                      <li key={image.id}>
+                        <figure>
+                          <span className="knowledge-detail__image knowledge-detail__step-image">
+                            <Image
+                              src={image.publicPath}
+                              alt={`实验步骤图片 ${index + 1}：${image.title}`}
+                              fill
+                              sizes="(min-width: 720px) 410px, 90vw"
+                            />
+                          </span>
+                          <figcaption>实验步骤图片 {index + 1}</figcaption>
+                        </figure>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              ) : null}
+            </>
           )}
         </div>
       </motion.article>
@@ -442,8 +466,12 @@ export function ScienceLab({
     const summary = initialItems.find((item) => item.id === initialResourceId);
     if (!summary) return;
 
-    autoOpenedResourceId.current = initialResourceId;
-    void openDetail(summary);
+    const autoOpenTimer = window.setTimeout(() => {
+      autoOpenedResourceId.current = initialResourceId;
+      void openDetail(summary);
+    }, 0);
+
+    return () => window.clearTimeout(autoOpenTimer);
   }, [initialItems, initialResourceId, openDetail]);
 
   return (

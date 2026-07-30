@@ -1413,6 +1413,27 @@ img {
   margin-bottom: 22px;
 }
 
+.knowledge-detail__steps {
+  margin-top: 22px;
+}
+
+.knowledge-detail__steps h3 {
+  margin: 0 0 12px;
+  color: #37544d;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.knowledge-detail__steps .knowledge-detail__gallery {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.knowledge-detail__steps .knowledge-detail__gallery li {
+  margin: 0;
+}
+
 .knowledge-detail__gallery figure {
   margin: 0;
   overflow: hidden;
@@ -1430,6 +1451,10 @@ img {
 
 .knowledge-detail__image img {
   object-fit: cover;
+}
+
+.knowledge-detail__step-image img {
+  object-fit: contain;
 }
 
 .knowledge-detail__gallery figcaption {

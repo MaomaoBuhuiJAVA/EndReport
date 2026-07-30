@@ -44,5 +44,13 @@ test("opens the requested resource in the existing detail dialog", () => {
 
   assert.match(component, /initialResourceId\?:\s*string/);
   assert.match(component, /initialResourceId[\s\S]*initialItems\.find/);
-  assert.match(component, /void openDetail\(summary\)/);
+  assert.match(component, /window\.setTimeout\(\(\) => \{[\s\S]*?void openDetail\(summary\)/);
+  assert.match(component, /window\.clearTimeout\(autoOpenTimer\)/);
+});
+
+test("renders ordered experiment images after the experiment instructions", () => {
+  const component = fs.readFileSync(componentPath, "utf8");
+
+  assert.match(component, /className="markdown-content knowledge-detail__content"[\s\S]*className="knowledge-detail__steps"/);
+  assert.match(component, /className="knowledge-detail__steps"[\s\S]*images\.map/);
 });
