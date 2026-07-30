@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/seed-science-on-build.mjs",
+    "prebuild": "node scripts/seed-science-on-build.mjs && node scripts/seed-qualification-on-build.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

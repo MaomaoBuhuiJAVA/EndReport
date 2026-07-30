@@ -4,8 +4,8 @@ import { createRequire } from "node:module";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import mammoth from "mammoth";
-import WordExtractor from "word-extractor";
 import nextEnv from "@next/env";
+import { extractWordCompatibleText } from "../scripts/wps-document-text.mjs";
 
 const require = createRequire(import.meta.url);
 const XLSX = require("xlsx");
@@ -15,8 +15,6 @@ const root = process.cwd();
 loadEnvConfig(root);
 
 const prisma = new PrismaClient();
-const extractor = new WordExtractor();
-
 const schoolName = "龙湾区国科温州第二幼儿园";
 
 const categoryRules = [
@@ -40,7 +38,7 @@ const structuredKnowledgeDocuments = [
     content: `龙湾区国科温州第二幼儿园，又称国科温州二幼、国科二幼。园所围绕“筑可探之境，润向美童心”的办园表达，强调儿童真实生活、科学探究、审美体验和家园共育。
 园所概览可重点回答：园所名称、办园理念、课程方向、空间环境、资料建设、智慧校园和家园沟通。网页展示的园所概览应以正式、温和、可信的官方网站语气呈现。
 园所资料库目前包含基本情况、省二相关资质资料、教师荣誉与获奖汇总、社团资料、智慧校园发言稿、课程指南与教育纲要、教职工名单索引等。涉及幼儿个人信息的花名册类资料仅建立索引，不公开展开。
-当用户询问“这是什么幼儿园”“国科二幼介绍”“园所概览”“基本情况”“资质”等问题时，可以优先引用本条结构化资料，并结合资料库中的《基本情况》《省二终极》等原始资料。`,
+当用户询问“这是什么幼儿园”“国科二幼介绍”“园所概览”“基本情况”“资质”等问题时，可以优先引用本条结构化资料，并结合资料库中的《基本情况》《国科第二幼儿园省二级评估自评报告》等原始资料。`,
   },
   {
     title: "功能室与空间结构化资料",
@@ -164,15 +162,12 @@ async function readDocumentText(filePath, file) {
     return cleanText(rows.join("\n")).slice(0, 40000);
   }
 
-  if (ext === ".doc") {
-    try {
-      const document = await extractor.extract(filePath);
-      const text = cleanText(document.getBody());
-      if (text.length > 80) return text.slice(0, 30000);
-    } catch {
-      const extracted = extractReadableTextFromBinary(filePath);
-      if (extracted.length > 80) return extracted;
-    }
+  if (ext === ".doc" || ext === ".wps") {
+    const extractedWithWordExtractor = await extractWordCompatibleText(filePath);
+    if (extractedWithWordExtractor.length > 80) return extractedWithWordExtractor;
+
+    const extracted = extractReadableTextFromBinary(filePath);
+    if (extracted.length > 80) return extracted;
   }
 
   if (ext === ".zip") {

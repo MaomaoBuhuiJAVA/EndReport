@@ -20,7 +20,7 @@ const aliases: Record<string, string[]> = {
   云宝: ["机器人", "小陪伴", "智能", "监控", "WASD"],
   社团: ["课程", "活动", "合唱", "摄想", "科创"],
   课程: ["体验式学习", "社团", "指南", "纲要", "学习环境", "0-8岁"],
-  资质: ["省二", "省二终极", "等级", "创建", "基本情况"],
+  资质: ["省二", "省二级评估自评报告", "等级", "创建", "基本情况"],
   科学诗: ["诗歌", "科学童谣", "科学诗库", "自然诗"],
   实验: ["科学实验", "亲子实验", "教师实验", "家庭实验", "实验教案", "实验材料"],
   亲子: ["家长版", "家庭实验", "家园共育", "亲子实验"],
@@ -98,6 +98,22 @@ export function expandKeywords(query: string) {
   }
 
   return Array.from(grams).slice(0, 48);
+}
+
+export function getDatabaseSearchKeywords(query: string) {
+  const expanded = expandKeywords(query);
+  const qualificationPhrases = ["省二级评估", "省二级评估自评报告", "省二级幼儿园"].filter((phrase) => query.includes(phrase));
+
+  return Array.from(new Set([...qualificationPhrases, ...expanded])).slice(0, 12);
+}
+
+export function prioritizeQualificationChunks<T extends { document: { category: string } }>(query: string, chunks: T[]) {
+  if (!/省二|资质|评估|等级/.test(query)) return chunks;
+
+  return [
+    ...chunks.filter((chunk) => chunk.document.category === "QUALIFICATION"),
+    ...chunks.filter((chunk) => chunk.document.category !== "QUALIFICATION"),
+  ];
 }
 
 function scoreText(text: string, keywords: string[]) {
@@ -187,6 +203,7 @@ export function wantsPhotoResults(query: string) {
 
 export async function searchKnowledge(query: string) {
   const keywords = expandKeywords(query);
+  const databaseKeywords = getDatabaseSearchKeywords(query);
 
   if (!keywords.length) {
     return { chunks: [], photos: [] };
@@ -196,17 +213,17 @@ export async function searchKnowledge(query: string) {
 
   try {
     const documentWhere = {
-      OR: keywords.flatMap((word) => [
+        OR: databaseKeywords.flatMap((word) => [
         { title: { contains: word, mode: "insensitive" as const } },
         { summary: { contains: word, mode: "insensitive" as const } },
         { content: { contains: word, mode: "insensitive" as const } },
       ]),
     };
 
-    const [chunkCandidates, documentCandidates, photoCandidates, fallbackPhotos] = await Promise.all([
+    const [chunkCandidates, documentCandidates, photoCandidates, fallbackPhotos, qualificationCandidates] = await Promise.all([
       prisma.knowledgeChunk.findMany({
         where: {
-          OR: keywords.flatMap((word) => [
+          OR: databaseKeywords.flatMap((word) => [
             { title: { contains: word, mode: "insensitive" as const } },
             { content: { contains: word, mode: "insensitive" as const } },
             { keywords: { contains: word, mode: "insensitive" as const } },
@@ -224,7 +241,7 @@ export async function searchKnowledge(query: string) {
       }),
       prisma.mediaAsset.findMany({
         where: {
-          OR: keywords.flatMap((word) => [
+          OR: databaseKeywords.flatMap((word) => [
             { title: { contains: word, mode: "insensitive" as const } },
             { description: { contains: word, mode: "insensitive" as const } },
             { room: { name: { contains: word, mode: "insensitive" as const } } },
@@ -243,9 +260,20 @@ export async function searchKnowledge(query: string) {
             take: 18,
           })
         : Promise.resolve([]),
+      /省二|资质|评估|等级/.test(query)
+        ? prisma.knowledgeDocument.findMany({
+            where: { category: "QUALIFICATION" },
+            orderBy: { updatedAt: "desc" },
+            take: 12,
+            select: { id: true, title: true, category: true, summary: true, content: true },
+          })
+        : Promise.resolve([]),
     ]);
 
-    const documentChunks = documentCandidates.map((document) => ({
+    const documentCandidatesWithQualification = [...documentCandidates, ...qualificationCandidates].filter(
+      (document, index, list) => list.findIndex((candidate) => candidate.id === document.id) === index,
+    );
+    const documentChunks = documentCandidatesWithQualification.map((document) => ({
       id: `doc-${document.id}`,
       documentId: document.id,
       title: document.title,
@@ -255,14 +283,14 @@ export async function searchKnowledge(query: string) {
       document: { title: document.title, category: document.category, summary: document.summary },
     }));
 
-    const chunks = [...chunkCandidates, ...documentChunks, ...science.chunks]
+    const scoredChunks = [...chunkCandidates, ...documentChunks, ...science.chunks]
       .map((chunk) => ({
         ...chunk,
         score: scoreText(`${chunk.title} ${chunk.content} ${chunk.document.title} ${chunk.document.summary}`, keywords) + intentBoost(query, `${chunk.title} ${chunk.content} ${chunk.document.title} ${chunk.document.summary}`),
       }))
       .filter((chunk) => chunk.score > 0)
       .sort((a, b) => b.score - a.score)
-      .slice(0, 12);
+    const chunks = prioritizeQualificationChunks(query, scoredChunks).slice(0, 12);
 
     const photos = [...photoCandidates, ...fallbackPhotos, ...(wantsPhotoResults(query) ? science.photos : [])]
       .filter((photo, index, list) => list.findIndex((item) => item.id === photo.id) === index)
