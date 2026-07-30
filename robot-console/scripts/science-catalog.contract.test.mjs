@@ -35,6 +35,23 @@ test("catalog keeps every activity and image from the experiment material packag
   assert.equal(imageCount, 68);
 });
 
+test("every experiment keeps its playable video link and scannable QR code", () => {
+  const experiments = catalog.filter((item) => item.category === "科学实验");
+  const videoResources = experiments.map((item) =>
+    item.resources.find((resource) => resource.type === "视频资源"),
+  );
+
+  assert.equal(videoResources.length, 21);
+  assert.ok(videoResources.every(Boolean));
+  assert.ok(videoResources.every((resource) => resource.externalUrl.startsWith("http")));
+  assert.ok(videoResources.every((resource) => resource.publicPath.startsWith("/science-assets/video-qr/")));
+  assert.ok(
+    videoResources.every((resource) =>
+      fs.existsSync(path.resolve("public", resource.publicPath.replace(/^\//, ""))),
+    ),
+  );
+});
+
 test("catalog IDs are unique and every item has a source path", () => {
   assert.equal(new Set(catalog.map((item) => item.id)).size, catalog.length);
   assert.ok(catalog.every((item) => item.sourceFile));

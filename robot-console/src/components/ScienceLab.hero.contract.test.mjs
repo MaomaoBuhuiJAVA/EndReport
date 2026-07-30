@@ -54,3 +54,14 @@ test("renders ordered experiment images after the experiment instructions", () =
   assert.match(component, /className="markdown-content knowledge-detail__content"[\s\S]*className="knowledge-detail__steps"/);
   assert.match(component, /className="knowledge-detail__steps"[\s\S]*images\.map/);
 });
+
+test("shows the video link and matching QR code in a resource detail", () => {
+  const component = fs.readFileSync(componentPath, "utf8");
+  const styles = fs.readFileSync(stylesPath, "utf8");
+
+  assert.match(component, /const videoQrCode = videoResource\?\.publicPath/);
+  assert.match(component, /className="video-resource"/);
+  assert.match(component, /className="video-qr-code"/);
+  assert.match(component, /href=\{videoUrl\}/);
+  assert.match(styles, /\.video-qr-code\s*\{/);
+});

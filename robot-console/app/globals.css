@@ -1478,6 +1478,45 @@ img {
   text-decoration: none;
 }
 
+.video-resource {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 6px 0 22px;
+}
+
+.video-resource .video-link {
+  margin: 0;
+}
+
+.video-qr-code {
+  display: grid;
+  width: 144px;
+  flex: 0 0 144px;
+  gap: 6px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  text-decoration: none;
+}
+
+.video-qr-code img {
+  display: block;
+  width: 144px;
+  height: 144px;
+  border: 1px solid var(--line);
+  background: #fff;
+  object-fit: contain;
+}
+
+@media (max-width: 560px) {
+  .video-resource {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .detail-loading {
   display: flex;
   min-height: 180px;

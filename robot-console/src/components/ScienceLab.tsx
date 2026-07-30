@@ -224,9 +224,9 @@ function KnowledgeDetail({
 }) {
   const display = item ?? summary;
   const images = publicImages(display);
-  const videoUrl =
-    item?.videoUrl ||
-    display.resources.find((resource) => resource.type === "视频资源")?.externalUrl;
+  const videoResource = display.resources.find((resource) => resource.type === "视频资源");
+  const videoUrl = item?.videoUrl || videoResource?.externalUrl;
+  const videoQrCode = videoResource?.publicPath;
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -306,11 +306,25 @@ function KnowledgeDetail({
           ) : null}
 
           {videoUrl ? (
-            <a className="video-link" href={videoUrl} target="_blank" rel="noreferrer">
-              <PlayCircle size={19} />
-              播放视频
-              <ExternalLink size={15} />
-            </a>
+            <section className="video-resource" aria-label="实验视频资源">
+              <a className="video-link" href={videoUrl} target="_blank" rel="noreferrer">
+                <PlayCircle size={19} />
+                播放视频
+                <ExternalLink size={15} />
+              </a>
+              {videoQrCode ? (
+                <a
+                  className="video-qr-code"
+                  href={videoUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="扫码打开视频"
+                >
+                  <Image src={videoQrCode} alt="视频二维码" width={144} height={144} sizes="144px" />
+                  <span>扫码观看视频</span>
+                </a>
+              ) : null}
+            </section>
           ) : display.resources.some((resource) => resource.type === "视频资源") ? (
             <div className="video-source-note">
               <PlayCircle size={18} />
