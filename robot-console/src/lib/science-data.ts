@@ -118,9 +118,55 @@ export function mergeScienceKnowledgeSummaries(
   const packagedIds = new Set(packagedItems.map((item) => item.id));
 
   return [
-    ...packagedItems.map((item) => databaseById.get(item.id) ?? item),
+    ...packagedItems.map((item) => {
+      const databaseItem = databaseById.get(item.id);
+      return databaseItem ? mergeScienceKnowledgeRecord(item, databaseItem) : item;
+    }),
     ...databaseItems.filter((item) => !packagedIds.has(item.id)),
   ];
+}
+
+function scienceResourceKey(resource: ScienceResource) {
+  return `${resource.type}:${resource.title.trim().toLocaleLowerCase("zh-CN")}`;
+}
+
+function mergeScienceResources(
+  packagedResources: ScienceResource[],
+  databaseResources: ScienceResource[],
+) {
+  const packagedByKey = new Map(
+    packagedResources.map((resource) => [scienceResourceKey(resource), resource]),
+  );
+  const databaseKeys = new Set(databaseResources.map(scienceResourceKey));
+
+  return [
+    ...databaseResources.map((resource) => {
+      const packagedResource = packagedByKey.get(scienceResourceKey(resource));
+      if (!packagedResource) return resource;
+
+      return {
+        ...packagedResource,
+        ...resource,
+        publicPath: resource.publicPath || packagedResource.publicPath,
+        externalUrl: resource.externalUrl || packagedResource.externalUrl,
+      };
+    }),
+    ...packagedResources.filter((resource) => !databaseKeys.has(scienceResourceKey(resource))),
+  ];
+}
+
+function mergeScienceKnowledgeRecord<T extends ScienceKnowledgeSummary>(
+  packagedItem: T,
+  databaseItem: T,
+): T {
+  const resources = mergeScienceResources(packagedItem.resources, databaseItem.resources);
+
+  return {
+    ...packagedItem,
+    ...databaseItem,
+    resources,
+    resourceTypes: Array.from(new Set(resources.map((resource) => resource.type))),
+  };
 }
 
 function groupResources(resources: ScienceResource[]) {
@@ -183,10 +229,11 @@ export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSu
 }
 
 export async function getScienceKnowledgeItem(id: string): Promise<ScienceKnowledgeItem | null> {
+  const fallback = fallbackItems.find((entry) => entry.id === id);
+
   try {
     const item = await prisma.scienceKnowledgeItem.findUnique({ where: { id } });
     if (!item) {
-      const fallback = fallbackItems.find((entry) => entry.id === id);
       return fallback ? normalizeFallbackItem(fallback) : null;
     }
 
@@ -195,7 +242,7 @@ export async function getScienceKnowledgeItem(id: string): Promise<ScienceKnowle
       orderBy: { sortOrder: "asc" },
     });
 
-    return mapItem(
+    const databaseItem = mapItem(
       {
         id: item.id,
         baseId: item.baseId,
@@ -218,8 +265,15 @@ export async function getScienceKnowledgeItem(id: string): Promise<ScienceKnowle
       },
       resources.map(mapResource),
     );
+
+    if (!fallback) return databaseItem;
+
+    const packagedItem = normalizeFallbackItem(fallback);
+    return {
+      ...mergeScienceKnowledgeRecord(packagedItem, databaseItem),
+      videoUrl: databaseItem.videoUrl || packagedItem.videoUrl,
+    };
   } catch {
-    const fallback = fallbackItems.find((entry) => entry.id === id);
     return fallback ? normalizeFallbackItem(fallback) : null;
   }
 }
