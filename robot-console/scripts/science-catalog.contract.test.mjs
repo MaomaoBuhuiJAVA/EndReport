@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import sharp from "sharp";
 
 const catalogPath = path.resolve("src/data/science-knowledge.json");
 const catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
@@ -37,4 +38,69 @@ test("catalog keeps every activity and image from the experiment material packag
 test("catalog IDs are unique and every item has a source path", () => {
   assert.equal(new Set(catalog.map((item) => item.id)).size, catalog.length);
   assert.ok(catalog.every((item) => item.sourceFile));
+});
+
+function compareNaturalPaths(left, right) {
+  return left.localeCompare(right, "zh-CN", { numeric: true, sensitivity: "base" });
+}
+
+function walkPngFiles(directory) {
+  return fs
+    .readdirSync(directory, { withFileTypes: true })
+    .sort((left, right) => compareNaturalPaths(left.name, right.name))
+    .flatMap((entry) => {
+      const entryPath = path.join(directory, entry.name);
+      return entry.isDirectory() ? walkPngFiles(entryPath) : entry.name.toLowerCase().endsWith(".png") ? [entryPath] : [];
+    });
+}
+
+function imageTitleFromPackage(packageName) {
+  return packageName.match(/《\s*([^》]+?)\s*》/u)?.[1].trim() ?? "";
+}
+
+async function isGalleryImage(filePath) {
+  const { width, height } = await sharp(filePath).metadata();
+  return !(width === height && typeof width === "number" && width >= 290 && width <= 310);
+}
+
+test("accepted source experiment images map to matching catalog records in numeric source order", async () => {
+  const sourceRoot = path.resolve("..", "..", "科学诗、科学故事、科学教案、科学实验");
+  const imageRoot = path.join(sourceRoot, "科学实验图片资源", "科学教案");
+  const imagesByExperiment = new Map();
+
+  for (const imagePath of walkPngFiles(imageRoot)) {
+    if (!(await isGalleryImage(imagePath))) continue;
+
+    const [topic, ageLabel, packageName] = path.relative(imageRoot, imagePath).split(path.sep);
+    const title = imageTitleFromPackage(packageName);
+    assert.ok(title, `experiment image package is missing a quoted title: ${imagePath}`);
+
+    const key = `${topic}\u0000${ageLabel}\u0000${title}`;
+    const files = imagesByExperiment.get(key) ?? [];
+    files.push(path.relative(sourceRoot, imagePath).replaceAll("\\", "/"));
+    imagesByExperiment.set(key, files);
+  }
+
+  for (const [key, expectedPaths] of imagesByExperiment) {
+    const [topic, ageLabel, title] = key.split("\u0000");
+    const matches = catalog.filter(
+      (item) =>
+        item.category === "科学实验" && item.topic === topic && item.ageLabel === ageLabel && item.title === title,
+    );
+    assert.equal(matches.length, 1, `expected exactly one catalog experiment for ${topic}/${ageLabel}/${title}`);
+
+    const imageResources = matches[0].resources.filter(
+      (resource) => resource.type === "图片资源" && resource.isPublic,
+    );
+    assert.deepEqual(
+      imageResources.map((resource) => resource.filePath),
+      expectedPaths,
+      `${title} image resources should retain their source step order`,
+    );
+    assert.deepEqual(
+      imageResources.map((resource) => resource.title),
+      expectedPaths.map((_, index) => `${title} · 图片 ${index + 1}`),
+      `${title} image labels should describe the displayed step order`,
+    );
+  }
 });

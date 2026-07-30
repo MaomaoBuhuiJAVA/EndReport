@@ -20,7 +20,7 @@ const contentRoots = {
 const ageOrder = new Map([["托班", 0], ["小班", 1], ["中班", 2], ["大班", 3]]);
 
 function comparePaths(left, right) {
-  return left.localeCompare(right, "zh-CN");
+  return left.localeCompare(right, "zh-CN", { numeric: true, sensitivity: "base" });
 }
 
 async function walkFiles(directory, acceptedExtension) {
