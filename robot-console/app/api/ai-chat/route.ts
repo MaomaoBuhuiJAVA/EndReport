@@ -4,6 +4,8 @@ import { generateDeepSeekReply } from "@/lib/deepseek";
 import { buildScienceLabLinks } from "@/lib/science-lab-links";
 import { searchKnowledge, wantsPhotoResults } from "@/lib/search";
 
+export const maxDuration = 35;
+
 const knowledgePrompt = `你是“科小贝”，龙湾区国科温州第二幼儿园的幼儿科学教育智能体。
 回答规则：
 1. 优先依据园所资料库与科小贝资源库中的科学诗、科学故事、科学实验内容回答。
@@ -94,6 +96,54 @@ function buildLessonPlanReply(chunk: SearchChunk) {
     "### 四、活动提示",
     "教师应根据幼儿年龄与材料特性进行分组指导，涉及剪切、小部件或液体操作时做好安全提醒。",
   ].join("\n");
+}
+
+function hasMeaningfulActivity(reply: string) {
+  let active = false;
+  let content = "";
+
+  for (const rawLine of reply.replace(/\r/g, "").split("\n")) {
+    const line = rawLine
+      .trim()
+      .replace(/^#{1,6}\s*/u, "")
+      .replace(/^[一二三四五六七八九十\d]+\s*[、.．:：]\s*/u, "")
+      .replace(/\*+/g, "")
+      .trim();
+
+    if (/^(?:活动过程|活动玩法|活动步骤|实验步骤)(?:\s*[:：]\s*(.*))?$/u.test(line)) {
+      active = true;
+      content += line.replace(/^(?:活动过程|活动玩法|活动步骤|实验步骤)\s*[:：]?\s*/u, "");
+      continue;
+    }
+
+    if (active && /^(?:活动目标|活动准备|观察与表达|观察表达|观察与小结|小结与延伸|活动小结|小结|活动提示|延伸与安全提示|安全提示)/u.test(line)) {
+      break;
+    }
+
+    if (active) content += line;
+  }
+
+  return content.replace(/[\s#*_`>\-—:：、，。！？!?()[\]{}]/gu, "").length >= 12;
+}
+
+function buildLessonPlanSupplement(chunk: SearchChunk, modelReply: string) {
+  const hasActivity = hasMeaningfulActivity(modelReply);
+  const sourceReply = buildLessonPlanReply(chunk);
+  const sourceActivity = sourceReply.match(/### 三、活动过程[\s\S]*?(?=\n### 四、活动提示)/u)?.[0] ?? "";
+
+  return [
+    !hasActivity && sourceActivity
+      ? `${sourceActivity}\n\n> 以上为依据现有资料整理的建议组织过程。`
+      : "",
+    "### 观察与小结",
+    "观察要点：关注幼儿是否愿意先猜想、按步骤操作，并能用自己的话描述看到的变化；教师根据幼儿的记录追问“你发现了什么”。",
+    "",
+    "### 活动小结",
+    "引导幼儿把猜想、操作结果和生活经验联系起来，说明本次活动中观察到的核心现象。",
+    "",
+    "### 延伸与安全提示",
+    "将材料投放到科学区继续探索；教师活动前检查材料，幼儿操作时保持适当距离，不接触尖锐、细小或需要加热的物品。",
+  ].filter(Boolean).join("\n");
 }
 
 function hasCompleteLessonPlan(reply: string | null) {
@@ -256,13 +306,13 @@ export async function POST(request: Request) {
     message,
     maxTokens: requestedLessonPlan ? 1600 : undefined,
   });
-  const lessonPlanFallbackChunk = requestedLessonPlan && !hasCompleteLessonPlan(modelReply)
-    ? requestedLessonPlan
-    : null;
-  const usedLessonPlanFallback = Boolean(lessonPlanFallbackChunk);
-  const reply = lessonPlanFallbackChunk
-    ? buildLessonPlanReply(lessonPlanFallbackChunk)
-    : modelReply;
+  const incompleteLessonPlan = requestedLessonPlan && modelReply && !hasCompleteLessonPlan(modelReply);
+  const usedLessonPlanFallback = Boolean(requestedLessonPlan && !modelReply);
+  const reply = incompleteLessonPlan
+    ? `${modelReply.trim()}\n\n${buildLessonPlanSupplement(requestedLessonPlan, modelReply)}`
+    : usedLessonPlanFallback
+      ? buildLessonPlanReply(requestedLessonPlan!)
+      : modelReply;
 
   return NextResponse.json({
     reply: reply ?? fallbackReply(context, sources, message, casualMessage),

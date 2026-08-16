@@ -19,6 +19,8 @@ type DeepSeekResponse = {
   }>;
 };
 
+const DEEPSEEK_REQUEST_TIMEOUT_MS = 30_000;
+
 export async function generateDeepSeekReply({
   apiKey,
   apiUrl,
@@ -32,7 +34,7 @@ export async function generateDeepSeekReply({
   if (!apiKey) return null;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8500);
+  const timeout = setTimeout(() => controller.abort(), DEEPSEEK_REQUEST_TIMEOUT_MS);
 
   try {
     const response = await fetchImpl(apiUrl, {

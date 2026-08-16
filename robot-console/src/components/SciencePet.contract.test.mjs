@@ -9,8 +9,8 @@ const styles = fs.readFileSync(path.resolve("app/globals.css"), "utf8");
 
 test("uses the same 科小贝 chat from the focused home page", () => {
   assert.match(home, /import \{ SciencePet \} from "@\/components\/SciencePet"/);
-  assert.match(home, /new Event\("kexiaobei:open"\)/);
   assert.match(home, /<SciencePet\s*\/>/);
+  assert.doesNotMatch(home, /className="pet-chat"/);
 });
 
 test("keeps the conversation scrollable instead of dropping earlier messages", () => {
@@ -19,21 +19,127 @@ test("keeps the conversation scrollable instead of dropping earlier messages", (
   assert.match(component, /<Link className="pet-message__lab-link" href=\{link\.href\}/);
 });
 
-test("registers the home-page open event before the first interactive paint", () => {
+test("keeps the external home-page open event listener available", () => {
   assert.match(component, /useLayoutEffect\(\(\) => \{[\s\S]*?window\.addEventListener\("kexiaobei:open"/);
   assert.match(component, /__kexiaobeiOpenRequested/);
-  assert.match(home, /__kexiaobeiOpenRequested = true/);
+});
+
+test("anchors the chat window to the draggable pet instead of the viewport", () => {
+  assert.match(styles, /\.pet-chat\s*\{[\s\S]*?position:\s*absolute[\s\S]*?right:\s*calc\(100% \+ 14px\)/);
+  assert.match(styles, /\.science-pet\.is-left \.pet-chat\s*\{[\s\S]*?left:\s*calc\(100% \+ 14px\)/);
+  assert.match(component, /style=\{\{ right: position\.right, bottom: position\.bottom \}\}/);
+  assert.match(component, /setDock\(\{[\s\S]*?left: centerX < window\.innerWidth \/ 2/);
+  assert.match(styles, /\.science-pet\.is-top \.pet-chat\s*\{[\s\S]*?top:\s*calc\(100% \+ 14px\)/);
+});
+
+test("keeps touch dragging available on mobile pointers", () => {
+  assert.match(component, /if \(event\.pointerType === "mouse" && event\.button !== 0\) return;/);
+  assert.match(component, /event\.currentTarget\.setPointerCapture\(event\.pointerId\)/);
+});
+
+test("does not lock the home-page pet away from its inline drag position", () => {
+  const homePetRule = styles.match(/\.home-page \.science-pet\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+  assert.doesNotMatch(homePetRule, /\b(?:position|top|right|left|bottom):[^;]*!important/);
+});
+
+test("keeps the pet position stable during SSR hydration before applying mobile placement", () => {
+  assert.match(component, /const \[position, setPosition\] = useState<PetPosition>\(\{ right: 18, bottom: 10 \}\);/);
+  assert.match(component, /useLayoutEffect\(\(\) => \{\s*if \(window\.innerWidth > 720\) return;[\s\S]*?positionRef\.current = mobilePosition;[\s\S]*?setPosition\(mobilePosition\);/);
+  assert.doesNotMatch(component, /useState<PetPosition>\(\(\) => \{\s*const isMobile = typeof window/);
 });
 
 test("gives the 科小贝 chat a full usable mobile viewport instead of a half-height panel", () => {
-  assert.match(styles, /\.pet-chat\s*\{[\s\S]*?position:\s*fixed[\s\S]*?max-height:\s*min\(640px, calc\(100dvh - 154px\)\)/);
   assert.match(styles, /\.pet-chat__messages\s*\{[\s\S]*?flex:\s*1[\s\S]*?max-height:\s*none/);
-  assert.match(styles, /@media \(max-width: 720px\)\s*\{[\s\S]*?\.pet-chat\s*\{[\s\S]*?bottom:\s*calc\(72px \+ env\(safe-area-inset-bottom\)\)[\s\S]*?height:\s*min\(680px, calc\(100dvh - 84px\)\)/);
-  assert.match(styles, /@media \(max-width: 720px\)\s*\{[\s\S]*?\.pet-chat\s*\{[\s\S]*?width:\s*min\(360px, calc\(100dvw - 24px\)\)/);
+  assert.match(styles, /\.pet-chat\s*\{[\s\S]*?max-height:\s*min\(640px,\s*calc\(100dvh - 154px\)[^;]*;/);
+  assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.pet-chat\s*\{[\s\S]*?height:\s*min\(680px,\s*calc\(100dvh - 84px\)[^;]*;/);
+  assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.pet-chat\s*\{[\s\S]*?width:\s*min\(360px,\s*calc\(100dvw - 24px\)[^;]*;/);
 });
 
 test("keeps generated lesson plans readable inside the chat bubble", () => {
   assert.match(component, /className="pet-message__markdown"/);
   assert.match(styles, /\.pet-message__markdown\s+h1,[\s\S]*?font-size:\s*12px/);
   assert.match(styles, /\.pet-message__markdown\s+ul,[\s\S]*?padding-left:\s*18px/);
+});
+
+test("adds assistant-only copy and Xunfei speech actions without changing user bubbles", () => {
+  assert.match(component, /import \{[^}]*\bCopy\b[^}]*\bVolume2\b[^}]*\} from "lucide-react"/);
+  assert.match(component, /function handleCopyMessage\(/);
+  assert.match(component, /function toggleMessageSpeech\(/);
+  assert.match(
+    component,
+    /\{message\.role === "assistant" \? \([\s\S]*?className="pet-message__actions"[\s\S]*?\) : null\}/,
+  );
+  assert.match(component, /aria-label=\{[^}]*复制回复/);
+  assert.match(component, /aria-label=\{[^}]*播放回复/);
+});
+
+test("keeps phone calls isolated from press-and-hold recognition and cleans up on close", () => {
+  assert.match(component, /\bPhoneCall\b/);
+  assert.match(component, /const callRecognitionRef = useRef<SpeechRecognitionLike \| null>\(null\)/);
+  assert.match(component, /function startVoiceCall\(/);
+  assert.match(component, /const stopAllVoice = useCallback\(/);
+  assert.match(component, /onClick=\{startVoiceCall\}/);
+  assert.match(component, /onClick=\{handleCloseChat\}/);
+  assert.match(component, /disabled=\{busy \|\| callPhase !== "idle"/);
+  assert.match(component, /className="pet-call"/);
+});
+
+test("uses a stable voice cleanup callback when the chat component unmounts", () => {
+  assert.match(component, /const stopAllVoice = useCallback\(/);
+  assert.match(component, /stopAllVoice\(\{ resetUi: false \}\)/);
+  assert.match(component, /\[stopAllVoice\]/);
+});
+
+test("releases a rejected audio play only when that audio is still current", () => {
+  assert.match(component, /let audio: HTMLAudioElement \| null = null;/);
+  assert.match(
+    component,
+    /catch \{\s*const shouldReportPlayFailure = !controller\.signal\.aborted;[\s\S]*?if \(audio && audioRef\.current === audio\) \{\s*stopActiveAudio\(\);\s*\}[\s\S]*?if \(shouldReportPlayFailure\) \{/,
+  );
+});
+
+test("ignores stale recognition callbacks and applies call errors only to the current session", () => {
+  assert.match(
+    component,
+    /function setVoiceCallError\(sessionId: number, message: string\) \{\s*const session = callSessionRef\.current;\s*if \(!isCurrentVoiceCall\(sessionId\)\) return;/,
+  );
+  assert.match(
+    component,
+    /recognition\.onerror = \(event\) => \{\s*if \(callRecognitionRef\.current !== recognition \|\| !isCurrentVoiceCall\(sessionId\)\) return;/,
+  );
+  assert.match(
+    component,
+    /recognition\.onend = \(\) => \{\s*if \(callRecognitionRef\.current !== recognition\) return;\s*callRecognitionRef\.current = null;[\s\S]*?!isCurrentVoiceCall\(sessionId\)/,
+  );
+});
+
+test("buffers final recognition fragments while listening and sends one debounced request", () => {
+  assert.match(component, /const callFinalTranscriptRef = useRef\(""\)/);
+  assert.match(
+    component,
+    /recognition\.onresult = \(event\) => \{\s*if \(callRecognitionRef\.current !== recognition \|\| !isCurrentVoiceCallListening\(sessionId\)\) return;\s*const fragment = extractFinalTranscript\(event\)\.trim\(\);\s*if \(!fragment\) return;\s*callFinalTranscriptRef\.current \+= fragment;/,
+  );
+  assert.match(
+    component,
+    /const transcript = callFinalTranscriptRef\.current\.trim\(\);\s*callFinalTranscriptRef\.current = "";\s*void processVoiceCallTranscript\(transcript, sessionId\);/,
+  );
+  assert.match(component, /const clearCallTimers = useCallback\(\(\) => \{\s*callFinalTranscriptRef\.current = "";/);
+  assert.match(
+    component,
+    /async function processVoiceCallTranscript\(transcript: string, sessionId: number\) \{\s*const session = callSessionRef\.current;\s*if \(!session \|\| !isCurrentVoiceCallListening\(sessionId\)\) return;\s*callFinalTranscriptRef\.current = "";/,
+  );
+});
+
+test("stops active call audio before unmuting into a fresh listening session", () => {
+  assert.match(
+    component,
+    /if \(callMutedRef\.current\) \{\s*stopActiveAudio\(\);\s*clearCallTimers\(\);\s*const session = beginVoiceSession\(callSessionIdRef\.current\);/,
+  );
+});
+
+test("cleans active voice work when the pet button closes the chat", () => {
+  assert.match(
+    component,
+    /function handlePetClick\(\) \{\s*if \(suppressClickRef\.current\) \{[\s\S]*?\}\s*if \(open\) \{\s*stopAllVoice\(\);\s*setOpen\(false\);\s*return;/,
+  );
 });

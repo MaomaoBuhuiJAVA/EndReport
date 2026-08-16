@@ -2,17 +2,21 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { LayoutGroup, motion } from "motion/react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
+  BookOpen,
   BookOpenText,
+  Clapperboard,
   FileText,
   FlaskConical,
-  MessageCircle,
   Sparkles,
 } from "lucide-react";
 import { SciencePet } from "@/components/SciencePet";
 import { GardenSeal } from "@/components/GardenSeal";
+import { MobileAppNav, type MobileAppNavItem } from "@/components/MobileAppNav";
 import type { SiteData } from "@/lib/site-data";
 
 type AgentHomeProps = {
@@ -47,18 +51,52 @@ const capabilities = [
   },
 ];
 
-function openFloatingChat() {
-  const assistantWindow = window as typeof window & {
-    __kexiaobeiOpenRequested?: boolean;
-  };
-  assistantWindow.__kexiaobeiOpenRequested = true;
-  assistantWindow.dispatchEvent(new Event("kexiaobei:open"));
-}
+const homeCategoryItems: MobileAppNavItem[] = [
+  { key: "科学诗", label: "科学诗", href: "#lab", icon: BookOpen },
+  { key: "科学故事", label: "科学故事", href: "#lab", icon: Clapperboard },
+  { key: "科学实验", label: "科学实验", href: "#lab", icon: FlaskConical },
+];
+
+const HOME_MOBILE_MODULE_FADE_DELAY_MS = 150;
+const HOME_MOBILE_MODULE_ROUTE_DELAY_MS = 380;
+const HOME_MOBILE_MODULE_LAYOUT_DURATION_S = 0.28;
 
 export function AgentHome({ data }: AgentHomeProps) {
+  const router = useRouter();
   const [activeHeroIndex, setActiveHeroIndex] = useState(0);
+  const [pendingCategory, setPendingCategory] = useState<string | null>(null);
+  const [homeFade, setHomeFade] = useState(false);
+  const fadeTimerRef = useRef<number | null>(null);
+  const routeTimerRef = useRef<number | null>(null);
   const secondaryHeroIndex = (activeHeroIndex + 1) % homeHeroImages.length;
   const secondaryHeroImage = homeHeroImages[secondaryHeroIndex];
+
+  function navigateToCategory(category: string) {
+    if (pendingCategory) return;
+
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const isMobileViewport = window.matchMedia("(max-width: 720px)").matches;
+    if (reducedMotion || !isMobileViewport) {
+      router.push(`/lab?type=${encodeURIComponent(category)}`);
+      return;
+    }
+
+    setPendingCategory(category);
+
+    fadeTimerRef.current = window.setTimeout(() => {
+      setHomeFade(true);
+    }, HOME_MOBILE_MODULE_FADE_DELAY_MS);
+    routeTimerRef.current = window.setTimeout(() => {
+      router.push(`/lab?type=${encodeURIComponent(category)}`);
+    }, HOME_MOBILE_MODULE_ROUTE_DELAY_MS);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (fadeTimerRef.current !== null) window.clearTimeout(fadeTimerRef.current);
+      if (routeTimerRef.current !== null) window.clearTimeout(routeTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -69,8 +107,9 @@ export function AgentHome({ data }: AgentHomeProps) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#f7f7f2] text-[#173b42]">
-      <header className="sticky top-0 z-30 border-b border-[#dce8e2]/90 bg-[#f7f7f2]/92 backdrop-blur-xl">
+    <LayoutGroup id="home-module-transition">
+      <div className={`home-page min-h-screen bg-[#f7f7f2] text-[#173b42]${pendingCategory ? " home-page--navigating" : ""}${homeFade ? " home-page--fading" : ""}`}>
+      <header className="home-site-header sticky top-0 z-30 border-b border-[#dce8e2]/90 bg-[#f7f7f2]/92 backdrop-blur-xl">
         <div className="mx-auto flex min-h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
           <Link className="flex min-w-0 items-center gap-3" href="/" aria-label="科小贝智能体首页">
             <GardenSeal glyph="贝" tone="teal" />
@@ -92,9 +131,23 @@ export function AgentHome({ data }: AgentHomeProps) {
       <main>
         <section className="relative overflow-hidden">
           <div className="absolute inset-x-0 top-0 h-72 bg-[#e6f2ec]" aria-hidden="true" />
-          <div className="relative mx-auto grid min-h-[calc(100vh-64px)] max-w-6xl items-center gap-10 px-4 py-12 sm:px-6 md:py-16 lg:grid-cols-[1.02fr_0.98fr] lg:px-8 lg:py-20">
-            <div className="max-w-2xl">
-              <p className="inline-flex items-center gap-2 rounded-full border border-[#c5ded5] bg-white/90 px-3 py-1.5 text-xs font-semibold text-[#176b5d] shadow-sm">
+          <div className="home-hero__ambient-gallery" aria-hidden="true">
+            {homeHeroImages.map((image, index) => (
+              <div className={`home-hero__ambient-fragment home-hero__ambient-fragment--${index + 1}`} key={`ambient-${image.src}`}>
+                <Image
+                  alt=""
+                  className="home-hero__ambient-image object-cover"
+                  fill
+                  loading="lazy"
+                  sizes="(min-width: 1280px) 240px, 18vw"
+                  src={image.src}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="home-hero__inner relative mx-auto grid min-h-[calc(100vh-64px)] max-w-6xl items-center gap-10 px-4 py-12 sm:px-6 md:py-16 lg:grid-cols-[1.02fr_0.98fr] lg:px-8 lg:py-20">
+            <div className="home-hero__copy max-w-2xl">
+              <p className="home-hero__eyebrow inline-flex items-center gap-2 rounded-full border border-[#c5ded5] bg-white/90 px-3 py-1.5 text-xs font-semibold text-[#176b5d] shadow-sm">
                 <Sparkles aria-hidden="true" size={14} />
                 面向幼儿科学教育的智能体
               </p>
@@ -106,25 +159,38 @@ export function AgentHome({ data }: AgentHomeProps) {
                 科小贝围绕幼儿园科学教育场景，协助教师生成活动思路、查找实验资源、匹配年龄段内容，并连接园所资料库。
               </p>
 
-              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                <button className="inline-flex h-12 items-center justify-center gap-2 rounded-[6px] bg-[#176b5d] px-5 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(23,107,93,0.22)] transition hover:bg-[#12594d]" onClick={openFloatingChat} type="button">
-                  <MessageCircle aria-hidden="true" size={18} />
-                  开始对话
-                </button>
-                <Link className="inline-flex h-12 items-center justify-center gap-2 rounded-[6px] border border-[#bbd5cc] bg-white px-5 text-sm font-semibold text-[#176b5d] transition hover:border-[#176b5d] hover:bg-[#eef8f4]" href="/lab">
-                  <FlaskConical aria-hidden="true" size={18} />
-                  进入科小贝实验室
-                </Link>
+              <div className="home-category-actions mt-8 grid gap-2 sm:grid-cols-3">
+                {pendingCategory
+                  ? null
+                  : homeCategoryItems.map((item) => {
+                      const Icon = item.icon;
+
+                      return (
+                        <motion.button
+                          aria-label={`进入${item.label}模块`}
+                          className="home-category-actions__item"
+                          key={item.key}
+                          layoutId={`home-module-${item.key}`}
+                          onClick={() => navigateToCategory(item.key)}
+                          transition={{ layout: { duration: HOME_MOBILE_MODULE_LAYOUT_DURATION_S, ease: [0.22, 1, 0.36, 1] } }}
+                          type="button"
+                        >
+                          {Icon ? <Icon aria-hidden="true" size={18} /> : null}
+                          <span>{item.label}</span>
+                          <ArrowRight aria-hidden="true" size={15} />
+                        </motion.button>
+                      );
+                    })}
               </div>
 
-              <div className="mt-9 flex flex-wrap gap-x-6 gap-y-3 text-sm text-[#59736d]">
+              <div className="home-hero__support-points mt-9 flex flex-wrap gap-x-6 gap-y-3 text-sm text-[#59736d]">
                 <span className="inline-flex items-center gap-2"><span className="size-2 rounded-full bg-[#176b5d]" />教案与活动支持</span>
                 <span className="inline-flex items-center gap-2"><span className="size-2 rounded-full bg-[#e2ac32]" />实验资源直达</span>
                 <span className="inline-flex items-center gap-2"><span className="size-2 rounded-full bg-[#d66e50]" />园所资料检索</span>
               </div>
             </div>
 
-            <div className="relative mx-auto w-full max-w-xl pb-16 sm:pb-20 lg:mx-0">
+            <div className="home-hero__media relative mx-auto w-full max-w-xl pb-16 sm:pb-20 lg:mx-0">
               <div className="absolute -right-5 -top-5 size-28 rounded-full border-[18px] border-[#f0ce64]/55" aria-hidden="true" />
               <div className="home-hero__media-stage relative aspect-[5/4]">
                 <div className="home-hero__primary-frame">
@@ -141,10 +207,6 @@ export function AgentHome({ data }: AgentHomeProps) {
                     src={image.src}
                   />
                 ))}
-                </div>
-                <div className="home-hero__primary-caption absolute inset-x-0 top-0 bg-gradient-to-b from-[#173b42]/85 via-[#173b42]/25 to-transparent p-5 pb-20 text-white sm:p-6">
-                  <p className="text-xs font-semibold text-[#e8d78a]">科小贝正在准备</p>
-                  <p className="mt-1 text-lg font-semibold">今天的科学探索</p>
                 </div>
                 <div className="home-hero__secondary-frame">
                   <div key={secondaryHeroImage.src} className="home-hero__secondary-image">
@@ -186,6 +248,18 @@ export function AgentHome({ data }: AgentHomeProps) {
 
       </main>
 
+      <div className="home-page__bottom-anchor" aria-hidden="true" />
+
+      {pendingCategory ? (
+        <MobileAppNav
+          items={homeCategoryItems}
+          activeKey={pendingCategory}
+          layoutIdPrefix="home-module"
+          layoutDuration={HOME_MOBILE_MODULE_LAYOUT_DURATION_S}
+          onSelect={(item) => navigateToCategory(item.key)}
+        />
+      ) : null}
+
       <footer className="border-t border-[#dce9e4] bg-white py-6">
         <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 text-sm text-[#66807a] sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
           <span>{data.profile.shortName} · 科小贝智能体</span>
@@ -194,6 +268,7 @@ export function AgentHome({ data }: AgentHomeProps) {
       </footer>
 
       <SciencePet />
-    </div>
+      </div>
+    </LayoutGroup>
   );
 }

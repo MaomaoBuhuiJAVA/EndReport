@@ -10,6 +10,7 @@ import {
   ExternalLink,
   FileText,
   FlaskConical,
+  House,
   Image as ImageIcon,
   LoaderCircle,
   PlayCircle,
@@ -53,8 +54,9 @@ const labNavItems: GooeyNavItem[] = [
 ];
 
 const labMobileNavItems: MobileAppNavItem[] = [
-  { key: "overview", label: "科小贝", href: "/" },
-  { key: "lab", label: "资源库", href: "/lab" },
+  { key: "科学诗", label: "科学诗", href: "#lab-results", icon: BookOpen },
+  { key: "科学故事", label: "科学故事", href: "#lab-results", icon: Clapperboard },
+  { key: "科学实验", label: "科学实验", href: "#lab-results", icon: FlaskConical },
 ];
 
 const labHeroPhotos = [
@@ -153,6 +155,12 @@ function publicImages(item: ScienceKnowledgeSummary) {
   return orderedExperimentImages(item.resources);
 }
 
+function literatureTone(item: ScienceKnowledgeSummary) {
+  const source = `${item.id}:${item.topic ?? ""}`;
+  const score = Array.from(source).reduce((total, character) => total + character.charCodeAt(0), 0);
+  return `tone-${score % 4}`;
+}
+
 function KnowledgeCard({
   item,
   onOpen,
@@ -161,11 +169,39 @@ function KnowledgeCard({
   onOpen: () => void;
 }) {
   const thumbnail = publicImages(item)[0];
+  const isLiterature = item.category === "科学诗" || item.category === "科学故事";
+  const categoryVisual =
+    categoryVisuals[item.category as keyof typeof categoryVisuals] ?? categoryVisuals.科学实验;
+  const CategoryIcon = categoryVisual.icon;
+  const mediaVariant = item.category === "科学诗" ? "poetry" : item.category === "科学故事" ? "story" : "experiment";
 
   return (
-    <button type="button" className="knowledge-card" onClick={onOpen}>
-      <span className={`knowledge-card__media${thumbnail ? "" : " is-placeholder"}`}>
-        {thumbnail ? (
+    <button
+      type="button"
+      className={`knowledge-card${isLiterature ? ` knowledge-card--literature knowledge-card--${literatureTone(item)}` : ""}`}
+      onClick={onOpen}
+      aria-label={`打开${item.category}：${item.title}`}
+    >
+      <span
+        className={`knowledge-card__media knowledge-card__media--${mediaVariant}${thumbnail && !isLiterature ? "" : " is-placeholder"}`}
+      >
+        {isLiterature ? (
+          <>
+            <Image
+              src={categoryVisual.image}
+              alt=""
+              fill
+              sizes="(min-width: 720px) 30vw, 46vw"
+              className="knowledge-card__literature-art"
+              aria-hidden="true"
+            />
+            <span className="knowledge-card__literature-shade" aria-hidden="true" />
+            <span className="knowledge-card__literature-icon" aria-hidden="true">
+              <CategoryIcon size={19} strokeWidth={2} />
+            </span>
+            <strong className="knowledge-card__cover-title">{item.title}</strong>
+          </>
+        ) : thumbnail ? (
           <Image
             src={thumbnail.publicPath}
             alt={thumbnail.title}
@@ -174,20 +210,25 @@ function KnowledgeCard({
           />
         ) : (
           <span className="knowledge-card__placeholder" aria-hidden="true">
-            {item.category === "科学诗" ? (
-              <BookOpen size={34} />
-            ) : item.category === "科学故事" ? (
-              <Clapperboard size={34} />
-            ) : (
-              <FlaskConical size={34} />
-            )}
+            <Image
+              src={categoryVisual.image}
+              alt=""
+              fill
+              sizes="(min-width: 1024px) 360px, 38vw"
+              className="knowledge-card__placeholder-image"
+            />
+            <span className="knowledge-card__placeholder-shade" />
+            <span className="knowledge-card__placeholder-content">
+              <CategoryIcon size={30} strokeWidth={1.9} />
+              <small>{item.category}</small>
+            </span>
           </span>
         )}
         <span className="knowledge-card__semester">{item.ageLabel}</span>
       </span>
-      <span className="knowledge-card__body">
+      <span className={`knowledge-card__body${isLiterature ? " knowledge-card__body--literature" : ""}`}>
         <span className="knowledge-card__category">{item.category}</span>
-        <strong>{item.title}</strong>
+        <strong className="knowledge-card__body-title">{item.title}</strong>
         <span className="knowledge-card__excerpt">{item.excerpt}</span>
         <span className="knowledge-card__footer">
           <span className="knowledge-card__resource-list">
@@ -431,12 +472,18 @@ function KnowledgeDetail({
 export function ScienceLab({
   initialItems,
   initialResourceId,
+  initialCategory,
 }: {
   initialItems: ScienceKnowledgeSummary[];
   initialResourceId?: string;
+  initialCategory?: string;
 }) {
   const [selection, setSelection] = useState<ScienceSelection>(() =>
-    normalizeScienceSelection(initialItems, { category: "", topic: "", ageLabel: "" }),
+    normalizeScienceSelection(initialItems, {
+      category: initialCategory ?? "",
+      topic: "",
+      ageLabel: "",
+    }),
   );
   const [query, setQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(12);
@@ -486,14 +533,23 @@ export function ScienceLab({
   );
 
   function changeCategory(category: string) {
+    const nextCategory = category === "全部" ? "" : category;
     setSelection(
       normalizeScienceSelection(initialItems, {
-        category: category === "全部" ? "" : category,
+        category: nextCategory,
         topic: "",
         ageLabel: "",
       }),
     );
     setVisibleCount(12);
+    const nextUrl = nextCategory
+      ? `/lab?type=${encodeURIComponent(nextCategory)}`
+      : "/lab";
+    window.history.replaceState(null, "", nextUrl);
+    document.getElementById("lab-results")?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "start",
+    });
   }
 
   function changeAge(ageLabel: string) {
@@ -561,10 +617,8 @@ export function ScienceLab({
 
       <MobileAppNav
         items={labMobileNavItems}
-        activeKey="lab"
-        onSelect={(item) => {
-          if (item.key === "lab") window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
-        }}
+        activeKey={selection.category}
+        onSelect={(item) => changeCategory(item.key)}
       />
 
       <main>
@@ -597,7 +651,10 @@ export function ScienceLab({
                 ))}
               </div>
             </div>
-            <label className="lab-search">
+            <div className="lab-search">
+              <Link className="lab-search__home" href="/" aria-label="返回首页" title="返回首页">
+                <House size={18} aria-hidden="true" />
+              </Link>
               <Search size={20} aria-hidden="true" />
               <input
                 value={query}
@@ -616,11 +673,11 @@ export function ScienceLab({
                   <X size={17} />
                 </button>
               ) : null}
-            </label>
+            </div>
           </div>
         </section>
 
-        <section className="lab-shell lab-content">
+        <section className="lab-shell lab-content" id="lab-results">
           <div className="filter-panel">
             <CompactFilterRow
               label="类型"
@@ -653,7 +710,7 @@ export function ScienceLab({
 
           {filtered.length ? (
             <>
-              <div className="knowledge-grid">
+              <div className={`knowledge-grid${selection.category === "科学诗" || selection.category === "科学故事" ? " knowledge-grid--literature" : ""}`}>
                 {filtered.slice(0, visibleCount).map((item) => (
                   <KnowledgeCard
                     key={item.id}

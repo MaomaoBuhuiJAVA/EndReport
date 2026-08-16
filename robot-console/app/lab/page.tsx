@@ -12,12 +12,24 @@ export const metadata: Metadata = {
 export default async function LabPage({
   searchParams,
 }: {
-  searchParams: Promise<{ item?: string | string[]; resource?: string | string[] }>;
+  searchParams: Promise<{
+    item?: string | string[];
+    resource?: string | string[];
+    type?: string | string[];
+  }>;
 }) {
-  const { item, resource } = await searchParams;
+  const { item, resource, type } = await searchParams;
   const items = await getScienceKnowledgeSummaries();
   const initialResourceId =
     typeof item === "string" ? item : typeof resource === "string" ? resource : undefined;
+  const initialCategory = typeof type === "string" ? type : undefined;
 
-  return <ScienceLab initialItems={items} initialResourceId={initialResourceId} />;
+  return (
+    <ScienceLab
+      key={initialCategory ?? "all"}
+      initialItems={items}
+      initialResourceId={initialResourceId}
+      initialCategory={initialCategory}
+    />
+  );
 }

@@ -76,4 +76,35 @@ describe("generateDeepSeekReply", () => {
 
     expect(historyContents).toEqual(Array.from({ length: 12 }, (_, index) => `历史${index + 3}`));
   });
+
+  it("allows slow lesson-plan responses to continue past the short request timeout", async () => {
+    vi.useFakeTimers();
+    let requestSignal: AbortSignal | undefined;
+    const fetchImpl = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    });
+
+    try {
+      const replyPromise = generateDeepSeekReply({
+        apiKey: "test-key",
+        apiUrl: "https://example.test/chat",
+        systemPrompt: "规则",
+        context: "资料",
+        history: [],
+        message: "生成完整教案",
+        fetchImpl,
+      });
+
+      await vi.advanceTimersByTimeAsync(8_501);
+      expect(requestSignal?.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(21_500);
+      await expect(replyPromise).resolves.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -53,7 +53,7 @@ test("keeps age choices broad after removing the topic control", () => {
 
   assert.match(
     component,
-    /normalizeScienceSelection\(initialItems, \{ category: "", topic: "", ageLabel: "" \}\)/,
+    /normalizeScienceSelection\(initialItems, \{[\s\S]*?category: initialCategory \?\? "",[\s\S]*?topic: "",[\s\S]*?ageLabel: "",[\s\S]*?\}\)/,
   );
   assert.match(component, /items=\{\["全部", \.\.\.categories\]\}/);
   assert.match(component, /items=\{\["全部", \.\.\.ages\]\}/);
@@ -89,4 +89,41 @@ test("shows every collected video QR and links the resources that have a playbac
   assert.match(component, /className="video-qr-code"/);
   assert.match(component, /const videoLabel = `视频资源 \$\{index \+ 1\}`/);
   assert.match(styles, /\.video-qr-code\s*\{/);
+});
+
+test("adds a compact mobile return-home control beside the lab search", () => {
+  const component = fs.readFileSync(componentPath, "utf8");
+  const styles = fs.readFileSync(stylesPath, "utf8");
+
+  assert.match(component, /import \{[\s\S]*?\bHouse\b[\s\S]*?\} from "lucide-react"/);
+  assert.match(component, /className="lab-search__home" href="\/"/);
+  assert.match(component, /aria-label="返回首页"/);
+  assert.match(styles, /\.lab-search__home\s*\{/);
+  assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.lab-search__home[\s\S]*?display:\s*grid/);
+});
+
+test("uses two-column illustrated cover cards for science poems and stories", () => {
+  const component = fs.readFileSync(componentPath, "utf8");
+  const styles = fs.readFileSync(stylesPath, "utf8");
+
+  assert.match(component, /knowledge-card--literature/);
+  assert.match(component, /knowledge-card__cover-title/);
+  assert.match(component, /categoryVisual\.image/);
+  assert.match(styles, /\.knowledge-card--literature/);
+  assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.knowledge-grid--literature[\s\S]*?grid-template-columns:\s*repeat\(2/);
+  assert.match(styles, /\.knowledge-card--literature[\s\S]*?background:\s*linear-gradient/);
+  assert.match(styles, /\.knowledge-card--literature[\s\S]*?box-shadow:/);
+});
+
+test("keeps literature card icons and age labels in separate top corners", () => {
+  const styles = fs.readFileSync(stylesPath, "utf8");
+  const literatureSemesterRule =
+    styles.match(/\.knowledge-card--literature \.knowledge-card__semester\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+  const mobileLiteratureSemesterRule =
+    styles.match(/@media \(max-width: 720px\)\s*\{[\s\S]*?\.knowledge-card--literature \.knowledge-card__semester\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+
+  assert.match(literatureSemesterRule, /left:\s*auto/);
+  assert.match(literatureSemesterRule, /right:\s*10px/);
+  assert.match(literatureSemesterRule, /z-index:\s*3/);
+  assert.match(mobileLiteratureSemesterRule, /right:\s*8px/);
 });

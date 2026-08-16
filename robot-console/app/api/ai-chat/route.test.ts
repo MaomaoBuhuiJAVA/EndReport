@@ -229,9 +229,10 @@ describe("POST /api/ai-chat", () => {
     const payload = await response.json();
 
     expect(payload).toMatchObject({
-      provider: "fallback",
+      provider: "deepseek",
       labLinks: [{ id: "paper", title: "玩转纸片", href: "/lab?item=paper" }],
     });
+    expect(payload.reply).toContain("目标");
     expect(payload.reply).toContain("活动过程");
     expect(payload.reply).toContain("幼儿观察纸片并说出猜想");
     expect(payload.reply).not.toContain("实验步骤：");
@@ -244,7 +245,7 @@ describe("POST /api/ai-chat", () => {
     expect(vi.mocked(generateDeepSeekReply).mock.calls[0]?.[0]?.context).not.toContain("空气动力小汽车");
   });
 
-  it("模型缺少观察、小结和提示时仍返回完整教案兜底", async () => {
+  it("模型缺少观察、小结和提示时保留正文并补齐板块", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({
       chunks: [
         {
@@ -275,12 +276,50 @@ describe("POST /api/ai-chat", () => {
     );
     const payload = await response.json();
 
-    expect(payload.reply).toContain("观察与表达");
-    expect(payload.reply).toContain("小结与延伸");
-    expect(payload.reply).toContain("活动提示");
+    expect(payload.provider).toBe("deepseek");
+    expect(payload.reply).toContain("观察与小结");
+    expect(payload.reply).toContain("活动小结");
+    expect(payload.reply).toContain("延伸与安全提示");
   });
 
-  it("教案标题齐全但活动过程为空时仍回退到可执行的完整教案", async () => {
+  it("保留 DeepSeek 已生成的教案正文，并补齐缺失板块", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-paper",
+          documentId: "paper",
+          title: "玩转纸片",
+          document: { title: "科小贝实验室：玩转纸片" },
+          content: "一、活动目标\n目标\n二、活动准备\n材料\n三、活动过程\n1. 操作纸片。",
+        },
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue([
+      "### 活动目标",
+      "这是 DeepSeek 生成的目标。",
+      "### 活动准备",
+      "这是 DeepSeek 生成的材料。",
+      "### 活动过程",
+      "这是 DeepSeek 生成的过程。",
+    ].join("\n"));
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.provider).toBe("deepseek");
+    expect(payload.reply).toContain("这是 DeepSeek 生成的目标");
+    expect(payload.reply).toContain("观察与小结");
+    expect(payload.reply).toContain("延伸与安全提示");
+  });
+
+  it("教案标题齐全但活动过程为空时保留模型并补充可执行步骤", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({
       chunks: [
         {
@@ -316,7 +355,7 @@ describe("POST /api/ai-chat", () => {
     );
     const payload = await response.json();
 
-    expect(payload.provider).toBe("fallback");
+    expect(payload.provider).toBe("deepseek");
     expect(payload.reply).toContain("操作纸片");
     expect(payload.reply).toContain("导入与猜想");
   });
