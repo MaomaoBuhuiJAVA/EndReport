@@ -115,10 +115,20 @@ function imageRoleRank(role) {
 }
 
 function imageResourceTitle(title, image, fallbackNumber) {
-  const number = image?.number ?? fallbackNumber;
+  const number = fallbackNumber ?? image?.number ?? 1;
   if (image?.role === "material") return `${title} · 材料准备 ${number}`;
   if (image?.role === "operation") return `${title} · 操作步骤 ${number}`;
   return `${title} · 实验图片 ${number}`;
+}
+
+// These source files are identical transparent transition artwork rather than experiment frames.
+// Keep their source paths for provenance, but do not publish them as gallery steps.
+function isExcludedExperimentImage(sourceImage) {
+  const relativePath = relativeSourcePath(sourceImage.filePath);
+  return (
+    relativePath.includes("/水与液体/小班/小班科学教案《自制泡泡液》图片/") &&
+    /操作(?:18|23|25|26)\.png$/u.test(relativePath)
+  );
 }
 
 function sourceDetails(sourceFile, title, body, ageLabel, topic, category, resources = []) {
@@ -252,6 +262,7 @@ async function copyExperimentImage(sourceImage) {
 
 async function isGalleryImage(sourceImage, image = parseExperimentImageName(path.basename(sourceImage))) {
   if (image?.role === "video") return false;
+  if (isExcludedExperimentImage({ filePath: sourceImage })) return false;
   const { width, height } = await sharp(sourceImage).metadata();
   const isQrCode = width === height && typeof width === "number" && width >= 290 && width <= 310;
   return !isQrCode;
@@ -379,12 +390,10 @@ async function buildExperiments(imagesByExperiment) {
       ];
 
       const sourceImages = imagesByExperiment.get(imageKey(topic, ageLabel, section.title)) ?? [];
-      let galleryImageIndex = 0;
       const fallbackCounters = { material: 0, operation: 0, legacy: 0 };
       for (const sourceImage of sourceImages) {
         if (!(await isGalleryImage(sourceImage.filePath, sourceImage))) continue;
         fallbackCounters[sourceImage.role] = (fallbackCounters[sourceImage.role] ?? 0) + 1;
-        galleryImageIndex += 1;
         resources.push({
           id: stableId("IMAGE", relativeSourcePath(sourceImage.filePath), section.title),
           type: "图片资源",
@@ -393,7 +402,7 @@ async function buildExperiments(imagesByExperiment) {
           title: imageResourceTitle(
             section.title,
             sourceImage,
-            fallbackCounters[sourceImage.role] || galleryImageIndex,
+            fallbackCounters[sourceImage.role],
           ),
           filePath: relativeSourcePath(sourceImage.filePath),
           publicPath: await copyExperimentImage(sourceImage.filePath),
