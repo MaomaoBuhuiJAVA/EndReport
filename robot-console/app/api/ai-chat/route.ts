@@ -106,8 +106,14 @@ function hasCompleteLessonPlan(reply: string | null) {
 
 function isCasualMessage(message: string) {
   const compact = message.replace(/[\s，,。！？!?、]/g, "");
+  const hasResourceIntent = /(?:科学|实验|诗|故事|教案|材料|步骤|主题|年龄|托班|小班|中班|大班|资源|资料|园所|照片|图片|推荐|查找|搜索|检索|找|生成|查看|介绍|有没有|如何|怎么做|怎么玩|活动)/.test(compact);
+  const hasExplicitConversationIntent = /^(?:介绍(?:一下)?你自己|你喜欢什么|(?:我们)?随便聊聊|我想(?:和你)?聊聊|陪我聊聊|陪我聊天)/.test(compact);
 
-  if (/(?:科学|实验|诗|故事|教案|材料|步骤|主题|年龄|托班|小班|中班|大班|资源|资料|园所|照片|图片|推荐|查找|搜索|检索|找|生成|查看|介绍|有没有|如何|怎么做|怎么玩|活动)/.test(compact)) {
+  if (hasExplicitConversationIntent && !/(?:科学|实验|诗|故事|教案|材料|步骤|主题|年龄|资源|资料|园所|照片|图片|活动)/.test(compact)) {
+    return true;
+  }
+
+  if (hasResourceIntent) {
     return false;
   }
 
@@ -124,12 +130,26 @@ function casualFallback(message: string) {
   if (/你会什么|能做什么|怎么用/.test(message)) {
     return "我可以帮助查找科学诗、科学故事和实验资源，按年龄段推荐内容，并根据已收录资料整理活动教案。";
   }
-  return "我暂时没有检索到直接对应的资料。你可以补充年龄段、科学主题或具体资源名称，例如“中班水的实验”或“生成《玩转纸片》完整教案”。";
+  if (/天气/.test(message)) {
+    return "今天的天气听起来不错。我们可以一起聊聊自然现象，也可以随时开始一个科学探索。";
+  }
+  if (/笑话/.test(message)) {
+    return "给你一个科学小笑话：为什么月亮不去上班？因为它晚上才会发光。还想聊哪个科学主题？";
+  }
+  if (/介绍一下你自己|介绍你自己|你喜欢什么/.test(message)) {
+    return "我是科小贝，专门陪你查找园所科学资源、聊科学现象，也能根据资料整理活动教案。";
+  }
+  if (/聊|聊天|随便/.test(message)) {
+    return "当然可以，我们可以聊科学、自然，也可以从你今天看到的一件小事开始。";
+  }
+  return "当然可以继续聊。你可以告诉我想探索的科学现象，或者直接问我一个问题。";
 }
 
-function fallbackReply(context: string, sources: string[], message: string) {
+function fallbackReply(context: string, sources: string[], message: string, casualMessage: boolean) {
   if (!context) {
-    return casualFallback(message);
+    return casualMessage
+      ? casualFallback(message)
+      : "我暂时没有检索到直接对应的资料。你可以补充年龄段、科学主题或具体资源名称，例如“中班水的实验”或“生成《玩转纸片》完整教案”。";
   }
 
   const sourceText = sources.length ? `\n\n参考资料：${Array.from(new Set(sources)).slice(0, 4).join("、")}` : "";
@@ -177,13 +197,14 @@ export async function POST(request: Request) {
     message,
     maxTokens: requestedLessonPlan ? 1600 : undefined,
   });
-  const reply = requestedLessonPlan && !hasCompleteLessonPlan(modelReply)
+  const usedLessonPlanFallback = Boolean(requestedLessonPlan && !hasCompleteLessonPlan(modelReply));
+  const reply = usedLessonPlanFallback
     ? buildLessonPlanReply(requestedLessonPlan)
     : modelReply;
 
   return NextResponse.json({
-    reply: reply ?? fallbackReply(context, sources, message),
-    provider: reply ? "deepseek" : "fallback",
+    reply: reply ?? fallbackReply(context, sources, message, casualMessage),
+    provider: reply && !usedLessonPlanFallback ? "deepseek" : "fallback",
     photos,
     sources: uniqueSources,
     labLinks,

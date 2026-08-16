@@ -208,6 +208,7 @@ describe("POST /api/ai-chat", () => {
     const payload = await response.json();
 
     expect(payload).toMatchObject({
+      provider: "fallback",
       labLinks: [{ id: "paper", title: "玩转纸片", href: "/lab?item=paper" }],
     });
     expect(payload.reply).toContain("活动过程");
@@ -332,6 +333,38 @@ describe("POST /api/ai-chat", () => {
       sources: [],
       labLinks: [],
     });
+    expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+
+  it("模型不可用时天气闲聊仍返回自然的对话兜底", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue(null);
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "今天天气真好" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.provider).toBe("fallback");
+    expect(payload.reply).toContain("天气");
+    expect(payload.reply).not.toContain("暂时没有检索到直接对应的资料");
+    expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+
+  it("介绍自己和随便聊天不会触发资料检索", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue("当然可以，我们聊聊科学和生活。");
+
+    await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "介绍一下你自己，我们随便聊聊" }),
+      }),
+    );
+
     expect(searchKnowledge).not.toHaveBeenCalled();
   });
 
