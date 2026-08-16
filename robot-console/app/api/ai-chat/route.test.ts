@@ -368,6 +368,26 @@ describe("POST /api/ai-chat", () => {
     expect(searchKnowledge).not.toHaveBeenCalled();
   });
 
+  it("礼貌前缀和语气词形式的闲聊不会触发资料检索", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue("我是科小贝。");
+
+    await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "你好，介绍一下你自己" }),
+      }),
+    );
+    await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "讲个笑话吧" }),
+      }),
+    );
+
+    expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+
   it("带有明确实验请求的闲聊仍然检索资料库", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({
       chunks: [

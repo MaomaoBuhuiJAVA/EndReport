@@ -106,8 +106,9 @@ function hasCompleteLessonPlan(reply: string | null) {
 
 function isCasualMessage(message: string) {
   const compact = message.replace(/[\s，,。！？!?、]/g, "");
+  const conversationalText = compact.replace(/^(?:(?:你好|您好|嗨|哈喽|hello)(?:科小贝)?(?:呀|啊|呢)?|请|麻烦(?:你)?)+/i, "");
   const hasResourceIntent = /(?:科学|实验|诗|故事|教案|材料|步骤|主题|年龄|托班|小班|中班|大班|资源|资料|园所|照片|图片|推荐|查找|搜索|检索|找|生成|查看|介绍|有没有|如何|怎么做|怎么玩|活动)/.test(compact);
-  const hasExplicitConversationIntent = /^(?:介绍(?:一下)?你自己|你喜欢什么|(?:我们)?随便聊聊|我想(?:和你)?聊聊|陪我聊聊|陪我聊天)/.test(compact);
+  const hasExplicitConversationIntent = /^(?:介绍(?:一下)?你自己|你喜欢什么|(?:我们)?随便聊聊|我想(?:和你)?聊聊|陪我聊聊|陪我聊天|(?:讲|说)个笑话(?:吧|呀|啊)?)/.test(conversationalText);
 
   if (hasExplicitConversationIntent && !/(?:科学|实验|诗|故事|教案|材料|步骤|主题|年龄|资源|资料|园所|照片|图片|活动)/.test(compact)) {
     return true;
