@@ -18,7 +18,11 @@ export function MobileAppNav({
   onSelect?: (item: MobileAppNavItem) => void;
 }) {
   return (
-    <nav className="home-bottom-nav lg:hidden" aria-label="移动端主导航">
+    <nav
+      className="home-bottom-nav lg:hidden"
+      aria-label="移动端主导航"
+      style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+    >
       {items.map((item) =>
         item.href.startsWith("#") ? (
           <button

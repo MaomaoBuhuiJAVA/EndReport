@@ -1,6 +1,18 @@
 export const SCIENCE_TYPE_ORDER = ["科学诗", "科学故事", "科学实验"] as const;
 export const SCIENCE_AGE_ORDER = ["托班", "小班", "中班", "大班"] as const;
 
+const SCIENCE_CATEGORY_SEARCH_ALIASES = [
+  ["科学诗歌", "科学诗"],
+  ["科学诗", "科学诗"],
+  ["诗歌", "科学诗"],
+  ["诗", "科学诗"],
+  ["科学故事", "科学故事"],
+  ["故事", "科学故事"],
+  ["科学实验", "科学实验"],
+  ["实验室", "科学实验"],
+  ["实验", "科学实验"],
+] as const;
+
 export type ScienceNavigationItem = {
   category: string;
   topic: string;
@@ -45,6 +57,53 @@ function matchesSelection(value: string, selection: string) {
 
 function normalizedSelectionValue(value: string) {
   return value.trim();
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function compactSearchTerms(
+  query: string,
+  items: readonly ScienceNavigationItem[],
+) {
+  const normalizedQuery = normalizeScienceSearchText(query);
+  if (!normalizedQuery) return [];
+
+  const aliases = unique([
+    ...SCIENCE_AGE_ORDER,
+    ...SCIENCE_CATEGORY_SEARCH_ALIASES.map(([label]) => label),
+    ...items.map((item) => item.topic),
+  ])
+    .map((label) => {
+      const normalizedLabel = normalizeScienceSearchText(label);
+      const categoryAlias = SCIENCE_CATEGORY_SEARCH_ALIASES.find(
+        ([alias]) => normalizeScienceSearchText(alias) === normalizedLabel,
+      );
+      return {
+        label: normalizedLabel,
+        replacement: categoryAlias?.[1] ?? normalizedLabel,
+      };
+    })
+    .filter(({ label }) => label)
+    .filter(
+      (alias, index, all) => all.findIndex((candidate) => candidate.label === alias.label) === index,
+    )
+    .sort((left, right) => right.label.length - left.label.length);
+
+  if (!aliases.length) return normalizedQuery.split(" ").filter(Boolean);
+
+  const replacementByLabel = new Map(aliases.map(({ label, replacement }) => [label, replacement]));
+  const aliasPattern = new RegExp(
+    aliases.map(({ label }) => escapeRegExp(label)).join("|"),
+    "gu",
+  );
+  const segmentedQuery = normalizedQuery.replace(aliasPattern, (match) => {
+    const replacement = replacementByLabel.get(match) ?? match;
+    return ` ${replacement} `;
+  });
+
+  return normalizeScienceSearchText(segmentedQuery).split(" ").filter(Boolean);
 }
 
 function orderValues(values: string[], preferredOrder: readonly string[]) {
@@ -125,7 +184,7 @@ export function filterScienceItems<T extends ScienceNavigationItem>(
   items: readonly T[],
   { category, topic, ageLabel, query = "" }: ScienceFilter,
 ) {
-  const searchTerms = normalizeScienceSearchText(query).split(" ").filter(Boolean);
+  const searchTerms = compactSearchTerms(query, items);
 
   return items.filter((item) => {
     if (

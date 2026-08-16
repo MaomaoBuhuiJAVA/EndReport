@@ -131,6 +131,27 @@ describe("POST /api/ai-chat", () => {
     });
   });
 
+  it("资料库兜底会清理正文中的 Markdown 标题，避免聊天气泡排版混乱", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [chunk("科小贝实验室：水的蒸发", "## 水的蒸发\n水受热后会逐渐蒸发。")],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue(null);
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "水为什么会蒸发？" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.provider).toBe("fallback");
+    expect(payload.reply).toContain("- 《科小贝实验室：水的蒸发》水的蒸发");
+    expect(payload.reply).not.toContain("##");
+  });
+
   it("为打包实验室资料返回确定性的详情链接", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({
       chunks: [
@@ -259,6 +280,47 @@ describe("POST /api/ai-chat", () => {
     expect(payload.reply).toContain("活动提示");
   });
 
+  it("教案标题齐全但活动过程为空时仍回退到可执行的完整教案", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-paper",
+          documentId: "paper",
+          title: "玩转纸片",
+          document: { title: "科小贝实验室：玩转纸片" },
+          content: "一、活动目标\n目标\n二、活动准备\n材料\n三、活动过程\n1. 操作纸片。",
+        },
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue([
+      "### 一、活动目标",
+      "目标",
+      "### 二、活动准备",
+      "材料",
+      "### 三、活动过程",
+      "### 四、观察与表达",
+      "观察",
+      "### 五、小结与延伸",
+      "小结",
+      "### 六、活动提示",
+      "提示",
+    ].join("\n"));
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.provider).toBe("fallback");
+    expect(payload.reply).toContain("操作纸片");
+    expect(payload.reply).toContain("导入与猜想");
+  });
+
   it("在资料未命中且模型不可用时仍回应基础问候", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
     vi.mocked(wantsPhotoResults).mockReturnValue(false);
@@ -368,6 +430,42 @@ describe("POST /api/ai-chat", () => {
     expect(searchKnowledge).not.toHaveBeenCalled();
   });
 
+  it("礼貌前缀和语气词形式的闲聊不会触发资料检索", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue("我是科小贝。");
+
+    await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "你好，介绍一下你自己" }),
+      }),
+    );
+    await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "讲个笑话吧" }),
+      }),
+    );
+
+    expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+
+  it("更自然的自我介绍和笑话问法仍保持对话模式", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue("我是科小贝，很高兴和你聊天。");
+
+    for (const message of ["请介绍一下你自己好吗", "你能介绍下自己吗", "请讲个笑话吧"]) {
+      await POST(
+        new Request("http://localhost/api/ai-chat", {
+          method: "POST",
+          body: JSON.stringify({ message }),
+        }),
+      );
+    }
+
+    expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+
   it("带有明确实验请求的闲聊仍然检索资料库", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({
       chunks: [
@@ -391,5 +489,58 @@ describe("POST /api/ai-chat", () => {
     );
 
     expect(searchKnowledge).toHaveBeenCalledWith("今天天气真好，推荐一个实验");
+  });
+
+  it("没有资料意图的自然聊天不会误检索，并使用闲聊规则回复", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue("我很好，也很高兴和你聊天。");
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "你今天过得怎么样" }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      reply: "我很好，也很高兴和你聊天。",
+      sources: [],
+      labLinks: [],
+    });
+    expect(searchKnowledge).not.toHaveBeenCalled();
+    expect(generateDeepSeekReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: "",
+        systemPrompt: expect.stringContaining("日常闲聊"),
+      }),
+    );
+  });
+
+  it("自然语言科学问句仍检索资料库", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [chunk("水的蒸发", "水受热会蒸发。")],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue("水受热后会逐渐蒸发。");
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "水为什么会蒸发？" }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      reply: "水受热后会逐渐蒸发。",
+      sources: ["水的蒸发"],
+    });
+    expect(searchKnowledge).toHaveBeenCalledWith("水为什么会蒸发？");
+    expect(generateDeepSeekReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.stringContaining("水的蒸发"),
+        systemPrompt: expect.stringContaining("优先依据园所资料库"),
+      }),
+    );
   });
 });

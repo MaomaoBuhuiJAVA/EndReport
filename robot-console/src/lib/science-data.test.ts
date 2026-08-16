@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { mergeScienceKnowledgeSummaries } from "./science-data";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    scienceKnowledgeItem: {
+      findMany: vi.fn(),
+    },
+  },
+}));
+
+import { getScienceKnowledgeSummaries, mergeScienceKnowledgeSummaries } from "./science-data";
+import { prisma } from "./prisma";
 import type { ScienceKnowledgeSummary, ScienceResource } from "./science-types";
 
 function summary(id: string, title = id): ScienceKnowledgeSummary {
@@ -97,5 +107,20 @@ describe("mergeScienceKnowledgeSummaries", () => {
         tags: ["科学故事", "水科学与气象自然", "中班"],
       },
     ]);
+  });
+});
+
+describe("getScienceKnowledgeSummaries", () => {
+  it("keeps the corrected topic when only packaged fallback resources are available", async () => {
+    vi.mocked(prisma.scienceKnowledgeItem.findMany).mockRejectedValueOnce(new Error("database unavailable"));
+
+    const summaries = await getScienceKnowledgeSummaries();
+    const waterStory = summaries.find((item) => item.title === "会变色的小水滴");
+
+    expect(waterStory).toMatchObject({
+      category: "科学故事",
+      topic: "水科学与气象自然",
+      tags: expect.arrayContaining(["水科学与气象自然"]),
+    });
   });
 });

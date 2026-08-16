@@ -25,8 +25,15 @@ test("registers the home-page open event before the first interactive paint", ()
   assert.match(home, /__kexiaobeiOpenRequested = true/);
 });
 
-test("bounds the 科小贝 chat to the available viewport height", () => {
+test("gives the 科小贝 chat a full usable mobile viewport instead of a half-height panel", () => {
   assert.match(styles, /\.pet-chat\s*\{[\s\S]*?position:\s*fixed[\s\S]*?max-height:\s*min\(640px, calc\(100dvh - 154px\)\)/);
   assert.match(styles, /\.pet-chat__messages\s*\{[\s\S]*?flex:\s*1[\s\S]*?max-height:\s*none/);
-  assert.match(styles, /@media \(max-width: 720px\)\s*\{[\s\S]*?\.pet-chat\s*\{[\s\S]*?bottom:\s*calc\(192px \+ env\(safe-area-inset-bottom\)\)/);
+  assert.match(styles, /@media \(max-width: 720px\)\s*\{[\s\S]*?\.pet-chat\s*\{[\s\S]*?bottom:\s*calc\(72px \+ env\(safe-area-inset-bottom\)\)[\s\S]*?height:\s*min\(680px, calc\(100dvh - 84px\)\)/);
+  assert.match(styles, /@media \(max-width: 720px\)\s*\{[\s\S]*?\.pet-chat\s*\{[\s\S]*?width:\s*min\(360px, calc\(100dvw - 24px\)\)/);
+});
+
+test("keeps generated lesson plans readable inside the chat bubble", () => {
+  assert.match(component, /className="pet-message__markdown"/);
+  assert.match(styles, /\.pet-message__markdown\s+h1,[\s\S]*?font-size:\s*12px/);
+  assert.match(styles, /\.pet-message__markdown\s+ul,[\s\S]*?padding-left:\s*18px/);
 });

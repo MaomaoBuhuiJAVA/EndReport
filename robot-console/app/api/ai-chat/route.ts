@@ -4,13 +4,20 @@ import { generateDeepSeekReply } from "@/lib/deepseek";
 import { buildScienceLabLinks } from "@/lib/science-lab-links";
 import { searchKnowledge, wantsPhotoResults } from "@/lib/search";
 
-const systemPrompt = `你是“龙湾区国科温州第二幼儿园”的园所信息问答助手。
+const knowledgePrompt = `你是“科小贝”，龙湾区国科温州第二幼儿园的幼儿科学教育智能体。
 回答规则：
 1. 优先依据园所资料库与科小贝资源库中的科学诗、科学故事、科学实验内容回答。
 2. 如果资料库没有明确内容，不要编造，请说明“资料库暂未收录明确内容”。
 3. 回答要适合家长、访客和教师阅读，简洁、温和、可信。
 4. 当用户问功能室、空间、环境、有没有照片、图片、参观等内容时，提醒用户可以查看下方相关照片。
 5. 不向普通用户提供云宝设备状态、实时监控、日志或控制细节。`;
+
+const casualPrompt = `你是“科小贝”，龙湾区国科温州第二幼儿园的幼儿科学教育智能体。
+日常闲聊规则：
+1. 对问候、心情、天气、笑话和关于你的问题，用自然、简洁、友好的中文连续回应。
+2. 当前没有提供资料库上下文时，不要杜撰园所环境、课程安排、照片或实验资源，也不要提示用户查看并不存在的下方内容。
+3. 可以顺着用户的话题继续聊，并在合适时自然邀请对方探索一个科学现象。
+4. 不向普通用户提供云宝设备状态、实时监控、日志或控制细节。`;
 
 type SearchChunk = Awaited<ReturnType<typeof searchKnowledge>>["chunks"][number];
 
@@ -92,32 +99,82 @@ function buildLessonPlanReply(chunk: SearchChunk) {
 function hasCompleteLessonPlan(reply: string | null) {
   if (!reply) return false;
 
-  const requiredSections = [
-    /活动目标/,
-    /活动准备/,
-    /活动过程|活动步骤/,
-    /观察与表达|观察表达|观察与小结/,
-    /小结与延伸|活动小结|小结/,
-    /活动提示|延伸与安全提示|安全提示/,
-  ];
+  const sections = new Map<string, string>();
+  let currentSection = "";
+  const normalizedReply = reply.replace(/\r/g, "");
+  const sectionPattern = /^(活动目标|活动准备|活动过程|活动玩法|活动步骤|实验步骤|观察与表达|观察表达|观察与小结|小结与延伸|活动小结|小结|活动提示|延伸与安全提示|安全提示)(?:\s*[:：]\s*(.*))?$/u;
 
-  return requiredSections.every((section) => section.test(reply));
+  for (const rawLine of normalizedReply.split("\n")) {
+    const line = rawLine
+      .trim()
+      .replace(/^#{1,6}\s*/u, "")
+      .replace(/\*+/g, "")
+      .replace(/^[一二三四五六七八九十\d]+\s*[、.．:：]\s*/u, "")
+      .trim();
+    const match = line.match(sectionPattern);
+
+    if (match) {
+      const label = match[1];
+      currentSection = label === "活动玩法" || label === "活动步骤" || label === "实验步骤"
+        ? "activity"
+        : label === "活动目标"
+          ? "goals"
+          : label === "活动准备"
+            ? "preparation"
+            : label === "观察与表达" || label === "观察表达" || label === "观察与小结"
+              ? "observation"
+              : label === "小结与延伸" || label === "活动小结" || label === "小结"
+                ? "summary"
+                : "tips";
+      sections.set(currentSection, match[2]?.trim() ?? "");
+      continue;
+    }
+
+    if (currentSection) {
+      sections.set(
+        currentSection,
+        `${sections.get(currentSection) ?? ""}\n${rawLine}`.trim(),
+      );
+    }
+  }
+
+  const meaningfulLength = (value: string | undefined) =>
+    (value ?? "").replace(/[\s#*_`>\-—:：、，。！？!?()[\]{}]/gu, "").length;
+
+  return (
+    meaningfulLength(sections.get("goals")) >= 4 &&
+    meaningfulLength(sections.get("preparation")) >= 4 &&
+    meaningfulLength(sections.get("activity")) >= 12 &&
+    meaningfulLength(sections.get("observation")) >= 4 &&
+    meaningfulLength(sections.get("summary")) >= 4 &&
+    meaningfulLength(sections.get("tips")) >= 4
+  );
 }
 
 function isCasualMessage(message: string) {
   const compact = message.replace(/[\s，,。！？!?、]/g, "");
-  const hasResourceIntent = /(?:科学|实验|诗|故事|教案|材料|步骤|主题|年龄|托班|小班|中班|大班|资源|资料|园所|照片|图片|推荐|查找|搜索|检索|找|生成|查看|介绍|有没有|如何|怎么做|怎么玩|活动)/.test(compact);
-  const hasExplicitConversationIntent = /^(?:介绍(?:一下)?你自己|你喜欢什么|(?:我们)?随便聊聊|我想(?:和你)?聊聊|陪我聊聊|陪我聊天)/.test(compact);
+  const conversationalText = compact.replace(/^(?:(?:你好|您好|嗨|哈喽|hello)(?:科小贝)?(?:呀|啊|呢)?|请问?|请|麻烦(?:你)?|能否|可以|帮我)+/i, "");
+  const hasResourceIntent = /(?:科学|实验|诗|故事|教案|材料|步骤|主题|年龄|托班|小班|中班|大班|资源|资料|园所|幼儿园|学校|课程|资质|省二|评估|等级|荣誉|功能室|地址|电话|联系|招生|报名|开学|放假|照片|图片|推荐|查找|搜索|检索|找|生成|查看|有没有|如何|怎么做|怎么玩|活动|(?:介绍|推荐)(?:园所|幼儿园|课程|功能室|资质|科学|实验|故事|诗|资源|资料))/.test(compact);
+  const hasExplicitConversationIntent = /(?:介绍(?:一下|下)?(?:你自己|自己)(?:好吗|吗)?|你能介绍(?:一下|下)?(?:你自己|自己)(?:好吗|吗)?|你是谁|你喜欢什么|(?:我们)?随便聊聊|我想(?:和你)?聊聊|陪我聊聊|陪我聊天|(?:讲|说)个笑话(?:吧|呀|啊|吗)?)/.test(conversationalText);
+  // Keep natural small talk in conversation mode, but route substantive science
+  // questions through retrieval even when the user omits words such as“实验”or“资料”.
+  const hasScienceQuestionIntent =
+    /(?:水|空气|气流|光影|光|影子|彩虹|植物|动物|昆虫|磁铁|磁力|重力|浮力|液体|溶解|蒸发|温度|热|电|能源|太阳|月亮|星星|天气|雨|雪|泡泡|身体|骨头|舌头|化学|密度|表面张力|虹吸|纸片|纸鱼|火山|流体)/.test(compact) &&
+    /(?:为什么|为何|什么(?:是|原因)|怎么(?:会|做|回事)?|如何|怎样|吗|原理|原因|作用|能否|是否|可以吗|解释)/.test(compact);
 
-  if (hasExplicitConversationIntent && !/(?:科学|实验|诗|故事|教案|材料|步骤|主题|年龄|资源|资料|园所|照片|图片|活动)/.test(compact)) {
+  if (hasExplicitConversationIntent && !hasResourceIntent) {
     return true;
+  }
+
+  if (hasScienceQuestionIntent) {
+    return false;
   }
 
   if (hasResourceIntent) {
     return false;
   }
 
-  return /^(?:(?:你好|您好|嗨|哈喽|hello)(?:科小贝)?(?:呀|啊|呢|喽|哟)?|(?:科小贝)?(?:在吗|早上好|下午好|晚上好|晚安|再见|拜拜)(?:呀|啊|呢|啦)?|(?:谢谢|感谢|辛苦)(?:科小贝)?(?:啦|了|呀)?|(?:科小贝)?(?:你是谁|你叫什么|你会什么|你能做什么|能做什么|怎么用|陪我聊聊|陪我聊天|聊聊|聊天|讲个笑话|说个笑话|讲笑话|今天的?天气(?:真|挺)?好|天气(?:真|挺)?好|你吃饭了吗|吃饭了吗|无聊|哈哈+)(?:呀|啊|呢|啦)?)$/i.test(compact);
+  return true;
 }
 
 function casualFallback(message: string) {
@@ -155,7 +212,7 @@ function fallbackReply(context: string, sources: string[], message: string, casu
   const sourceText = sources.length ? `\n\n参考资料：${Array.from(new Set(sources)).slice(0, 4).join("、")}` : "";
   const snippets = context
     .split("\n")
-    .map((line) => line.trim())
+    .map((line) => line.replace(/#{1,6}\s*/gu, "").replace(/\s+/gu, " ").trim())
     .filter(Boolean)
     .slice(0, 4)
     .map((line) => `- ${line.slice(0, 210)}${line.length > 210 ? "..." : ""}`)
@@ -190,16 +247,21 @@ export async function POST(request: Request) {
     apiKey: process.env.DEEPSEEK_API_KEY,
     apiUrl: process.env.DEEPSEEK_API_URL ?? "https://api.deepseek.com/chat/completions",
     systemPrompt: requestedLessonPlan
-      ? `${systemPrompt}\n6. 当用户要求“完整教案”时，必须按“活动目标、活动准备、活动过程、观察与小结、延伸与安全提示”完整输出；活动过程不可省略。`
-      : systemPrompt,
+      ? `${knowledgePrompt}\n6. 当用户要求“完整教案”时，必须按“活动目标、活动准备、活动过程、观察与小结、延伸与安全提示”完整输出；活动过程不可省略。`
+      : casualMessage
+        ? casualPrompt
+        : knowledgePrompt,
     context,
     history: body.history ?? [],
     message,
     maxTokens: requestedLessonPlan ? 1600 : undefined,
   });
-  const usedLessonPlanFallback = Boolean(requestedLessonPlan && !hasCompleteLessonPlan(modelReply));
-  const reply = usedLessonPlanFallback
-    ? buildLessonPlanReply(requestedLessonPlan)
+  const lessonPlanFallbackChunk = requestedLessonPlan && !hasCompleteLessonPlan(modelReply)
+    ? requestedLessonPlan
+    : null;
+  const usedLessonPlanFallback = Boolean(lessonPlanFallbackChunk);
+  const reply = lessonPlanFallbackChunk
+    ? buildLessonPlanReply(lessonPlanFallbackChunk)
     : modelReply;
 
   return NextResponse.json({

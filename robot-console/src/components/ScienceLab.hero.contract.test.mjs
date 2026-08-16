@@ -11,7 +11,7 @@ test("keeps the original lab hero and limits the redesign to the option bar", ()
 
   assert.match(component, /className="lab-hero"/);
   assert.match(component, /lab-hero__photos/);
-  assert.match(component, /<RotatingText/);
+  assert.match(component, /className="rotating-text">实验室<\/span>/);
   assert.doesNotMatch(component, /className="lab-shell lab-intro"/);
   assert.match(component, /label="类型"/);
   assert.match(component, /label="主题"/);
