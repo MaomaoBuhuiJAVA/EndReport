@@ -57,7 +57,8 @@ function openFloatingChat() {
 
 export function AgentHome({ data }: AgentHomeProps) {
   const [activeHeroIndex, setActiveHeroIndex] = useState(0);
-  const secondaryHeroImage = homeHeroImages[(activeHeroIndex + 1) % homeHeroImages.length];
+  const secondaryHeroIndex = (activeHeroIndex + 1) % homeHeroImages.length;
+  const secondaryHeroImage = homeHeroImages[secondaryHeroIndex];
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -125,12 +126,13 @@ export function AgentHome({ data }: AgentHomeProps) {
 
             <div className="relative mx-auto w-full max-w-xl pb-16 sm:pb-20 lg:mx-0">
               <div className="absolute -right-5 -top-5 size-28 rounded-full border-[18px] border-[#f0ce64]/55" aria-hidden="true" />
-              <div className="relative aspect-[5/4] overflow-hidden rounded-[8px] border border-white/80 bg-[#d8e8e1] shadow-[0_24px_62px_rgba(27,67,61,0.18)]">
+              <div className="home-hero__media-stage relative aspect-[5/4]">
+                <div className="home-hero__primary-frame">
                 {homeHeroImages.map((image, index) => (
                   <Image
                     alt={index === activeHeroIndex ? image.alt : ""}
-                    className={`object-cover transition-opacity duration-700 ease-out motion-reduce:transition-none ${
-                      index === activeHeroIndex ? "opacity-100" : "opacity-0"
+                    className={`home-hero__primary-image object-cover ${
+                      index === activeHeroIndex ? "home-hero__primary-image--active" : "home-hero__primary-image--inactive"
                     }`}
                     fill
                     key={image.src}
@@ -139,13 +141,14 @@ export function AgentHome({ data }: AgentHomeProps) {
                     src={image.src}
                   />
                 ))}
-                <div className="absolute inset-x-0 top-0 bg-gradient-to-b from-[#173b42]/85 via-[#173b42]/25 to-transparent p-5 pb-20 text-white sm:p-6">
+                </div>
+                <div className="home-hero__primary-caption absolute inset-x-0 top-0 bg-gradient-to-b from-[#173b42]/85 via-[#173b42]/25 to-transparent p-5 pb-20 text-white sm:p-6">
                   <p className="text-xs font-semibold text-[#e8d78a]">科小贝正在准备</p>
                   <p className="mt-1 text-lg font-semibold">今天的科学探索</p>
                 </div>
-              </div>
-              <div className="absolute bottom-0 left-5 z-10 w-[42%] max-w-60 overflow-hidden rounded-[8px] border-4 border-white bg-[#d8e8e1] shadow-[0_18px_38px_rgba(27,67,61,0.18)] sm:left-8 sm:w-[38%]">
-                <div className="relative aspect-[4/3]">
+                <div className="home-hero__secondary-frame">
+                  <div key={secondaryHeroImage.src} className="home-hero__secondary-image">
+                    <div className="relative aspect-[4/3] h-full">
                   <Image
                     alt={secondaryHeroImage.alt}
                     className="object-cover"
@@ -153,6 +156,8 @@ export function AgentHome({ data }: AgentHomeProps) {
                     sizes="(min-width: 1024px) 18vw, 40vw"
                     src={secondaryHeroImage.src}
                   />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
