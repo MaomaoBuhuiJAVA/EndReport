@@ -89,7 +89,7 @@ async function main() {
           type: "图片资源",
           knowledgeBaseId: item.baseId,
           semester: item.semester,
-          title: `${item.title} · 图片 ${index + 1}`,
+          title: `${item.title} · 操作步骤 ${index + 1}`,
           filePath,
           publicPath: await publicImagePath(image.filePath),
           externalUrl: "",

@@ -1,12 +1,22 @@
 import { createHash } from "node:crypto";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import mammoth from "mammoth";
 import sharp from "sharp";
 
 const repoRoot = process.cwd();
-const defaultSourceRoot = path.resolve(repoRoot, "..", "..", "科学诗、科学故事、科学教案、科学实验");
-const sourceRoot = path.resolve(process.env.SCIENCE_SOURCE_DIR || defaultSourceRoot);
+const sourceRootCandidates = [
+  path.join(
+    process.env.USERPROFILE || "",
+    "Desktop",
+    "科学诗、科学故事、科学教案、科学实验",
+  ),
+  path.resolve(repoRoot, "..", "..", "科学诗、科学故事、科学教案、科学实验"),
+];
+const sourceRoot = path.resolve(
+  process.env.SCIENCE_SOURCE_DIR || sourceRootCandidates.find((candidate) => fsSync.existsSync(candidate)) || sourceRootCandidates[0],
+);
 const outputCatalog = path.join(repoRoot, "src", "data", "science-knowledge.json");
 const outputAssetRoot = path.join(repoRoot, "public", "science-assets");
 
@@ -83,6 +93,32 @@ function titleFromQuotedText(value) {
 
 function titleFromExperimentFile(filePath) {
   return titleFromQuotedText(path.basename(filePath, path.extname(filePath)));
+}
+
+function parseExperimentImageName(fileName) {
+  const match = fileName.match(/(?:材料准备|操作|视频资源)\s*(\d+)\.(?:png|jpe?g|webp)$/iu);
+  if (match) {
+    const role = fileName.includes("材料准备")
+      ? "material"
+      : fileName.includes("视频资源")
+        ? "video"
+        : "operation";
+    return { role, number: Number(match[1]) };
+  }
+
+  const legacyMatch = fileName.match(/图片\s*(\d+)\.(?:png|jpe?g|webp)$/iu);
+  return legacyMatch ? { role: "legacy", number: Number(legacyMatch[1]) } : null;
+}
+
+function imageRoleRank(role) {
+  return { material: 0, operation: 1, legacy: 2, video: 3 }[role] ?? 4;
+}
+
+function imageResourceTitle(title, image, fallbackNumber) {
+  const number = image?.number ?? fallbackNumber;
+  if (image?.role === "material") return `${title} · 材料准备 ${number}`;
+  if (image?.role === "operation") return `${title} · 操作步骤 ${number}`;
+  return `${title} · 实验图片 ${number}`;
 }
 
 function sourceDetails(sourceFile, title, body, ageLabel, topic, category, resources = []) {
@@ -184,10 +220,20 @@ async function collectExperimentImages() {
     const title = titleFromQuotedText(packageName);
     if (!title || !ageOrder.has(ageLabel)) continue;
 
+    const image = parseExperimentImageName(path.basename(sourceImage));
+    if (!image) continue;
+
     const key = imageKey(topic, ageLabel, title);
     const images = grouped.get(key) ?? [];
-    images.push(sourceImage);
+    images.push({ filePath: sourceImage, ...image });
     grouped.set(key, images);
+  }
+
+  for (const images of grouped.values()) {
+    images.sort(
+      (left, right) =>
+        imageRoleRank(left.role) - imageRoleRank(right.role) || left.number - right.number,
+    );
   }
 
   return grouped;
@@ -204,7 +250,8 @@ async function copyExperimentImage(sourceImage) {
   return `/science-assets/experiments/${outputName}`;
 }
 
-async function isGalleryImage(sourceImage) {
+async function isGalleryImage(sourceImage, image = parseExperimentImageName(path.basename(sourceImage))) {
+  if (image?.role === "video") return false;
   const { width, height } = await sharp(sourceImage).metadata();
   const isQrCode = width === height && typeof width === "number" && width >= 290 && width <= 310;
   return !isQrCode;
@@ -333,19 +380,25 @@ async function buildExperiments(imagesByExperiment) {
 
       const sourceImages = imagesByExperiment.get(imageKey(topic, ageLabel, section.title)) ?? [];
       let galleryImageIndex = 0;
+      const fallbackCounters = { material: 0, operation: 0, legacy: 0 };
       for (const sourceImage of sourceImages) {
-        if (!(await isGalleryImage(sourceImage))) continue;
+        if (!(await isGalleryImage(sourceImage.filePath, sourceImage))) continue;
+        fallbackCounters[sourceImage.role] = (fallbackCounters[sourceImage.role] ?? 0) + 1;
         galleryImageIndex += 1;
         resources.push({
-          id: stableId("IMAGE", relativeSourcePath(sourceImage), section.title),
+          id: stableId("IMAGE", relativeSourcePath(sourceImage.filePath), section.title),
           type: "图片资源",
           knowledgeBaseId: baseId,
           semester: ageLabel,
-          title: `${section.title} · 图片 ${galleryImageIndex}`,
-          filePath: relativeSourcePath(sourceImage),
-          publicPath: await copyExperimentImage(sourceImage),
+          title: imageResourceTitle(
+            section.title,
+            sourceImage,
+            fallbackCounters[sourceImage.role] || galleryImageIndex,
+          ),
+          filePath: relativeSourcePath(sourceImage.filePath),
+          publicPath: await copyExperimentImage(sourceImage.filePath),
           externalUrl: "",
-          source: relativeSourcePath(sourceImage),
+          source: relativeSourcePath(sourceImage.filePath),
           isPublic: true,
         });
       }

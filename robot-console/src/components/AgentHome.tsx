@@ -2,10 +2,10 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import {
   ArrowRight,
   BookOpenText,
-  BotMessageSquare,
   FileText,
   FlaskConical,
   MessageCircle,
@@ -16,8 +16,18 @@ import { GardenSeal } from "@/components/GardenSeal";
 import type { SiteData } from "@/lib/site-data";
 
 type AgentHomeProps = {
-  data: Pick<SiteData, "profile" | "campusPhotos" | "rooms">;
+  data: Pick<SiteData, "profile">;
 };
+
+const homeHeroImages = [
+  { src: "/gallery/kexiaobei-home/kexiaobei-home-01.webp", alt: "幼儿园科学活动现场" },
+  { src: "/gallery/kexiaobei-home/kexiaobei-home-02.webp", alt: "幼儿园科学探索活动" },
+  { src: "/gallery/kexiaobei-home/kexiaobei-home-03.webp", alt: "幼儿园科学教育场景" },
+  { src: "/gallery/kexiaobei-home/kexiaobei-home-04.webp", alt: "幼儿园科学实验活动" },
+  { src: "/gallery/kexiaobei-home/kexiaobei-home-05.webp", alt: "幼儿园科学学习现场" },
+  { src: "/gallery/kexiaobei-home/kexiaobei-home-06.webp", alt: "幼儿园科学课堂活动" },
+  { src: "/gallery/kexiaobei-home/kexiaobei-home-07.webp", alt: "幼儿园科学探索现场" },
+] as const;
 
 const capabilities = [
   {
@@ -46,10 +56,16 @@ function openFloatingChat() {
 }
 
 export function AgentHome({ data }: AgentHomeProps) {
-  const heroImage =
-    data.rooms.find((room) => room.assets[0])?.assets[0]?.url ??
-    data.campusPhotos[0]?.url ??
-    "/gallery/campus-01.webp";
+  const [activeHeroIndex, setActiveHeroIndex] = useState(0);
+  const secondaryHeroImage = homeHeroImages[(activeHeroIndex + 1) % homeHeroImages.length];
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setActiveHeroIndex((current) => (current + 1) % homeHeroImages.length);
+    }, 5000);
+
+    return () => window.clearInterval(timer);
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#f7f7f2] text-[#173b42]">
@@ -107,22 +123,36 @@ export function AgentHome({ data }: AgentHomeProps) {
               </div>
             </div>
 
-            <div className="relative mx-auto w-full max-w-xl lg:mx-0">
+            <div className="relative mx-auto w-full max-w-xl pb-16 sm:pb-20 lg:mx-0">
               <div className="absolute -right-5 -top-5 size-28 rounded-full border-[18px] border-[#f0ce64]/55" aria-hidden="true" />
               <div className="relative aspect-[5/4] overflow-hidden rounded-[8px] border border-white/80 bg-[#d8e8e1] shadow-[0_24px_62px_rgba(27,67,61,0.18)]">
-                <Image alt="科小贝服务的幼儿园科学活动环境" className="object-cover" fill priority sizes="(min-width: 1024px) 46vw, 92vw" src={heroImage} />
+                {homeHeroImages.map((image, index) => (
+                  <Image
+                    alt={index === activeHeroIndex ? image.alt : ""}
+                    className={`object-cover transition-opacity duration-700 ease-out motion-reduce:transition-none ${
+                      index === activeHeroIndex ? "opacity-100" : "opacity-0"
+                    }`}
+                    fill
+                    key={image.src}
+                    priority={index === 0}
+                    sizes="(min-width: 1024px) 46vw, 92vw"
+                    src={image.src}
+                  />
+                ))}
                 <div className="absolute inset-x-0 top-0 bg-gradient-to-b from-[#173b42]/85 via-[#173b42]/25 to-transparent p-5 pb-20 text-white sm:p-6">
                   <p className="text-xs font-semibold text-[#e8d78a]">科小贝正在准备</p>
                   <p className="mt-1 text-lg font-semibold">今天的科学探索</p>
                 </div>
               </div>
-              <div className="relative -mt-10 ml-5 w-[min(286px,calc(100%_-_20px))] rounded-[8px] border border-white/80 bg-white p-4 shadow-[0_18px_38px_rgba(27,67,61,0.18)] sm:ml-8 sm:p-5">
-                <div className="flex items-center gap-3">
-                  <span className="grid size-10 place-items-center rounded-full bg-[#e8f4ef] text-[#176b5d]"><BotMessageSquare size={19} /></span>
-                  <div>
-                    <p className="text-sm font-bold text-[#173b42]">可以这样问科小贝</p>
-                    <p className="mt-0.5 text-xs text-[#6a817b]">“生成《玩转纸片》完整教案”</p>
-                  </div>
+              <div className="absolute bottom-0 left-5 z-10 w-[42%] max-w-60 overflow-hidden rounded-[8px] border-4 border-white bg-[#d8e8e1] shadow-[0_18px_38px_rgba(27,67,61,0.18)] sm:left-8 sm:w-[38%]">
+                <div className="relative aspect-[4/3]">
+                  <Image
+                    alt={secondaryHeroImage.alt}
+                    className="object-cover"
+                    fill
+                    sizes="(min-width: 1024px) 18vw, 40vw"
+                    src={secondaryHeroImage.src}
+                  />
                 </div>
               </div>
             </div>

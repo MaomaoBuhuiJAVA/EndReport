@@ -147,14 +147,20 @@ function scienceResourceKey(resource: ScienceResource) {
 function mergeScienceResources(
   packagedResources: ScienceResource[],
   databaseResources: ScienceResource[],
+  preferPackagedExperimentMedia = false,
 ) {
+  const effectiveDatabaseResources = preferPackagedExperimentMedia
+    ? databaseResources.filter(
+        (resource) => resource.type !== "图片资源" && resource.type !== "视频资源",
+      )
+    : databaseResources;
   const packagedByKey = new Map(
     packagedResources.map((resource) => [scienceResourceKey(resource), resource]),
   );
-  const databaseKeys = new Set(databaseResources.map(scienceResourceKey));
+  const databaseKeys = new Set(effectiveDatabaseResources.map(scienceResourceKey));
 
   return [
-    ...databaseResources.map((resource) => {
+    ...effectiveDatabaseResources.map((resource) => {
       const packagedResource = packagedByKey.get(scienceResourceKey(resource));
       if (!packagedResource) return resource;
 
@@ -173,7 +179,11 @@ function mergeScienceKnowledgeRecord<T extends ScienceKnowledgeSummary>(
   packagedItem: T,
   databaseItem: T,
 ): T {
-  const resources = mergeScienceResources(packagedItem.resources, databaseItem.resources);
+  const resources = mergeScienceResources(
+    packagedItem.resources,
+    databaseItem.resources,
+    packagedItem.category === "科学实验",
+  );
 
   return {
     ...packagedItem,

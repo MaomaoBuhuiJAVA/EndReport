@@ -81,6 +81,50 @@ describe("mergeScienceKnowledgeSummaries", () => {
     ]);
   });
 
+  it("uses packaged experiment media when database resources still use obsolete image names", () => {
+    const oldImage = resource("图片资源", "纸片 · 图片 1", {
+      publicPath: "/science-assets/experiments/old.png",
+    });
+    const oldVideo = resource("视频资源", "纸片 视频", {
+      publicPath: "/science-assets/video-qr/old.png",
+      externalUrl: "https://example.test/old-video",
+    });
+    const lesson = resource("教案资源", "纸片 · 实验教案");
+    const material = resource("图片资源", "纸片 · 材料准备 1", {
+      publicPath: "/science-assets/experiments/material.png",
+    });
+    const operation = resource("图片资源", "纸片 · 操作步骤 1", {
+      publicPath: "/science-assets/experiments/step.png",
+    });
+    const video = resource("视频资源", "纸片 视频", {
+      publicPath: "/science-assets/video-qr/source.png",
+      externalUrl: "https://example.test/source-video",
+    });
+    const packaged = [
+      {
+        ...summary("EXP-shared", "纸片"),
+        category: "科学实验" as const,
+        resources: [lesson, material, operation, video],
+        resourceTypes: ["教案资源" as const, "图片资源" as const, "视频资源" as const],
+      },
+    ];
+    const database = [
+      {
+        ...summary("EXP-shared", "纸片"),
+        category: "科学实验" as const,
+        resources: [lesson, oldImage, oldVideo],
+        resourceTypes: ["教案资源" as const, "图片资源" as const, "视频资源" as const],
+      },
+    ];
+
+    expect(mergeScienceKnowledgeSummaries(packaged, database)).toMatchObject([
+      {
+        resources: [lesson, material, operation, video],
+        resourceTypes: ["教案资源", "图片资源", "视频资源"],
+      },
+    ]);
+  });
+
   it("keeps a corrected story topic when an older database record still has the source-folder topic", () => {
     const title = "会变色的小水滴";
     const packaged = [

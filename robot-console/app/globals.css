@@ -1424,6 +1424,17 @@ img {
   font-weight: 700;
 }
 
+.knowledge-detail__step-group + .knowledge-detail__step-group {
+  margin-top: 18px;
+}
+
+.knowledge-detail__step-group h4 {
+  margin: 0 0 8px;
+  color: #62807a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .knowledge-detail__steps .knowledge-detail__gallery {
   margin: 0;
   padding: 0;
@@ -1479,13 +1490,36 @@ img {
 }
 
 .video-resource {
-  display: flex;
-  align-items: center;
-  gap: 18px;
   margin: 6px 0 22px;
 }
 
-.video-resource .video-link {
+.video-resource__items {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 20px 24px;
+}
+
+.video-resource__item {
+  display: grid;
+  gap: 8px;
+  min-width: 144px;
+}
+
+.video-resource__label {
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.video-resource__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.video-resource__actions .video-link {
   margin: 0;
 }
 
@@ -1511,8 +1545,12 @@ img {
 }
 
 @media (max-width: 560px) {
-  .video-resource {
-    align-items: flex-start;
+  .video-resource__items {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .video-resource__actions {
     flex-direction: column;
   }
 }
@@ -2672,11 +2710,6 @@ img {
 
   .compact-filter-row--type .compact-filter-choice.is-active .compact-filter-choice__label {
     color: #07524c;
-  }
-
-  .compact-filter-row--topic .compact-filter-row__choices {
-    flex-wrap: wrap;
-    overflow-x: visible;
   }
 
   .compact-filter-choice {

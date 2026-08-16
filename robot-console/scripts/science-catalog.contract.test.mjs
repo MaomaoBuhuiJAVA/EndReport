@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -6,6 +7,19 @@ import sharp from "sharp";
 
 const catalogPath = path.resolve("src/data/science-knowledge.json");
 const catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
+
+function preferredSourceRoot() {
+  const candidates = [
+    process.env.SCIENCE_SOURCE_DIR,
+    path.join(
+      process.env.USERPROFILE || "",
+      "Desktop",
+      "科学诗、科学故事、科学教案、科学实验",
+    ),
+    path.resolve("..", "..", "科学诗、科学故事、科学教案、科学实验"),
+  ].filter(Boolean);
+  return candidates.find((candidate) => fs.existsSync(candidate));
+}
 
 test("catalog uses the three canonical resource types", () => {
   assert.deepEqual(
@@ -58,7 +72,7 @@ test("catalog keeps every activity and image from the experiment material packag
 
   assert.equal(experiments.length, 21);
   assert.ok(experiments.some((item) => item.title === "空气动力小汽车"));
-  assert.equal(importedPackageImages.length, 68);
+  assert.equal(importedPackageImages.length, 125);
   assert.equal(localStepImages.length, 10);
   assert.equal(imageResources.length, importedPackageImages.length + localStepImages.length);
 });
@@ -97,6 +111,57 @@ test("every experiment keeps its playable video link and scannable QR code", () 
   );
 });
 
+test("source experiment packages keep their provided QR image instead of a generated placeholder", () => {
+  const sourceRoot = preferredSourceRoot();
+  assert.ok(sourceRoot, "science source directory is required for QR provenance checks");
+  const imageRoot = path.join(sourceRoot, "科学实验图片资源", "科学教案");
+  const sourcePackages = [];
+
+  for (const imagePath of walkPngFiles(imageRoot)) {
+    if (!/视频资源\d+\.png$/u.test(path.basename(imagePath))) continue;
+    const [topic, ageLabel, packageName] = path.relative(imageRoot, imagePath).split(path.sep);
+    sourcePackages.push({ topic, ageLabel, title: imageTitleFromPackage(packageName), imagePath });
+  }
+
+  assert.equal(sourcePackages.length, 21);
+  const packagesByExperiment = new Map();
+  for (const entry of sourcePackages) {
+    const key = `${entry.topic}\u0000${entry.ageLabel}\u0000${entry.title}`;
+    const images = packagesByExperiment.get(key) ?? [];
+    images.push(entry.imagePath);
+    packagesByExperiment.set(key, images);
+  }
+
+  let sourceBackedQrCount = 0;
+  for (const [key, sourceQrImages] of packagesByExperiment) {
+    const [topic, ageLabel, title] = key.split("\u0000");
+    const item = catalog.find(
+      (entry) =>
+        entry.category === "科学实验" &&
+        entry.topic === topic &&
+        entry.ageLabel === ageLabel &&
+        entry.title === title,
+    );
+    assert.ok(item, `catalog is missing ${topic}/${ageLabel}/${title}`);
+    const videos = item.resources.filter((resource) => resource.type === "视频资源");
+    assert.equal(videos.length, sourceQrImages.length, `${title} should retain every provided QR image`);
+    assert.ok(videos.every((video) => video.filePath.startsWith("科学实验图片资源/")));
+    sourceBackedQrCount += videos.length;
+
+    const copiedHashes = new Set(
+      videos.map((video) => {
+        const copiedQr = path.resolve("public", video.publicPath.replace(/^\//u, ""));
+        return createHash("sha256").update(fs.readFileSync(copiedQr)).digest("hex");
+      }),
+    );
+    const sourceHashes = new Set(
+      sourceQrImages.map((sourceQr) => createHash("sha256").update(fs.readFileSync(sourceQr)).digest("hex")),
+    );
+    assert.deepEqual(copiedHashes, sourceHashes, `${title} should retain its complete QR set`);
+  }
+  assert.equal(sourceBackedQrCount, 21);
+});
+
 test("catalog IDs are unique and every item has a source path", () => {
   assert.equal(new Set(catalog.map((item) => item.id)).size, catalog.length);
   assert.ok(catalog.every((item) => item.sourceFile));
@@ -126,7 +191,8 @@ async function isGalleryImage(filePath) {
 }
 
 test("accepted source experiment images map to matching catalog records in numeric source order", async () => {
-  const sourceRoot = path.resolve("..", "..", "科学诗、科学故事、科学教案、科学实验");
+  const sourceRoot = preferredSourceRoot();
+  assert.ok(sourceRoot);
   const imageRoot = path.join(sourceRoot, "科学实验图片资源", "科学教案");
   const imagesByExperiment = new Map();
 
@@ -139,11 +205,18 @@ test("accepted source experiment images map to matching catalog records in numer
 
     const key = `${topic}\u0000${ageLabel}\u0000${title}`;
     const files = imagesByExperiment.get(key) ?? [];
-    files.push(path.relative(sourceRoot, imagePath).replaceAll("\\", "/"));
+    const fileName = path.basename(imagePath);
+    const material = fileName.match(/材料准备(\d+)\.png$/u);
+    const operation = fileName.match(/操作(\d+)\.png$/u);
+    files.push({
+      path: path.relative(sourceRoot, imagePath).replaceAll("\\", "/"),
+      role: material ? "材料准备" : operation ? "操作步骤" : "实验图片",
+      number: Number(material?.[1] ?? operation?.[1] ?? files.length + 1),
+    });
     imagesByExperiment.set(key, files);
   }
 
-  for (const [key, expectedPaths] of imagesByExperiment) {
+  for (const [key, expectedImages] of imagesByExperiment) {
     const [topic, ageLabel, title] = key.split("\u0000");
     const matches = catalog.filter(
       (item) =>
@@ -154,15 +227,77 @@ test("accepted source experiment images map to matching catalog records in numer
     const imageResources = matches[0].resources.filter(
       (resource) => resource.type === "图片资源" && resource.isPublic,
     );
+    const expected = expectedImages
+      .toSorted((left, right) =>
+        left.role === right.role ? left.number - right.number : left.role === "材料准备" ? -1 : 1,
+      );
     assert.deepEqual(
       imageResources.map((resource) => resource.filePath),
-      expectedPaths,
+      expected.map((image) => image.path),
       `${title} image resources should retain their source step order`,
     );
     assert.deepEqual(
       imageResources.map((resource) => resource.title),
-      expectedPaths.map((_, index) => `${title} · 图片 ${index + 1}`),
-      `${title} image labels should describe the displayed step order`,
+      expected.map((image) => `${title} · ${image.role} ${image.number}`),
+      `${title} image labels should describe the source role and order`,
     );
+  }
+});
+
+test("source image roles become meaningful catalog labels in material-first order", async () => {
+  const sourceRoot = preferredSourceRoot();
+  assert.ok(sourceRoot);
+  const imageRoot = path.join(sourceRoot, "科学实验图片资源", "科学教案");
+  const sourceImagesByExperiment = new Map();
+
+  for (const imagePath of walkPngFiles(imageRoot)) {
+    const fileName = path.basename(imagePath);
+    const roleMatch = fileName.match(/(材料准备|操作)(\d+)\.png$/u);
+    if (!roleMatch) continue;
+
+    const [topic, ageLabel, packageName] = path.relative(imageRoot, imagePath).split(path.sep);
+    const title = imageTitleFromPackage(packageName);
+    assert.ok(title, `experiment image package is missing a quoted title: ${imagePath}`);
+
+    const key = `${topic}\u0000${ageLabel}\u0000${title}`;
+    const images = sourceImagesByExperiment.get(key) ?? [];
+    images.push({
+      source: path.relative(sourceRoot, imagePath).replaceAll("\\", "/"),
+      role: roleMatch[1],
+      number: Number(roleMatch[2]),
+    });
+    sourceImagesByExperiment.set(key, images);
+  }
+
+  assert.equal(sourceImagesByExperiment.size, 11);
+  assert.equal(
+    [...sourceImagesByExperiment.values()].reduce((total, images) => total + images.length, 0),
+    125,
+  );
+
+  for (const [key, expectedImages] of sourceImagesByExperiment) {
+    const [topic, ageLabel, title] = key.split("\u0000");
+    const item = catalog.find(
+      (entry) =>
+        entry.category === "科学实验" &&
+        entry.topic === topic &&
+        entry.ageLabel === ageLabel &&
+        entry.title === title,
+    );
+    assert.ok(item, `catalog is missing ${topic}/${ageLabel}/${title}`);
+
+    const expected = expectedImages
+      .toSorted((left, right) =>
+        left.role === right.role ? left.number - right.number : left.role === "材料准备" ? -1 : 1,
+      )
+      .map((entry) => ({
+        source: entry.source,
+        title: `${title} · ${entry.role === "材料准备" ? "材料准备" : "操作步骤"} ${entry.number}`,
+      }));
+    const actual = item.resources
+      .filter((resource) => resource.type === "图片资源" && resource.filePath.startsWith("科学实验图片资源/"))
+      .map((resource) => ({ source: resource.filePath, title: resource.title }));
+
+    assert.deepEqual(actual, expected, `${title} should retain role-aware source order and labels`);
   }
 });

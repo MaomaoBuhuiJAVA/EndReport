@@ -36,13 +36,16 @@ import {
 } from "@/lib/science-types";
 import {
   availableAges,
-  availableTopics,
   availableTypes,
   filterScienceItems,
   normalizeScienceSelection,
   type ScienceSelection,
 } from "@/lib/science-navigation";
-import { orderedExperimentImages } from "@/lib/science-step-images";
+import {
+  experimentImageCaption,
+  experimentImageRole,
+  orderedExperimentImages,
+} from "@/lib/science-step-images";
 
 const labNavItems: GooeyNavItem[] = [
   { key: "overview", label: "科小贝首页", href: "/" },
@@ -99,9 +102,7 @@ function CompactFilterRow({
   const rowClassName =
     label === "类型"
       ? "compact-filter-row compact-filter-row--type"
-      : label === "主题"
-        ? "compact-filter-row compact-filter-row--topic"
-        : "compact-filter-row";
+      : "compact-filter-row";
 
   return (
     <div className={rowClassName}>
@@ -219,9 +220,21 @@ function KnowledgeDetail({
 }) {
   const display = item ?? summary;
   const images = publicImages(display);
-  const videoResource = display.resources.find((resource) => resource.type === "视频资源");
-  const videoUrl = item?.videoUrl || videoResource?.externalUrl;
-  const videoQrCode = videoResource?.publicPath;
+  const imageGroups = [
+    {
+      key: "material",
+      label: "材料准备",
+      images: images.filter((image) => experimentImageRole(image) === "material"),
+    },
+    {
+      key: "operation",
+      label: "操作步骤",
+      images: images.filter((image) => experimentImageRole(image) !== "material"),
+    },
+  ].filter((group) => group.images.length);
+  const videoResources = display.resources.filter(
+    (resource) => resource.type === "视频资源" && resource.isPublic,
+  );
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -300,25 +313,61 @@ function KnowledgeDetail({
             </div>
           ) : null}
 
-          {videoUrl ? (
+          {videoResources.length ? (
             <section className="video-resource" aria-label="实验视频资源">
-              <a className="video-link" href={videoUrl} target="_blank" rel="noreferrer">
-                <PlayCircle size={19} />
-                播放视频
-                <ExternalLink size={15} />
-              </a>
-              {videoQrCode ? (
-                <a
-                  className="video-qr-code"
-                  href={videoUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label="扫码打开视频"
-                >
-                  <Image src={videoQrCode} alt="视频二维码" width={144} height={144} sizes="144px" />
-                  <span>扫码观看视频</span>
-                </a>
-              ) : null}
+              <div className="video-resource__items">
+                {videoResources.map((videoResource, index) => {
+                  const videoLabel = `视频资源 ${index + 1}`;
+                  const videoUrl =
+                    videoResource.externalUrl || (index === 0 ? item?.videoUrl : "");
+                  const qrContent = videoResource.publicPath ? (
+                    <>
+                      <Image
+                        src={videoResource.publicPath}
+                        alt={`${videoLabel}二维码`}
+                        width={144}
+                        height={144}
+                        sizes="144px"
+                      />
+                      <span>{videoUrl ? "扫码观看视频" : "扫码查看视频"}</span>
+                    </>
+                  ) : null;
+
+                  return (
+                    <div className="video-resource__item" key={videoResource.id}>
+                      {videoResources.length > 1 ? (
+                        <span className="video-resource__label">{videoLabel}</span>
+                      ) : null}
+                      <div className="video-resource__actions">
+                        {videoUrl ? (
+                          <a className="video-link" href={videoUrl} target="_blank" rel="noreferrer">
+                            <PlayCircle size={19} />
+                            播放视频
+                            <ExternalLink size={15} />
+                          </a>
+                        ) : null}
+                        {qrContent ? (
+                          videoUrl ? (
+                            <a
+                              className="video-qr-code"
+                              href={videoUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              aria-label={`扫码打开${videoLabel}`}
+                            >
+                              {qrContent}
+                            </a>
+                          ) : (
+                            <span className="video-qr-code" aria-label={`${videoLabel}二维码`}>
+                              {qrContent}
+                            </span>
+                          )
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </section>
           ) : display.resources.some((resource) => resource.type === "视频资源") ? (
             <div className="video-source-note" role="note">
@@ -343,24 +392,32 @@ function KnowledgeDetail({
 
               {display.category === "科学实验" && images.length ? (
                 <section className="knowledge-detail__steps" aria-labelledby="experiment-step-images">
-                  <h3 id="experiment-step-images">实验步骤图片</h3>
-                  <ol className="knowledge-detail__gallery">
-                    {images.map((image, index) => (
-                      <li key={image.id}>
-                        <figure>
-                          <span className="knowledge-detail__image knowledge-detail__step-image">
-                            <Image
-                              src={image.publicPath}
-                              alt={`实验步骤图片 ${index + 1}：${image.title}`}
-                              fill
-                              sizes="(min-width: 720px) 410px, 90vw"
-                            />
-                          </span>
-                          <figcaption>实验步骤图片 {index + 1}</figcaption>
-                        </figure>
-                      </li>
-                    ))}
-                  </ol>
+                  <h3 id="experiment-step-images">实验图片</h3>
+                  {imageGroups.map((group) => (
+                    <section className="knowledge-detail__step-group" key={group.key}>
+                      <h4>{group.label}</h4>
+                      <ol className="knowledge-detail__gallery">
+                        {group.images.map((image) => {
+                          const caption = experimentImageCaption(image);
+                          return (
+                            <li key={image.id}>
+                              <figure>
+                                <span className="knowledge-detail__image knowledge-detail__step-image">
+                                  <Image
+                                    src={image.publicPath}
+                                    alt={`${group.label}：${caption}`}
+                                    fill
+                                    sizes="(min-width: 720px) 410px, 90vw"
+                                  />
+                                </span>
+                                <figcaption>{caption}</figcaption>
+                              </figure>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    </section>
+                  ))}
                 </section>
               ) : null}
             </>
@@ -404,13 +461,9 @@ export function ScienceLab({
   }, []);
 
   const categories = useMemo(() => availableTypes(initialItems), [initialItems]);
-  const topics = useMemo(
-    () => availableTopics(initialItems, selection.category),
-    [initialItems, selection.category],
-  );
   const ages = useMemo(
-    () => availableAges(initialItems, selection.category, selection.topic),
-    [initialItems, selection.category, selection.topic],
+    () => availableAges(initialItems, selection.category, ""),
+    [initialItems, selection.category],
   );
   const ageCounts = useMemo(
     () =>
@@ -420,12 +473,11 @@ export function ScienceLab({
           initialItems.filter(
             (item) =>
               (!selection.category || item.category === selection.category) &&
-              (!selection.topic || item.topic === selection.topic) &&
               item.ageLabel === age,
           ).length,
         ]),
       ),
-    [ages, initialItems, selection.category, selection.topic],
+    [ages, initialItems, selection.category],
   );
 
   const filtered = useMemo(
@@ -438,17 +490,6 @@ export function ScienceLab({
       normalizeScienceSelection(initialItems, {
         category: category === "全部" ? "" : category,
         topic: "",
-        ageLabel: "",
-      }),
-    );
-    setVisibleCount(12);
-  }
-
-  function changeTopic(topic: string) {
-    setSelection(
-      normalizeScienceSelection(initialItems, {
-        ...selection,
-        topic: topic === "全部" ? "" : topic,
         ageLabel: "",
       }),
     );
@@ -588,12 +629,6 @@ export function ScienceLab({
               onChange={changeCategory}
             />
             <CompactFilterRow
-              label="主题"
-              items={["全部", ...topics]}
-              value={selection.topic}
-              onChange={changeTopic}
-            />
-            <CompactFilterRow
               label="年龄段"
               items={["全部", ...ages]}
               value={selection.ageLabel}
@@ -607,7 +642,7 @@ export function ScienceLab({
               <strong>{filtered.length}</strong>
               <span> 条匹配资料</span>
             </div>
-            <span>{selection.category || "全部"} / {selection.topic || "全部"} / {selection.ageLabel || "全部"}</span>
+            <span>{selection.category || "全部"} / {selection.ageLabel || "全部"}</span>
           </div>
 
           {resourceNotice ? (

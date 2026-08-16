@@ -14,20 +14,20 @@ test("keeps the original lab hero and limits the redesign to the option bar", ()
   assert.match(component, /className="rotating-text">实验室<\/span>/);
   assert.doesNotMatch(component, /className="lab-shell lab-intro"/);
   assert.match(component, /label="类型"/);
-  assert.match(component, /label="主题"/);
   assert.match(component, /label="年龄段"/);
+  assert.doesNotMatch(component, /label="主题"/);
 });
 
-test("uses visual type buttons on mobile and wraps topic choices when needed", () => {
+test("keeps only type and age controls in the filter panel", () => {
   const component = fs.readFileSync(componentPath, "utf8");
-  const styles = fs.readFileSync(stylesPath, "utf8");
 
   assert.match(component, /lab-category-buttons\/poetry\.png/);
   assert.match(component, /lab-category-buttons\/story\.png/);
   assert.match(component, /lab-category-buttons\/experiment\.png/);
   assert.match(component, /compact-filter-row--type/);
-  assert.match(component, /compact-filter-row--topic/);
-  assert.match(styles, /\.compact-filter-row--topic\s+\.compact-filter-row__choices\s*\{[\s\S]*?flex-wrap:\s*wrap/);
+  assert.doesNotMatch(component, /compact-filter-row--topic/);
+  assert.doesNotMatch(component, /items=\{\["全部", \.\.\.topics\]\}/);
+  assert.doesNotMatch(component, /function changeTopic/);
 });
 
 test("shows each type name below its mobile illustration", () => {
@@ -48,7 +48,7 @@ test("opens the requested resource in the existing detail dialog", () => {
   assert.match(component, /window\.clearTimeout\(autoOpenTimer\)/);
 });
 
-test("keeps topic and age optional so a search is not trapped in a sparse subgroup", () => {
+test("keeps age choices broad after removing the topic control", () => {
   const component = fs.readFileSync(componentPath, "utf8");
 
   assert.match(
@@ -56,8 +56,9 @@ test("keeps topic and age optional so a search is not trapped in a sparse subgro
     /normalizeScienceSelection\(initialItems, \{ category: "", topic: "", ageLabel: "" \}\)/,
   );
   assert.match(component, /items=\{\["全部", \.\.\.categories\]\}/);
-  assert.match(component, /items=\{\["全部", \.\.\.topics\]\}/);
   assert.match(component, /items=\{\["全部", \.\.\.ages\]\}/);
+  assert.match(component, /availableAges\(initialItems, selection\.category, ""\)/);
+  assert.doesNotMatch(component, /selection\.topic/);
 });
 
 test("renders ordered experiment images after the experiment instructions", () => {
@@ -67,13 +68,25 @@ test("renders ordered experiment images after the experiment instructions", () =
   assert.match(component, /className="knowledge-detail__steps"[\s\S]*images\.map/);
 });
 
-test("shows the video link and matching QR code in a resource detail", () => {
+test("groups source experiment images by their role with meaningful captions", () => {
+  const component = fs.readFileSync(componentPath, "utf8");
+
+  assert.match(component, /experimentImageCaption/);
+  assert.match(component, /experimentImageRole/);
+  assert.match(component, /材料准备/);
+  assert.match(component, /操作步骤/);
+  assert.doesNotMatch(component, /figcaption>实验步骤图片 \{index \+ 1\}<\/figcaption>/);
+});
+
+test("shows every collected video QR and links the resources that have a playback URL", () => {
   const component = fs.readFileSync(componentPath, "utf8");
   const styles = fs.readFileSync(stylesPath, "utf8");
 
-  assert.match(component, /const videoQrCode = videoResource\?\.publicPath/);
+  assert.match(component, /const videoResources = display\.resources\.filter/);
+  assert.match(component, /videoResources\.map/);
+  assert.match(component, /videoResource\.externalUrl/);
   assert.match(component, /className="video-resource"/);
   assert.match(component, /className="video-qr-code"/);
-  assert.match(component, /href=\{videoUrl\}/);
+  assert.match(component, /const videoLabel = `视频资源 \$\{index \+ 1\}`/);
   assert.match(styles, /\.video-qr-code\s*\{/);
 });
