@@ -197,9 +197,12 @@ export async function POST(request: Request) {
     message,
     maxTokens: requestedLessonPlan ? 1600 : undefined,
   });
-  const usedLessonPlanFallback = Boolean(requestedLessonPlan && !hasCompleteLessonPlan(modelReply));
-  const reply = usedLessonPlanFallback
-    ? buildLessonPlanReply(requestedLessonPlan)
+  const lessonPlanFallbackChunk = requestedLessonPlan && !hasCompleteLessonPlan(modelReply)
+    ? requestedLessonPlan
+    : null;
+  const usedLessonPlanFallback = Boolean(lessonPlanFallbackChunk);
+  const reply = lessonPlanFallbackChunk
+    ? buildLessonPlanReply(lessonPlanFallbackChunk)
     : modelReply;
 
   return NextResponse.json({
