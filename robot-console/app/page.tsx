@@ -1,14 +1,12 @@
-import { getSessionUser } from "@/lib/auth";
 import { getSiteData } from "@/lib/site-data";
-import { SchoolPortal } from "@/components/SchoolPortal";
+import { AgentHome } from "@/components/AgentHome";
 
 export default async function Home() {
-  const user = await getSessionUser();
-  const data = await getSiteData(user?.role);
+  const data = await getSiteData();
   const cleanSummary = data.profile.summary
     .replace(/[、与]?云宝机器人能力/g, "")
     .replace(/[、与]?云宝机器人/g, "");
-  const portalData = {
+  const homeData = {
     profile: { ...data.profile, summary: cleanSummary },
     campusPhotos: data.campusPhotos,
     rooms: data.rooms,
@@ -17,5 +15,5 @@ export default async function Home() {
     ),
   };
 
-  return <SchoolPortal data={portalData} initialUser={user} />;
+  return <AgentHome data={homeData} />;
 }

@@ -10,19 +10,39 @@ type SearchChunk = {
   id: string;
   documentId?: string | null;
   title: string;
+  document?: {
+    title?: string | null;
+  };
 };
 
-export function buildScienceLabLinks(chunks: SearchChunk[]): ScienceLabLink[] {
+function namedResourceTitles(query: string) {
+  return Array.from(query.matchAll(/[《〈「“\"]\s*([^》〉」”\"]+?)\s*[》〉」”\"]/g))
+    .map((match) => match[1]?.trim())
+    .filter((title): title is string => Boolean(title));
+}
+
+function isScienceChunk(chunk: SearchChunk) {
+  return (
+    chunk.id.startsWith("science-") ||
+    chunk.document?.title?.startsWith("科小贝实验室：") === true
+  );
+}
+
+export function buildScienceLabLinks(chunks: SearchChunk[], query = ""): ScienceLabLink[] {
+  const namedTitles = namedResourceTitles(query);
   const seen = new Set<string>();
   const links: ScienceLabLink[] = [];
 
   for (const chunk of chunks) {
     if (
       !chunk.documentId ||
-      !chunk.id.startsWith("science-") ||
-      chunk.id !== `science-${chunk.documentId}` ||
+      !isScienceChunk(chunk) ||
       seen.has(chunk.documentId)
     ) {
+      continue;
+    }
+
+    if (namedTitles.length && !namedTitles.some((title) => chunk.title.includes(title))) {
       continue;
     }
 

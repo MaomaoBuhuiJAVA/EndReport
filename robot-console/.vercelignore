@@ -3,6 +3,8 @@
 /.deploy/
 /.next/
 /node_modules/
+pnpm-lock.yaml
+robot-console
 *.doc
 *.docx
 *.xlsx

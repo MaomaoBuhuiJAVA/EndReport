@@ -47,4 +47,29 @@ describe("science lab links", () => {
     expect(findScienceSummaryFromSearch("?item=missing", [summary])).toBeNull();
     expect(findScienceSummaryFromSearch("", [summary])).toBeNull();
   });
+
+  it("keeps only the exact science resource when a teacher asks for a named lesson plan", () => {
+    expect(
+      buildScienceLabLinks(
+        [
+          { id: "science-paper", documentId: "paper", title: "玩转纸片" },
+          { id: "science-car", documentId: "car", title: "空气动力小汽车" },
+        ],
+        "生成《玩转纸片》完整教案",
+      ),
+    ).toEqual([{ id: "paper", title: "玩转纸片", href: "/lab?item=paper" }]);
+  });
+
+  it("uses the science document marker when a search chunk ID is not packaged", () => {
+    expect(
+      buildScienceLabLinks([
+        {
+          id: "database-chunk-17",
+          documentId: "story-17",
+          title: "小水滴的旅行",
+          document: { title: "科小贝实验室：小水滴的旅行" },
+        },
+      ]),
+    ).toEqual([{ id: "story-17", title: "小水滴的旅行", href: "/lab?item=story-17" }]);
+  });
 });

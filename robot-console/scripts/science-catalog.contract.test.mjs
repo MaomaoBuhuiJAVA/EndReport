@@ -26,6 +26,24 @@ test("catalog includes real story records from the new source materials", () => 
   assert.ok(stories.every((item) => item.resources.some((resource) => resource.type === "视频资源")));
 });
 
+test("corrects 会变色的小水滴 to the water and weather topic without losing its source path", () => {
+  const story = catalog.find((item) => item.title === "会变色的小水滴");
+
+  assert.ok(story);
+  assert.equal(story.category, "科学故事");
+  assert.equal(story.topic, "水科学与气象自然");
+  assert.ok(story.tags.includes("水科学与气象自然"));
+  assert.ok(!story.tags.includes("动物生活习性认知"));
+  assert.match(story.body, /展示主题：水科学与气象自然/u);
+  assert.match(story.excerpt, /展示主题：水科学与气象自然/u);
+  assert.ok(!story.body.includes("原始主题：动物生活习性认知"));
+  assert.equal(
+    story.sourceFile,
+    "科学故事/动物生活习性认知/教师版/中班/《会变色的小水滴》杨海倩老师（第13期）.mp4",
+  );
+  assert.equal(story.resources[0]?.source, story.sourceFile);
+});
+
 test("catalog keeps every activity and image from the experiment material packages", () => {
   const experiments = catalog.filter((item) => item.category === "科学实验");
   const imageCount = experiments.flatMap((item) => item.resources).filter((resource) => resource.type === "图片资源").length;

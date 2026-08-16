@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import { Mic, Send, X } from "lucide-react";
 import { GardenSeal } from "@/components/GardenSeal";
@@ -8,6 +9,7 @@ import type { ScienceLabLink } from "@/lib/science-lab-links";
 import Markdown from "react-markdown";
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -77,6 +79,7 @@ type SpeechRecognitionLike = {
 };
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+type KexiaobeiWindow = typeof window & { __kexiaobeiOpenRequested?: boolean };
 
 type PetAnimationState =
   | "idle"
@@ -88,7 +91,11 @@ type PetAnimationState =
 
 type WalkDirection = "left" | "right";
 
-const starters = ["推荐一个小班科学实验", "找一首小班科学诗"];
+const starters = [
+  "推荐一个小班科学实验",
+  "找一首小班科学诗",
+  "生成《玩转纸片》完整教案",
+];
 const petWidth = 116;
 const petHeight = 122;
 const viewportMargin = 6;
@@ -238,6 +245,19 @@ export function SciencePet() {
     [],
   );
 
+  useLayoutEffect(() => {
+    const assistantWindow = window as KexiaobeiWindow;
+    function openChat() {
+      assistantWindow.__kexiaobeiOpenRequested = false;
+      setOpen(true);
+    }
+
+    window.addEventListener("kexiaobei:open", openChat);
+    if (assistantWindow.__kexiaobeiOpenRequested) openChat();
+
+    return () => window.removeEventListener("kexiaobei:open", openChat);
+  }, []);
+
   useEffect(() => {
     if (open) {
       scrollRef.current?.scrollTo({
@@ -282,7 +302,7 @@ export function SciencePet() {
 
     const userMessageId = messageIdRef.current++;
     const assistantMessageId = messageIdRef.current++;
-    const history = messages.slice(-6).map((message) => ({
+    const history = messages.slice(-12).map((message) => ({
       role: message.role,
       content: message.text,
     }));
@@ -549,7 +569,7 @@ export function SciencePet() {
             </header>
 
             <div ref={scrollRef} className="pet-chat__messages" aria-live="polite">
-              {messages.slice(-8).map((message) => (
+              {messages.map((message) => (
                 <div
                   key={message.id}
                   className={`pet-message pet-message--${message.role}`}
@@ -574,9 +594,9 @@ export function SciencePet() {
                   {message.labLinks?.length ? (
                     <div className="pet-message__lab-links">
                       {message.labLinks.map((link) => (
-                        <a className="pet-message__lab-link" href={link.href} key={link.id}>
+                        <Link className="pet-message__lab-link" href={link.href} key={link.id}>
                           查看《{link.title}》
-                        </a>
+                        </Link>
                       ))}
                     </div>
                   ) : null}
@@ -593,15 +613,13 @@ export function SciencePet() {
               ) : null}
             </div>
 
-            {messages.length === 1 ? (
-              <div className="pet-chat__starters">
-                {starters.map((starter) => (
-                  <button key={starter} type="button" onClick={() => void sendMessage(starter)}>
-                    {starter}
-                  </button>
-                ))}
-              </div>
-            ) : null}
+            <div className="pet-chat__starters">
+              {starters.map((starter) => (
+                <button key={starter} type="button" onClick={() => void sendMessage(starter)}>
+                  {starter}
+                </button>
+              ))}
+            </div>
 
             <div className="pet-chat__composer">
               {voiceNotice ? (

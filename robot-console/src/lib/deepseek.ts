@@ -7,6 +7,7 @@ type GenerateDeepSeekReplyArgs = {
   context: string;
   history: ConversationMessage[];
   message: string;
+  maxTokens?: number;
   fetchImpl?: typeof fetch;
 };
 
@@ -25,6 +26,7 @@ export async function generateDeepSeekReply({
   context,
   history,
   message,
+  maxTokens = 900,
   fetchImpl = fetch,
 }: GenerateDeepSeekReplyArgs) {
   if (!apiKey) return null;
@@ -50,11 +52,11 @@ export async function generateDeepSeekReply({
               ? `资料库检索内容如下：\n${context.slice(0, 8000)}`
               : "资料库检索内容：未找到直接相关资料。",
           },
-          ...history.slice(-6),
+          ...history.slice(-12),
           { role: "user", content: message },
         ],
         temperature: 0.2,
-        max_tokens: 900,
+        max_tokens: maxTokens,
       }),
     });
 

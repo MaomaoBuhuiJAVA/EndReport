@@ -70,4 +70,32 @@ describe("mergeScienceKnowledgeSummaries", () => {
       },
     ]);
   });
+
+  it("keeps a corrected story topic when an older database record still has the source-folder topic", () => {
+    const title = "会变色的小水滴";
+    const packaged = [
+      {
+        ...summary("STORY-water", title),
+        category: "科学故事" as const,
+        topic: "水科学与气象自然",
+        tags: ["科学故事", "水科学与气象自然", "中班"],
+      },
+    ];
+    const database = [
+      {
+        ...summary("STORY-water", title),
+        category: "科学故事" as const,
+        topic: "动物生活习性认知",
+        tags: ["科学故事", "动物生活习性认知", "中班"],
+      },
+    ];
+
+    expect(mergeScienceKnowledgeSummaries(packaged, database)).toMatchObject([
+      {
+        title,
+        topic: "水科学与气象自然",
+        tags: ["科学故事", "水科学与气象自然", "中班"],
+      },
+    ]);
+  });
 });

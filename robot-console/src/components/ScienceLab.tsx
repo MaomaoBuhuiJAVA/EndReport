@@ -115,18 +115,20 @@ function CompactFilterRow({
       <span className="compact-filter-row__label">{label}</span>
       <div className="compact-filter-row__choices" role="radiogroup" aria-label={`选择${label}`}>
         {items.map((item) => {
+          const isAllChoice = item === "全部";
           const categoryVisual =
             label === "类型" ? categoryVisuals[item as keyof typeof categoryVisuals] : null;
           const Icon = categoryVisual?.icon;
           const count = counts?.get(item);
+          const isActive = isAllChoice ? !value : value === item;
 
           return (
             <button
               key={item}
               type="button"
-              className={`compact-filter-choice${value === item ? " is-active" : ""}${label === "年龄段" ? " is-age" : ""}${categoryVisual ? " is-type" : ""}`}
+              className={`compact-filter-choice${isActive ? " is-active" : ""}${label === "年龄段" ? " is-age" : ""}${categoryVisual ? " is-type" : ""}${isAllChoice ? " is-all" : ""}`}
               role="radio"
-              aria-checked={value === item}
+              aria-checked={isActive}
               aria-label={categoryVisual ? item : undefined}
               onClick={() => onChange(item)}
               title={categoryVisual ? item : undefined}
@@ -326,9 +328,12 @@ function KnowledgeDetail({
               ) : null}
             </section>
           ) : display.resources.some((resource) => resource.type === "视频资源") ? (
-            <div className="video-source-note">
+            <div className="video-source-note" role="note">
               <PlayCircle size={18} />
-              <span>视频素材已归档：{display.resources.find((resource) => resource.type === "视频资源")?.source}</span>
+              <div>
+                <strong>暂未提供在线播放链接</strong>
+                <span>视频原文件已收录，公开播放地址补充后可在此直接观看。</span>
+              </div>
             </div>
           ) : null}
 
@@ -381,13 +386,14 @@ export function ScienceLab({
   initialResourceId?: string;
 }) {
   const [selection, setSelection] = useState<ScienceSelection>(() =>
-    normalizeScienceSelection(initialItems, { category: "科学诗", topic: "", ageLabel: "" }),
+    normalizeScienceSelection(initialItems, { category: "", topic: "", ageLabel: "" }),
   );
   const [query, setQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(12);
   const [selectedSummary, setSelectedSummary] = useState<ScienceKnowledgeSummary | null>(null);
   const [selectedItem, setSelectedItem] = useState<ScienceKnowledgeItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [resourceNotice, setResourceNotice] = useState("");
   const [heroIndex, setHeroIndex] = useState(0);
   const autoOpenedResourceId = useRef<string | null>(null);
   const deferredQuery = useDeferredValue(query);
@@ -420,8 +426,8 @@ export function ScienceLab({
           age,
           initialItems.filter(
             (item) =>
-              item.category === selection.category &&
-              item.topic === selection.topic &&
+              (!selection.category || item.category === selection.category) &&
+              (!selection.topic || item.topic === selection.topic) &&
               item.ageLabel === age,
           ).length,
         ]),
@@ -435,17 +441,29 @@ export function ScienceLab({
   );
 
   function changeCategory(category: string) {
-    setSelection(normalizeScienceSelection(initialItems, { category, topic: "", ageLabel: "" }));
+    setSelection(
+      normalizeScienceSelection(initialItems, {
+        category: category === "全部" ? "" : category,
+        topic: "",
+        ageLabel: "",
+      }),
+    );
     setVisibleCount(12);
   }
 
   function changeTopic(topic: string) {
-    setSelection(normalizeScienceSelection(initialItems, { ...selection, topic, ageLabel: "" }));
+    setSelection(
+      normalizeScienceSelection(initialItems, {
+        ...selection,
+        topic: topic === "全部" ? "" : topic,
+        ageLabel: "",
+      }),
+    );
     setVisibleCount(12);
   }
 
   function changeAge(ageLabel: string) {
-    setSelection({ ...selection, ageLabel });
+    setSelection({ ...selection, ageLabel: ageLabel === "全部" ? "" : ageLabel });
     setVisibleCount(12);
   }
 
@@ -456,6 +474,7 @@ export function ScienceLab({
   }, []);
 
   const openDetail = useCallback(async (summary: ScienceKnowledgeSummary) => {
+    setResourceNotice("");
     setSelectedSummary(summary);
     setSelectedItem(null);
     setDetailLoading(true);
@@ -478,7 +497,13 @@ export function ScienceLab({
     if (!initialResourceId || autoOpenedResourceId.current === initialResourceId) return;
 
     const summary = initialItems.find((item) => item.id === initialResourceId);
-    if (!summary) return;
+    if (!summary) {
+      autoOpenedResourceId.current = initialResourceId;
+      const noticeTimer = window.setTimeout(() => {
+        setResourceNotice("未找到对应资料，可能已更新或下架。请在下方搜索资源名称。");
+      }, 0);
+      return () => window.clearTimeout(noticeTimer);
+    }
 
     const autoOpenTimer = window.setTimeout(() => {
       autoOpenedResourceId.current = initialResourceId;
@@ -576,19 +601,19 @@ export function ScienceLab({
           <div className="filter-panel">
             <CompactFilterRow
               label="类型"
-              items={categories}
+              items={["全部", ...categories]}
               value={selection.category}
               onChange={changeCategory}
             />
             <CompactFilterRow
               label="主题"
-              items={topics}
+              items={["全部", ...topics]}
               value={selection.topic}
               onChange={changeTopic}
             />
             <CompactFilterRow
               label="年龄段"
-              items={ages}
+              items={["全部", ...ages]}
               value={selection.ageLabel}
               onChange={changeAge}
               counts={ageCounts}
@@ -600,8 +625,14 @@ export function ScienceLab({
               <strong>{filtered.length}</strong>
               <span> 条匹配资料</span>
             </div>
-            <span>{selection.category} / {selection.topic} / {selection.ageLabel}</span>
+            <span>{selection.category || "全部"} / {selection.topic || "全部"} / {selection.ageLabel || "全部"}</span>
           </div>
+
+          {resourceNotice ? (
+            <div className="lab-route-notice" role="status">
+              {resourceNotice}
+            </div>
+          ) : null}
 
           {filtered.length ? (
             <>

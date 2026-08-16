@@ -23,8 +23,28 @@ export function scienceDetailHref(id: string) {
   return `/lab?item=${encodeURIComponent(id)}`;
 }
 
+export function normalizeScienceSearchText(value: string) {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase("zh-CN")
+    .replace(/[\s\p{P}\p{S}]+/gu, " ")
+    .trim();
+}
+
 function unique(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
+}
+
+function isAllSelection(value: string) {
+  return !value.trim();
+}
+
+function matchesSelection(value: string, selection: string) {
+  return isAllSelection(selection) || value === selection;
+}
+
+function normalizedSelectionValue(value: string) {
+  return value.trim();
 }
 
 function orderValues(values: string[], preferredOrder: readonly string[]) {
@@ -51,7 +71,7 @@ export function availableTopics(
   category: string,
 ) {
   return orderValues(
-    items.filter((item) => item.category === category).map((item) => item.topic),
+    items.filter((item) => matchesSelection(item.category, category)).map((item) => item.topic),
     [],
   );
 }
@@ -63,7 +83,10 @@ export function availableAges(
 ) {
   return orderValues(
     items
-      .filter((item) => item.category === category && item.topic === topic)
+      .filter(
+        (item) =>
+          matchesSelection(item.category, category) && matchesSelection(item.topic, topic),
+      )
       .map((item) => item.ageLabel),
     SCIENCE_AGE_ORDER,
   );
@@ -74,11 +97,26 @@ export function normalizeScienceSelection(
   selection: ScienceSelection,
 ): ScienceSelection {
   const categories = availableTypes(items);
-  const category = categories.includes(selection.category) ? selection.category : (categories[0] ?? "");
+  const requestedCategory = normalizedSelectionValue(selection.category);
+  const category = isAllSelection(requestedCategory)
+    ? ""
+    : categories.includes(requestedCategory)
+      ? requestedCategory
+      : (categories[0] ?? "");
   const topics = availableTopics(items, category);
-  const topic = topics.includes(selection.topic) ? selection.topic : (topics[0] ?? "");
+  const requestedTopic = normalizedSelectionValue(selection.topic);
+  const topic = isAllSelection(requestedTopic)
+    ? ""
+    : topics.includes(requestedTopic)
+      ? requestedTopic
+      : (topics[0] ?? "");
   const ages = availableAges(items, category, topic);
-  const ageLabel = ages.includes(selection.ageLabel) ? selection.ageLabel : (ages[0] ?? "");
+  const requestedAgeLabel = normalizedSelectionValue(selection.ageLabel);
+  const ageLabel = isAllSelection(requestedAgeLabel)
+    ? ""
+    : ages.includes(requestedAgeLabel)
+      ? requestedAgeLabel
+      : (ages[0] ?? "");
 
   return { category, topic, ageLabel };
 }
@@ -87,19 +125,33 @@ export function filterScienceItems<T extends ScienceNavigationItem>(
   items: readonly T[],
   { category, topic, ageLabel, query = "" }: ScienceFilter,
 ) {
-  const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
+  const searchTerms = normalizeScienceSearchText(query).split(" ").filter(Boolean);
 
   return items.filter((item) => {
-    if (item.category !== category || item.topic !== topic || item.ageLabel !== ageLabel) {
+    if (
+      (!matchesSelection(item.category, category) ||
+        !matchesSelection(item.topic, topic) ||
+        !matchesSelection(item.ageLabel, ageLabel))
+    ) {
       return false;
     }
 
-    if (!normalizedQuery) return true;
+    if (!searchTerms.length) return true;
 
-    return [item.title, item.author, item.topic, item.excerpt, ...(item.tags ?? [])]
+    const searchableText = normalizeScienceSearchText(
+      [
+        item.category,
+        item.topic,
+        item.ageLabel,
+        item.title,
+        item.author,
+        item.excerpt,
+        ...(item.tags ?? []),
+      ]
       .filter(Boolean)
-      .join(" ")
-      .toLocaleLowerCase("zh-CN")
-      .includes(normalizedQuery);
+      .join(" "),
+    );
+
+    return searchTerms.every((term) => searchableText.includes(term));
   });
 }

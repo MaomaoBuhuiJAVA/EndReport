@@ -7,6 +7,9 @@ import type {
 } from "@/lib/science-types";
 
 const fallbackItems = fallbackPayload as unknown as ScienceKnowledgeItem[];
+const correctedScienceTopics = new Map([
+  ["科学故事\u0000会变色的小水滴", "水科学与气象自然"],
+]);
 
 const knowledgeVersionSuffix = /\s*(?:[-_—]\s*\d+|[（(]\s*(?:\d+|[一二三四五六七八九十]+|初稿|初版|定稿|最终稿|终稿|修改稿|修订稿|送审稿)\s*[）)])\s*$/i;
 
@@ -27,6 +30,17 @@ function normalizeResources(
   resources: ScienceResource[],
 ) {
   return resources.filter((resource) => resource.isPublic);
+}
+
+function applyScienceTopicCorrection<T extends ScienceKnowledgeSummary>(item: T): T {
+  const topic = correctedScienceTopics.get(`${item.category}\u0000${item.title}`);
+  if (!topic || topic === item.topic) return item;
+
+  return {
+    ...item,
+    topic,
+    tags: item.tags.map((tag) => (tag === item.topic ? topic : tag)),
+  };
 }
 
 function toSummary(item: ScienceKnowledgeItem): ScienceKnowledgeSummary {
@@ -103,11 +117,11 @@ function normalizeFallbackItem(item: ScienceKnowledgeItem) {
     sourceFile: cleanKnowledgeName(item.sourceFile),
   };
   const resources = normalizeResources(item.resources);
-  return {
+  return applyScienceTopicCorrection({
     ...normalizedItem,
     resources,
     resourceTypes: Array.from(new Set(resources.map((resource) => resource.type))),
-  };
+  });
 }
 
 export function mergeScienceKnowledgeSummaries(
@@ -123,7 +137,7 @@ export function mergeScienceKnowledgeSummaries(
       return databaseItem ? mergeScienceKnowledgeRecord(item, databaseItem) : item;
     }),
     ...databaseItems.filter((item) => !packagedIds.has(item.id)),
-  ];
+  ].map(applyScienceTopicCorrection);
 }
 
 function scienceResourceKey(resource: ScienceResource) {
@@ -266,13 +280,13 @@ export async function getScienceKnowledgeItem(id: string): Promise<ScienceKnowle
       resources.map(mapResource),
     );
 
-    if (!fallback) return databaseItem;
+    if (!fallback) return applyScienceTopicCorrection(databaseItem);
 
     const packagedItem = normalizeFallbackItem(fallback);
-    return {
+    return applyScienceTopicCorrection({
       ...mergeScienceKnowledgeRecord(packagedItem, databaseItem),
       videoUrl: databaseItem.videoUrl || packagedItem.videoUrl,
-    };
+    });
   } catch {
     return fallback ? normalizeFallbackItem(fallback) : null;
   }

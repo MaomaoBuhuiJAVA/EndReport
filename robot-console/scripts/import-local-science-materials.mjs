@@ -18,6 +18,10 @@ const contentRoots = {
 };
 
 const ageOrder = new Map([["托班", 0], ["小班", 1], ["中班", 2], ["大班", 3]]);
+// These corrections alter only the displayed subject; source paths remain provenance.
+const storyTopicOverrides = new Map([
+  ["会变色的小水滴", "水科学与气象自然"],
+]);
 
 function comparePaths(left, right) {
   return left.localeCompare(right, "zh-CN", { numeric: true, sensitivity: "base" });
@@ -113,6 +117,18 @@ function sourceDetails(sourceFile, title, body, ageLabel, topic, category, resou
     resourceTypes: Array.from(new Set(normalizedResources.map((resource) => resource.type))),
     resources: normalizedResources,
   };
+}
+
+function applyStoryTopicOverride(item, sourceTopic) {
+  const displayTopic = storyTopicOverrides.get(item.title);
+  if (!displayTopic || displayTopic === sourceTopic) return item;
+
+  item.topic = displayTopic;
+  item.tags = item.tags.map((tag) => (tag === sourceTopic ? displayTopic : tag));
+  item.body = item.body.replace(`原始主题：${sourceTopic}`, `展示主题：${displayTopic}`);
+  item.excerpt = excerptFromText(item.body);
+  item.allocationBasis = `按源材料目录归档；按内容校正展示主题为${displayTopic}`;
+  return item;
 }
 
 function extractAuthor(body) {
@@ -273,6 +289,7 @@ async function buildStories() {
       isPublic: true,
     };
     const item = sourceDetails(sourceFile, title, body, ageLabel, topic, "科学故事", [videoResource]);
+    applyStoryTopicOverride(item, topic);
     item.author = performer;
     item.tags.push(edition, "视频");
     items.push(item);

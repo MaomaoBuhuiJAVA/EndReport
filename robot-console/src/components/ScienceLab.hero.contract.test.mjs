@@ -48,6 +48,18 @@ test("opens the requested resource in the existing detail dialog", () => {
   assert.match(component, /window\.clearTimeout\(autoOpenTimer\)/);
 });
 
+test("keeps topic and age optional so a search is not trapped in a sparse subgroup", () => {
+  const component = fs.readFileSync(componentPath, "utf8");
+
+  assert.match(
+    component,
+    /normalizeScienceSelection\(initialItems, \{ category: "", topic: "", ageLabel: "" \}\)/,
+  );
+  assert.match(component, /items=\{\["全部", \.\.\.categories\]\}/);
+  assert.match(component, /items=\{\["全部", \.\.\.topics\]\}/);
+  assert.match(component, /items=\{\["全部", \.\.\.ages\]\}/);
+});
+
 test("renders ordered experiment images after the experiment instructions", () => {
   const component = fs.readFileSync(componentPath, "utf8");
 

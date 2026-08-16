@@ -50,4 +50,30 @@ describe("generateDeepSeekReply", () => {
       }),
     ).resolves.toBeNull();
   });
+
+  it("keeps the latest twelve chat messages for a continuing conversation", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: "继续回答" } }] }), { status: 200 }),
+    );
+    const history = Array.from({ length: 14 }, (_, index) => ({
+      role: index % 2 ? "assistant" as const : "user" as const,
+      content: `历史${index + 1}`,
+    }));
+
+    await generateDeepSeekReply({
+      apiKey: "test-key",
+      apiUrl: "https://example.test/chat",
+      systemPrompt: "规则",
+      context: "资料",
+      history,
+      message: "继续问",
+      fetchImpl,
+    });
+
+    const request = fetchImpl.mock.calls[0]?.[1] as RequestInit;
+    const payload = JSON.parse(request.body as string) as { messages: Array<{ content: string }> };
+    const historyContents = payload.messages.slice(2, -1).map((entry) => entry.content);
+
+    expect(historyContents).toEqual(Array.from({ length: 12 }, (_, index) => `历史${index + 3}`));
+  });
 });

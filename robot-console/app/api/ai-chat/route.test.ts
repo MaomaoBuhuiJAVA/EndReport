@@ -165,4 +165,198 @@ describe("POST /api/ai-chat", () => {
       labLinks: [{ id: "exp-1", title: "水会跳舞", href: "/lab?item=exp-1" }],
     });
   });
+
+  it("生成指定完整教案时锁定当前资料并补齐活动过程", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-paper",
+          documentId: "paper",
+          title: "玩转纸片",
+          document: { title: "科小贝实验室：玩转纸片" },
+          content: [
+            "一、活动目标",
+            "1. 感受纸片在不同操作中的变化。",
+            "二、活动准备",
+            "彩纸、吸管、剪刀和记录卡。",
+            "三、活动玩法",
+            "1. 幼儿观察纸片并说出猜想。",
+            "2. 尝试折叠、吹动和移动纸片。",
+            "3. 分享发现并完成记录。",
+            "实验步骤：",
+          ].join("\n"),
+        },
+        {
+          id: "science-car",
+          documentId: "car",
+          title: "空气动力小汽车",
+          document: { title: "科小贝实验室：空气动力小汽车" },
+          content: "无关实验内容",
+        },
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue("## 一、活动目标\n目标\n## 二、活动准备\n材料");
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload).toMatchObject({
+      labLinks: [{ id: "paper", title: "玩转纸片", href: "/lab?item=paper" }],
+    });
+    expect(payload.reply).toContain("活动过程");
+    expect(payload.reply).toContain("幼儿观察纸片并说出猜想");
+    expect(payload.reply).not.toContain("实验步骤：");
+    expect(generateDeepSeekReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.stringContaining("玩转纸片"),
+        maxTokens: 1600,
+      }),
+    );
+    expect(vi.mocked(generateDeepSeekReply).mock.calls[0]?.[0]?.context).not.toContain("空气动力小汽车");
+  });
+
+  it("模型缺少观察、小结和提示时仍返回完整教案兜底", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-paper",
+          documentId: "paper",
+          title: "玩转纸片",
+          document: { title: "科小贝实验室：玩转纸片" },
+          content: "一、活动目标\n目标\n二、活动准备\n材料\n三、活动过程\n1. 操作纸片。",
+        },
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue([
+      "### 一、活动目标",
+      "目标",
+      "### 二、活动准备",
+      "材料",
+      "### 三、活动过程",
+      "1. 操作纸片。",
+    ].join("\n"));
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.reply).toContain("观察与表达");
+    expect(payload.reply).toContain("小结与延伸");
+    expect(payload.reply).toContain("活动提示");
+  });
+
+  it("在资料未命中且模型不可用时仍回应基础问候", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue(null);
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "你好，科小贝" }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      provider: "fallback",
+      reply: expect.stringContaining("你好"),
+    });
+  });
+
+  it("普通问候直接进入对话，不检索资料库或附带实验入口", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-volcano",
+          documentId: "volcano",
+          title: "火山喷发",
+          document: { title: "科小贝实验室：火山喷发" },
+          content: "无关的实验资料",
+        },
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue("你好呀，我在这里。你想聊什么科学主题？");
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "你好，科小贝" }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      reply: "你好呀，我在这里。你想聊什么科学主题？",
+      provider: "deepseek",
+      photos: [],
+      sources: [],
+      labLinks: [],
+    });
+    expect(searchKnowledge).not.toHaveBeenCalled();
+    expect(wantsPhotoResults).not.toHaveBeenCalled();
+    expect(generateDeepSeekReply).toHaveBeenCalledWith(
+      expect.objectContaining({ context: "", message: "你好，科小贝" }),
+    );
+  });
+
+  it("普通闲聊不检索资料库或附带实验入口", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [chunk("科小贝实验室：火山喷发", "无关实验资料")],
+      photos: [],
+    } as never);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue("天气很好，适合一起观察自然现象。");
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "今天天气真好" }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      provider: "deepseek",
+      photos: [],
+      sources: [],
+      labLinks: [],
+    });
+    expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+
+  it("带有明确实验请求的闲聊仍然检索资料库", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-paper",
+          documentId: "paper",
+          title: "玩转纸片",
+          document: { title: "科小贝实验室：玩转纸片" },
+          content: "纸片实验资料",
+        },
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue("可以试试玩转纸片。");
+
+    await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "今天天气真好，推荐一个实验" }),
+      }),
+    );
+
+    expect(searchKnowledge).toHaveBeenCalledWith("今天天气真好，推荐一个实验");
+  });
 });
