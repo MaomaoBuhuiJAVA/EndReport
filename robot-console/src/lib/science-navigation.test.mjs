@@ -21,6 +21,13 @@ const items = [
     title: "彩虹的秘密",
     tags: ["水滴", "折射"],
   },
+  {
+    id: "experiment-water-young",
+    category: "科学实验",
+    topic: "水与液体",
+    ageLabel: "小班",
+    title: "水上烟花",
+  },
 ];
 
 test("derives topics and ages from the selected type and topic", () => {
@@ -29,7 +36,7 @@ test("derives topics and ages from the selected type and topic", () => {
 });
 
 test("treats empty dependent selections as all values", () => {
-  assert.deepEqual(availableTopics(items, ""), ["风", "光学现象", "光影"]);
+  assert.deepEqual(availableTopics(items, ""), ["风", "光学现象", "光影", "水与液体"]);
   assert.deepEqual(availableAges(items, "", ""), ["小班", "中班"]);
   assert.deepEqual(availableAges(items, "科学诗", ""), ["小班", "中班"]);
 });
@@ -71,7 +78,7 @@ test("filters by all three navigation levels and the optional text query", () =>
 test("uses empty navigation values as wildcards", () => {
   assert.deepEqual(
     filterScienceItems(items, { category: "", topic: "", ageLabel: "" }).map((item) => item.id),
-    ["poem-wind-young", "poem-light-middle", "story-light-young"],
+    ["poem-wind-young", "poem-light-middle", "story-light-young", "experiment-water-young"],
   );
   assert.deepEqual(
     filterScienceItems(items, { category: "科学诗", topic: "", ageLabel: "" }).map((item) => item.id),
@@ -111,6 +118,36 @@ test("matches tags after Chinese whitespace and punctuation normalization", () =
     ["story-light-young"],
   );
   assert.equal(normalizeScienceSearchText("  水，会跳舞！\n"), "水 会跳舞");
+});
+
+test("matches compact Chinese combinations of age, topic, and resource type", () => {
+  assert.deepEqual(
+    filterScienceItems(items, {
+      category: "",
+      topic: "",
+      ageLabel: "",
+      query: "小班水实验",
+    }).map((item) => item.id),
+    ["experiment-water-young"],
+  );
+  assert.deepEqual(
+    filterScienceItems(items, {
+      category: "",
+      topic: "",
+      ageLabel: "",
+      query: "科学实验小班水与液体",
+    }).map((item) => item.id),
+    ["experiment-water-young"],
+  );
+  assert.deepEqual(
+    filterScienceItems(items, {
+      category: "",
+      topic: "",
+      ageLabel: "",
+      query: "小班光学故事",
+    }).map((item) => item.id),
+    ["story-light-young"],
+  );
 });
 
 test("builds a detail URL that preserves a science item ID", () => {

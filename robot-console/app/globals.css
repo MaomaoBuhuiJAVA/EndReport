@@ -1710,6 +1710,43 @@ img {
   margin-bottom: 0;
 }
 
+.pet-message__markdown {
+  overflow-wrap: anywhere;
+}
+
+.pet-message__markdown h1,
+.pet-message__markdown h2,
+.pet-message__markdown h3,
+.pet-message__markdown h4 {
+  margin: 1px 0 5px;
+  color: #21312e;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.5;
+}
+
+.pet-message__markdown p {
+  margin: 4px 0;
+}
+
+.pet-message__markdown ul,
+.pet-message__markdown ol {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.pet-message__markdown li {
+  margin: 2px 0;
+}
+
+.pet-message__markdown > :first-child {
+  margin-top: 0;
+}
+
+.pet-message__markdown > :last-child {
+  margin-bottom: 0;
+}
+
 .pet-message--assistant {
   align-self: flex-start;
   border: 1px solid #dce9e5;
@@ -2346,10 +2383,10 @@ img {
   }
 
   .pet-chat {
-    bottom: calc(192px + env(safe-area-inset-bottom));
-    width: min(370px, calc(100vw - 12px));
-    height: min(640px, calc(100dvh - 214px));
-    max-height: min(640px, calc(100dvh - 214px));
+    bottom: calc(72px + env(safe-area-inset-bottom));
+    width: min(360px, calc(100dvw - 24px));
+    height: min(680px, calc(100dvh - 84px));
+    max-height: min(680px, calc(100dvh - 84px));
   }
 
   .pet-chat__messages {

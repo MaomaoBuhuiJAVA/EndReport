@@ -15,6 +15,7 @@
     "seed": "node scripts/prepare-assets.mjs && node prisma/seed.mjs",
     "seed:science": "node scripts/seed-science-knowledge.mjs",
     "import:science": "node scripts/import-local-science-materials.mjs",
+    "attach:science-step-images": "node scripts/attach-local-experiment-step-images.mjs",
     "attach:science-videos": "node scripts/attach-experiment-video-resources.mjs",
     "test:science": "node --no-warnings --test src/lib/science-navigation.test.mjs scripts/science-catalog.contract.test.mjs src/components/ScienceLab.hero.contract.test.mjs scripts/seed-science-on-build.test.mjs"
   },

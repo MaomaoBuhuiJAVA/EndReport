@@ -10,9 +10,6 @@ export default async function Home() {
     profile: { ...data.profile, summary: cleanSummary },
     campusPhotos: data.campusPhotos,
     rooms: data.rooms,
-    documents: data.documents.filter(
-      (document) => !/云宝|yunbao/i.test(`${document.title} ${document.summary}`),
-    ),
   };
 
   return <AgentHome data={homeData} />;

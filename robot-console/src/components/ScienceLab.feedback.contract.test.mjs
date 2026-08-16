@@ -16,3 +16,14 @@ test("does not present a missing public video as a playable archived resource", 
   assert.match(component, /暂未提供在线播放链接/);
   assert.match(component, /视频原文件已收录，公开播放地址补充后可在此直接观看/);
 });
+
+test("keeps resource-library navigation focused on 科小贝 instead of unrelated legacy sections", () => {
+  assert.doesNotMatch(component, /label: "成长照片"/);
+  assert.doesNotMatch(component, /label: "功能室"/);
+  assert.doesNotMatch(component, /label: "园所资料"/);
+});
+
+test("keeps the laboratory title visible instead of leaving an animation gap", () => {
+  assert.match(component, /<span className="rotating-text">实验室<\/span>/);
+  assert.doesNotMatch(component, /<RotatingText/);
+});

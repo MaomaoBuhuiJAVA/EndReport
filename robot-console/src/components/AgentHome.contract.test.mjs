@@ -10,3 +10,8 @@ test("keeps the home hero title and image label clear at a standard desktop widt
   assert.doesNotMatch(component, /md:text-6xl/);
   assert.match(component, /bg-gradient-to-b from-\[#173b42\]\/85/);
 });
+
+test("keeps the public home focused on the 科小贝 agent instead of embedding legacy document browsing", () => {
+  assert.doesNotMatch(component, /id="school-documents"/);
+  assert.doesNotMatch(component, /href="#school-documents"/);
+});

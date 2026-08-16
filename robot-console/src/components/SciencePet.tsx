@@ -575,7 +575,9 @@ export function SciencePet() {
                   className={`pet-message pet-message--${message.role}`}
                 >
                   {message.role === "assistant" ? (
-                    <Markdown>{message.text}</Markdown>
+                    <div className="pet-message__markdown">
+                      <Markdown>{message.text}</Markdown>
+                    </div>
                   ) : (
                     message.text
                   )}

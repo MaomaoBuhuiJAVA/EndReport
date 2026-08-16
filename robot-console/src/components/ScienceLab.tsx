@@ -29,7 +29,6 @@ import {
 } from "react";
 import { GooeyNav, type GooeyNavItem } from "@/components/GooeyNav";
 import { MobileAppNav, type MobileAppNavItem } from "@/components/MobileAppNav";
-import { RotatingText } from "@/components/RotatingText";
 import { SciencePet } from "@/components/SciencePet";
 import {
   type ScienceKnowledgeItem,
@@ -46,19 +45,13 @@ import {
 import { orderedExperimentImages } from "@/lib/science-step-images";
 
 const labNavItems: GooeyNavItem[] = [
-  { key: "overview", label: "园所首页", href: "/" },
-  { key: "growth", label: "成长照片", href: "/#growth" },
-  { key: "rooms", label: "功能室", href: "/#rooms" },
-  { key: "docs", label: "园所资料", href: "/#docs" },
+  { key: "overview", label: "科小贝首页", href: "/" },
   { key: "lab", label: "科小贝实验室", href: "/lab" },
 ];
 
 const labMobileNavItems: MobileAppNavItem[] = [
-  { key: "overview", label: "概览", href: "/" },
-  { key: "growth", label: "成长", href: "/#growth" },
-  { key: "rooms", label: "功能室", href: "/#rooms" },
-  { key: "docs", label: "资料", href: "/#docs" },
-  { key: "lab", label: "实验室", href: "/lab" },
+  { key: "overview", label: "科小贝", href: "/" },
+  { key: "lab", label: "资源库", href: "/lab" },
 ];
 
 const labHeroPhotos = [
@@ -554,18 +547,7 @@ export function ScienceLab({
               <p className="lab-eyebrow">国科二幼园本资源中心</p>
               <h1>
                 科小贝
-                <RotatingText
-                  texts={["实验室", "科学诗库", "亲子探索站"]}
-                  mainClassName="rotating-text"
-                  splitLevelClassName="rotating-text__clip"
-                  staggerFrom="last"
-                  staggerDuration={0.025}
-                  initial={{ y: "100%" }}
-                  animate={{ y: 0 }}
-                  exit={{ y: "-120%" }}
-                  transition={{ type: "spring", damping: 30, stiffness: 400 }}
-                  rotationInterval={2600}
-                />
+                <span className="rotating-text">实验室</span>
               </h1>
               <p>汇集园本科学诗、教师实验与家庭实验资料。</p>
               <div className="lab-hero__progress" aria-hidden="true">

@@ -46,11 +46,38 @@ test("corrects 会变色的小水滴 to the water and weather topic without losi
 
 test("catalog keeps every activity and image from the experiment material packages", () => {
   const experiments = catalog.filter((item) => item.category === "科学实验");
-  const imageCount = experiments.flatMap((item) => item.resources).filter((resource) => resource.type === "图片资源").length;
+  const imageResources = experiments
+    .flatMap((item) => item.resources)
+    .filter((resource) => resource.type === "图片资源");
+  const importedPackageImages = imageResources.filter((resource) =>
+    resource.filePath.startsWith("科学实验图片资源/"),
+  );
+  const localStepImages = imageResources.filter((resource) =>
+    resource.filePath.startsWith("public/knowledge/"),
+  );
 
   assert.equal(experiments.length, 21);
   assert.ok(experiments.some((item) => item.title === "空气动力小汽车"));
-  assert.equal(imageCount, 68);
+  assert.equal(importedPackageImages.length, 68);
+  assert.equal(localStepImages.length, 10);
+  assert.equal(imageResources.length, importedPackageImages.length + localStepImages.length);
+});
+
+test("every experiment has at least one public step image for the detail view", () => {
+  const experiments = catalog.filter((item) => item.category === "科学实验");
+  const missingStepImages = experiments
+    .filter(
+      (item) =>
+        !item.resources.some(
+          (resource) =>
+            resource.type === "图片资源" &&
+            resource.isPublic &&
+            resource.publicPath.startsWith("/science-assets/experiments/"),
+        ),
+    )
+    .map((item) => item.title);
+
+  assert.deepEqual(missingStepImages, []);
 });
 
 test("every experiment keeps its playable video link and scannable QR code", () => {
