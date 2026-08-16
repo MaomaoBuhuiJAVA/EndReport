@@ -8,6 +8,13 @@ import sharp from "sharp";
 const catalogPath = path.resolve("src/data/science-knowledge.json");
 const catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
 
+function isExcludedSourceImage(filePath) {
+  return (
+    filePath.includes("/水与液体/小班/小班科学教案《自制泡泡液》图片/") &&
+    /操作(?:18|23|25|26)\.png$/u.test(filePath)
+  );
+}
+
 function preferredSourceRoot() {
   const candidates = [
     process.env.SCIENCE_SOURCE_DIR,
@@ -58,7 +65,7 @@ test("corrects 会变色的小水滴 to the water and weather topic without losi
   assert.equal(story.resources[0]?.source, story.sourceFile);
 });
 
-test("catalog keeps every activity and image from the experiment material packages", () => {
+test("catalog keeps every activity and valid image from the experiment material packages", () => {
   const experiments = catalog.filter((item) => item.category === "科学实验");
   const imageResources = experiments
     .flatMap((item) => item.resources)
@@ -72,7 +79,7 @@ test("catalog keeps every activity and image from the experiment material packag
 
   assert.equal(experiments.length, 21);
   assert.ok(experiments.some((item) => item.title === "空气动力小汽车"));
-  assert.equal(importedPackageImages.length, 125);
+  assert.equal(importedPackageImages.length, 121);
   assert.equal(localStepImages.length, 10);
   assert.equal(imageResources.length, importedPackageImages.length + localStepImages.length);
 });
@@ -197,6 +204,8 @@ test("accepted source experiment images map to matching catalog records in numer
   const imagesByExperiment = new Map();
 
   for (const imagePath of walkPngFiles(imageRoot)) {
+    const source = path.relative(sourceRoot, imagePath).replaceAll("\\", "/");
+    if (isExcludedSourceImage(source)) continue;
     if (!(await isGalleryImage(imagePath))) continue;
 
     const [topic, ageLabel, packageName] = path.relative(imageRoot, imagePath).split(path.sep);
@@ -209,7 +218,7 @@ test("accepted source experiment images map to matching catalog records in numer
     const material = fileName.match(/材料准备(\d+)\.png$/u);
     const operation = fileName.match(/操作(\d+)\.png$/u);
     files.push({
-      path: path.relative(sourceRoot, imagePath).replaceAll("\\", "/"),
+      path: source,
       role: material ? "材料准备" : operation ? "操作步骤" : "实验图片",
       number: Number(material?.[1] ?? operation?.[1] ?? files.length + 1),
     });
@@ -227,6 +236,7 @@ test("accepted source experiment images map to matching catalog records in numer
     const imageResources = matches[0].resources.filter(
       (resource) => resource.type === "图片资源" && resource.isPublic,
     );
+    const roleCounters = new Map();
     const expected = expectedImages
       .toSorted((left, right) =>
         left.role === right.role ? left.number - right.number : left.role === "材料准备" ? -1 : 1,
@@ -238,7 +248,11 @@ test("accepted source experiment images map to matching catalog records in numer
     );
     assert.deepEqual(
       imageResources.map((resource) => resource.title),
-      expected.map((image) => `${title} · ${image.role} ${image.number}`),
+      expected.map((image) => {
+        const displayNumber = (roleCounters.get(image.role) ?? 0) + 1;
+        roleCounters.set(image.role, displayNumber);
+        return `${title} · ${image.role} ${displayNumber}`;
+      }),
       `${title} image labels should describe the source role and order`,
     );
   }
@@ -255,6 +269,9 @@ test("source image roles become meaningful catalog labels in material-first orde
     const roleMatch = fileName.match(/(材料准备|操作)(\d+)\.png$/u);
     if (!roleMatch) continue;
 
+    const source = path.relative(sourceRoot, imagePath).replaceAll("\\", "/");
+    if (isExcludedSourceImage(source)) continue;
+
     const [topic, ageLabel, packageName] = path.relative(imageRoot, imagePath).split(path.sep);
     const title = imageTitleFromPackage(packageName);
     assert.ok(title, `experiment image package is missing a quoted title: ${imagePath}`);
@@ -262,7 +279,7 @@ test("source image roles become meaningful catalog labels in material-first orde
     const key = `${topic}\u0000${ageLabel}\u0000${title}`;
     const images = sourceImagesByExperiment.get(key) ?? [];
     images.push({
-      source: path.relative(sourceRoot, imagePath).replaceAll("\\", "/"),
+      source,
       role: roleMatch[1],
       number: Number(roleMatch[2]),
     });
@@ -272,7 +289,7 @@ test("source image roles become meaningful catalog labels in material-first orde
   assert.equal(sourceImagesByExperiment.size, 11);
   assert.equal(
     [...sourceImagesByExperiment.values()].reduce((total, images) => total + images.length, 0),
-    125,
+    121,
   );
 
   for (const [key, expectedImages] of sourceImagesByExperiment) {
@@ -286,18 +303,38 @@ test("source image roles become meaningful catalog labels in material-first orde
     );
     assert.ok(item, `catalog is missing ${topic}/${ageLabel}/${title}`);
 
+    const roleCounters = new Map();
     const expected = expectedImages
       .toSorted((left, right) =>
         left.role === right.role ? left.number - right.number : left.role === "材料准备" ? -1 : 1,
       )
-      .map((entry) => ({
-        source: entry.source,
-        title: `${title} · ${entry.role === "材料准备" ? "材料准备" : "操作步骤"} ${entry.number}`,
-      }));
+      .map((entry) => {
+        const displayNumber = (roleCounters.get(entry.role) ?? 0) + 1;
+        roleCounters.set(entry.role, displayNumber);
+        return {
+          source: entry.source,
+          title: `${title} · ${entry.role === "材料准备" ? "材料准备" : "操作步骤"} ${displayNumber}`,
+        };
+      });
     const actual = item.resources
       .filter((resource) => resource.type === "图片资源" && resource.filePath.startsWith("科学实验图片资源/"))
       .map((resource) => ({ source: resource.filePath, title: resource.title }));
 
     assert.deepEqual(actual, expected, `${title} should retain role-aware source order and labels`);
   }
+});
+
+test("omits the four decorative bubble-liquid transition frames and renumbers operations", () => {
+  const item = catalog.find((entry) => entry.category === "科学实验" && entry.title === "自制泡泡液");
+  assert.ok(item);
+  const images = item.resources.filter((resource) => resource.type === "图片资源");
+  const operationImages = images.filter((resource) => resource.title.includes("操作步骤"));
+
+  assert.equal(images.length, 34 - 4);
+  assert.equal(operationImages.length, 29 - 4);
+  assert.deepEqual(
+    operationImages.map((resource) => resource.title),
+    Array.from({ length: 25 }, (_, index) => `自制泡泡液 · 操作步骤 ${index + 1}`),
+  );
+  assert.ok(operationImages.every((resource) => !/操作(?:18|23|25|26)\.png$/u.test(resource.filePath)));
 });
