@@ -4,48 +4,56 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import mammoth from "mammoth";
 import sharp from "sharp";
+import {
+  belongsToExperiment,
+  experimentImageMatchesPackage,
+  parseExperimentImageName,
+  resolveScienceSourceLayout,
+  titleFromQuotedText,
+} from "./science-source-layout.mjs";
 
 const repoRoot = process.cwd();
 const sourceRootCandidates = [
+  process.env.SCIENCE_SOURCE_DIR,
+  path.resolve(repoRoot, "..", "..", "科学诗、科学故事、科学教案、科学实验"),
   path.join(
     process.env.USERPROFILE || "",
     "Desktop",
     "科学诗、科学故事、科学教案、科学实验",
   ),
-  path.resolve(repoRoot, "..", "..", "科学诗、科学故事、科学教案、科学实验"),
-];
+].filter(Boolean);
 const sourceRoot = path.resolve(
-  process.env.SCIENCE_SOURCE_DIR || sourceRootCandidates.find((candidate) => fsSync.existsSync(candidate)) || sourceRootCandidates[0],
+  sourceRootCandidates.find((candidate) => fsSync.existsSync(candidate)) || sourceRootCandidates[0],
 );
 const outputCatalog = path.join(repoRoot, "src", "data", "science-knowledge.json");
 const outputAssetRoot = path.join(repoRoot, "public", "science-assets");
+const outputExperimentAssetRoot = path.join(outputAssetRoot, "experiments");
 
-const contentRoots = {
-  poetry: path.join(sourceRoot, "科学诗"),
-  stories: path.join(sourceRoot, "科学故事"),
-  experiments: path.join(sourceRoot, "科学实验教案"),
-  experimentImages: path.join(sourceRoot, "科学实验图片资源", "科学教案"),
-};
+const contentRoots = resolveScienceSourceLayout(sourceRoot);
 
 const ageOrder = new Map([["托班", 0], ["小班", 1], ["中班", 2], ["大班", 3]]);
-// These corrections alter only the displayed subject; source paths remain provenance.
-const storyTopicOverrides = new Map([
-  ["会变色的小水滴", "水科学与气象自然"],
-]);
 
 function comparePaths(left, right) {
   return left.localeCompare(right, "zh-CN", { numeric: true, sensitivity: "base" });
 }
 
-async function walkFiles(directory, acceptedExtension) {
+async function walkFiles(directory, acceptedExtensions) {
+  const extensions =
+    acceptedExtensions instanceof Set
+      ? acceptedExtensions
+      : new Set(
+          (Array.isArray(acceptedExtensions) ? acceptedExtensions : [acceptedExtensions]).map((extension) =>
+            extension.toLocaleLowerCase("en-US"),
+          ),
+        );
   const entries = await fs.readdir(directory, { withFileTypes: true });
   const files = await Promise.all(
     entries
       .sort((left, right) => comparePaths(left.name, right.name))
       .map(async (entry) => {
         const filePath = path.join(directory, entry.name);
-        if (entry.isDirectory()) return walkFiles(filePath, acceptedExtension);
-        return entry.name.toLocaleLowerCase("en-US").endsWith(acceptedExtension) ? [filePath] : [];
+        if (entry.isDirectory()) return walkFiles(filePath, extensions);
+        return extensions.has(path.extname(entry.name).toLocaleLowerCase("en-US")) ? [filePath] : [];
       }),
   );
 
@@ -82,32 +90,8 @@ function stableId(prefix, sourceFile, title) {
   return `${prefix}-${digest}`;
 }
 
-function imageKey(topic, ageLabel, title) {
-  return [topic, ageLabel, title.trim()].join("\u0000");
-}
-
-function titleFromQuotedText(value) {
-  const match = value.match(/《\s*([^》]+?)\s*》/u);
-  return match?.[1].trim() ?? "";
-}
-
 function titleFromExperimentFile(filePath) {
   return titleFromQuotedText(path.basename(filePath, path.extname(filePath)));
-}
-
-function parseExperimentImageName(fileName) {
-  const match = fileName.match(/(?:材料准备|操作|视频资源)\s*(\d+)\.(?:png|jpe?g|webp)$/iu);
-  if (match) {
-    const role = fileName.includes("材料准备")
-      ? "material"
-      : fileName.includes("视频资源")
-        ? "video"
-        : "operation";
-    return { role, number: Number(match[1]) };
-  }
-
-  const legacyMatch = fileName.match(/图片\s*(\d+)\.(?:png|jpe?g|webp)$/iu);
-  return legacyMatch ? { role: "legacy", number: Number(legacyMatch[1]) } : null;
 }
 
 function imageRoleRank(role) {
@@ -126,8 +110,9 @@ function imageResourceTitle(title, image, fallbackNumber) {
 function isExcludedExperimentImage(sourceImage) {
   const relativePath = relativeSourcePath(sourceImage.filePath);
   return (
-    relativePath.includes("/水与液体/小班/小班科学教案《自制泡泡液》图片/") &&
-    /操作(?:18|23|25|26)\.png$/u.test(relativePath)
+    relativePath.includes("/水与液体/小班/") &&
+    relativePath.includes("《自制泡泡液》") &&
+    /(?:操作|实验步骤)(?:18|23|25|26)\.(?:png|jpe?g|webp)$/iu.test(relativePath)
   );
 }
 
@@ -165,18 +150,6 @@ function sourceDetails(sourceFile, title, body, ageLabel, topic, category, resou
   };
 }
 
-function applyStoryTopicOverride(item, sourceTopic) {
-  const displayTopic = storyTopicOverrides.get(item.title);
-  if (!displayTopic || displayTopic === sourceTopic) return item;
-
-  item.topic = displayTopic;
-  item.tags = item.tags.map((tag) => (tag === sourceTopic ? displayTopic : tag));
-  item.body = item.body.replace(`原始主题：${sourceTopic}`, `展示主题：${displayTopic}`);
-  item.excerpt = excerptFromText(item.body);
-  item.allocationBasis = `按源材料目录归档；按内容校正展示主题为${displayTopic}`;
-  return item;
-}
-
 function extractAuthor(body) {
   const explicit = body.match(/(?:作者|作者\/收集者)[：:]\s*([^\n]{2,80})/u);
   if (explicit?.[1]) return explicit[1].trim();
@@ -188,20 +161,6 @@ function extractAuthor(body) {
 async function extractRawText(filePath) {
   const { value } = await mammoth.extractRawText({ path: filePath });
   return normalizeWhitespace(value);
-}
-
-function poemSections(rawText, fallbackTitle) {
-  const titlePattern = /^\s*\d+\s*[.、]\s*《\s*([^》\n]+?)\s*》\s*$/gmu;
-  const matches = [...rawText.matchAll(titlePattern)];
-
-  if (!matches.length) return [{ title: fallbackTitle, body: rawText }];
-
-  return matches.map((match, index) => {
-    const title = match[1].trim();
-    const start = (match.index ?? 0) + match[0].length;
-    const end = matches[index + 1]?.index ?? rawText.length;
-    return { title, body: rawText.slice(start, end).trim() };
-  });
 }
 
 function experimentSections(rawText, fallbackTitle) {
@@ -219,8 +178,8 @@ function experimentSections(rawText, fallbackTitle) {
 }
 
 async function collectExperimentImages() {
-  const imageFiles = await walkFiles(contentRoots.experimentImages, ".png");
-  const grouped = new Map();
+  const imageFiles = await walkFiles(contentRoots.experimentImages, [".png", ".jpg", ".jpeg", ".webp"]);
+  const images = [];
 
   for (const sourceImage of imageFiles) {
     const relative = path.relative(contentRoots.experimentImages, sourceImage).split(path.sep);
@@ -232,28 +191,49 @@ async function collectExperimentImages() {
 
     const image = parseExperimentImageName(path.basename(sourceImage));
     if (!image) continue;
+    if (!experimentImageMatchesPackage(path.basename(sourceImage), title)) continue;
 
-    const key = imageKey(topic, ageLabel, title);
-    const images = grouped.get(key) ?? [];
-    images.push({ filePath: sourceImage, ...image });
-    grouped.set(key, images);
+    images.push({
+      filePath: sourceImage,
+      topic,
+      ageLabel,
+      packageTitle: title,
+      ...image,
+    });
   }
 
-  for (const images of grouped.values()) {
-    images.sort(
+  return images.toSorted(
+    (left, right) =>
+      left.topic.localeCompare(right.topic, "zh-CN") ||
+      ageOrder.get(left.ageLabel) - ageOrder.get(right.ageLabel) ||
+      left.packageTitle.localeCompare(right.packageTitle, "zh-CN") ||
+      imageRoleRank(left.role) - imageRoleRank(right.role) ||
+      left.number - right.number ||
+      comparePaths(left.filePath, right.filePath),
+  );
+}
+
+function experimentImagesForSection(sourceImages, topic, ageLabel, title) {
+  return sourceImages
+    .filter(
+      (image) =>
+        image.topic === topic &&
+        image.ageLabel === ageLabel &&
+        belongsToExperiment(image, title, image),
+    )
+    .toSorted(
       (left, right) =>
-        imageRoleRank(left.role) - imageRoleRank(right.role) || left.number - right.number,
+        imageRoleRank(left.role) - imageRoleRank(right.role) ||
+        left.number - right.number ||
+        comparePaths(left.filePath, right.filePath),
     );
-  }
-
-  return grouped;
 }
 
 async function copyExperimentImage(sourceImage) {
   const extension = path.extname(sourceImage).toLocaleLowerCase("en-US");
   const digest = createHash("sha1").update(relativeSourcePath(sourceImage)).digest("hex").slice(0, 16);
   const outputName = `${digest}${extension}`;
-  const target = path.join(outputAssetRoot, "experiments", outputName);
+  const target = path.join(outputExperimentAssetRoot, outputName);
 
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.copyFile(sourceImage, target);
@@ -268,95 +248,7 @@ async function isGalleryImage(sourceImage, image = parseExperimentImageName(path
   return !isQrCode;
 }
 
-async function buildPoems() {
-  const files = await walkFiles(contentRoots.poetry, ".docx");
-  const items = [];
-
-  for (const filePath of files) {
-    const relative = path.relative(contentRoots.poetry, filePath).split(path.sep);
-    const [topic, ageLabel] = relative;
-    if (!topic || !ageOrder.has(ageLabel)) {
-      throw new Error(`Unexpected poetry path: ${filePath}`);
-    }
-
-    const sourceFile = relativeSourcePath(filePath);
-    const rawText = await extractRawText(filePath);
-    const fallbackTitle = `${topic}科学诗`;
-
-    for (const section of poemSections(rawText, fallbackTitle)) {
-      const body = markdownFromText(section.body || rawText);
-      const documentResource = {
-        id: stableId("DOC", sourceFile, section.title),
-        type: "文档资源",
-        knowledgeBaseId: stableId("BASE", sourceFile, section.title),
-        semester: ageLabel,
-        title: `${section.title} · 科学诗原稿`,
-        filePath: sourceFile,
-        publicPath: "",
-        externalUrl: "",
-        source: sourceFile,
-        isPublic: true,
-      };
-      const item = sourceDetails(sourceFile, section.title, body, ageLabel, topic, "科学诗", [documentResource]);
-      item.author = extractAuthor(body);
-      if (item.author) item.tags.push(item.author);
-      items.push(item);
-    }
-  }
-
-  return items;
-}
-
-async function buildStories() {
-  const files = await walkFiles(contentRoots.stories, ".mp4");
-  const items = [];
-
-  for (const filePath of files) {
-    const relative = path.relative(contentRoots.stories, filePath).split(path.sep);
-    const [topic, edition, ageLabel] = relative;
-    if (!topic || !edition || !ageOrder.has(ageLabel)) {
-      throw new Error(`Unexpected story path: ${filePath}`);
-    }
-
-    const sourceFile = relativeSourcePath(filePath);
-    const stem = path.basename(filePath, path.extname(filePath));
-    const title = titleFromQuotedText(stem) || stem;
-    const performer = stem.replace(/^.*?》\s*/u, "").replace(/（第\d+期）$/u, "").trim();
-    const body = [
-      `## ${title}`,
-      "",
-      `本条为${edition}科学故事视频，适用${ageLabel}。`,
-      "",
-      `原始主题：${topic}`,
-      performer ? `演绎/提供：${performer}` : "",
-      "",
-      "视频原文件已按本地资料目录归档；公开播放地址接入后可直接替换此资源链接。",
-    ]
-      .filter(Boolean)
-      .join("\n");
-    const videoResource = {
-      id: stableId("VIDEO", sourceFile, title),
-      type: "视频资源",
-      knowledgeBaseId: stableId("BASE", sourceFile, title),
-      semester: ageLabel,
-      title: `${title} · ${edition}`,
-      filePath: sourceFile,
-      publicPath: "",
-      externalUrl: "",
-      source: sourceFile,
-      isPublic: true,
-    };
-    const item = sourceDetails(sourceFile, title, body, ageLabel, topic, "科学故事", [videoResource]);
-    applyStoryTopicOverride(item, topic);
-    item.author = performer;
-    item.tags.push(edition, "视频");
-    items.push(item);
-  }
-
-  return items;
-}
-
-async function buildExperiments(imagesByExperiment) {
+async function buildExperiments(sourceImages) {
   const files = await walkFiles(contentRoots.experiments, ".docx");
   const items = [];
 
@@ -389,9 +281,9 @@ async function buildExperiments(imagesByExperiment) {
         },
       ];
 
-      const sourceImages = imagesByExperiment.get(imageKey(topic, ageLabel, section.title)) ?? [];
+      const sectionImages = experimentImagesForSection(sourceImages, topic, ageLabel, section.title);
       const fallbackCounters = { material: 0, operation: 0, legacy: 0 };
-      for (const sourceImage of sourceImages) {
+      for (const sourceImage of sectionImages) {
         if (!(await isGalleryImage(sourceImage.filePath, sourceImage))) continue;
         fallbackCounters[sourceImage.role] = (fallbackCounters[sourceImage.role] ?? 0) + 1;
         resources.push({
@@ -415,7 +307,7 @@ async function buildExperiments(imagesByExperiment) {
       const body = markdownFromText(section.body || rawText);
       const item = sourceDetails(sourceFile, section.title, body, ageLabel, topic, "科学实验", resources);
       item.author = extractAuthor(body);
-      item.tags.push("教案", ...(sourceImages.length ? ["图片"] : []));
+      item.tags.push("教案", ...(resources.some((resource) => resource.type === "图片资源") ? ["图片"] : []));
       items.push(item);
     }
   }
@@ -440,31 +332,31 @@ function sortCatalog(items) {
 }
 
 async function validateSourceDirectories() {
-  for (const directory of Object.values(contentRoots)) {
+  for (const directory of [contentRoots.experiments, contentRoots.experimentImages]) {
     const stat = await fs.stat(directory).catch(() => null);
     if (!stat?.isDirectory()) throw new Error(`Source directory is unavailable: ${directory}`);
   }
 }
 
 async function resetGeneratedAssets() {
-  const relativeTarget = path.relative(repoRoot, outputAssetRoot);
-  if (relativeTarget !== path.join("public", "science-assets")) {
-    throw new Error(`Refusing to reset an unexpected asset directory: ${outputAssetRoot}`);
+  const relativeTarget = path.relative(repoRoot, outputExperimentAssetRoot);
+  if (relativeTarget !== path.join("public", "science-assets", "experiments")) {
+    throw new Error(`Refusing to reset an unexpected asset directory: ${outputExperimentAssetRoot}`);
   }
-  await fs.rm(outputAssetRoot, { recursive: true, force: true });
+  await fs.rm(outputExperimentAssetRoot, { recursive: true, force: true });
 }
 
 async function main() {
   await validateSourceDirectories();
+  const existingCatalog = JSON.parse(await fs.readFile(outputCatalog, "utf8"));
   await resetGeneratedAssets();
 
-  const imagesByExperiment = await collectExperimentImages();
-  const [poems, stories, experiments] = await Promise.all([
-    buildPoems(),
-    buildStories(),
-    buildExperiments(imagesByExperiment),
+  const sourceImages = await collectExperimentImages();
+  const experiments = await buildExperiments(sourceImages);
+  const catalog = sortCatalog([
+    ...existingCatalog.filter((item) => item.category !== "科学实验"),
+    ...experiments,
   ]);
-  const catalog = sortCatalog([...poems, ...stories, ...experiments]);
 
   if (!catalog.length) throw new Error("No science materials were imported");
   if (new Set(catalog.map((item) => item.id)).size !== catalog.length) {
