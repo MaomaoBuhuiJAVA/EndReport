@@ -143,3 +143,78 @@ test("cleans active voice work when the pet button closes the chat", () => {
     /function handlePetClick\(\) \{\s*if \(suppressClickRef\.current\) \{[\s\S]*?\}\s*if \(open\) \{\s*stopAllVoice\(\);\s*setOpen\(false\);\s*return;/,
   );
 });
+
+test("uses the real floating pet sprite inside the merged call card", () => {
+  assert.match(component, /className="pet-call__pet-stage"/);
+  assert.match(component, /className="science-pet__sprite pet-call__pet"/);
+  assert.match(component, /style=\{spriteStyle\}/);
+  assert.match(styles, /\.pet-call__pet\s*\{[\s\S]*?image-rendering:\s*auto/);
+});
+
+test("uses the scoped Uiverse ghost loader instead of the square typing dots", () => {
+  assert.match(component, /function ThinkingGhost\(\)/);
+  assert.match(component, /className="thinking-ghost"/);
+  assert.match(component, /const thinkingGhostPieces = \[[\s\S]*"top0"[\s\S]*"an18"/);
+  assert.match(component, /data-piece=\{piece\}/);
+  assert.match(styles, /\.thinking-ghost__body\s*\{[\s\S]*?grid-template-areas:/);
+  assert.match(styles, /@keyframes thinking-ghost-up/);
+  assert.doesNotMatch(styles, /#ghost\s*\{/);
+});
+
+test("keeps call bubbles between the voiceprint and the three call controls", () => {
+  assert.match(component, /className="pet-call__messages"/);
+  assert.match(component, /className="pet-call__bubble pet-call__bubble--assistant"/);
+  assert.match(component, /className="pet-call__bubble pet-call__bubble--user"/);
+  assert.match(component, /<ThinkingGhost \/>/);
+  assert.match(component, /aria-label="扬声器"/);
+  assert.match(component, /aria-label="结束通话"/);
+  assert.match(component, /callPhase === "idle" \?/);
+  assert.doesNotMatch(component, /className="pet-call__status"/);
+  assert.doesNotMatch(component, /className="pet-call__turns"/);
+});
+
+test("re-measures the moving pet before placing the mobile chat window", () => {
+  assert.match(
+    component,
+    /useLayoutEffect\(\(\) => \{\s*if \(!open\) return;\s*const frame = window\.requestAnimationFrame\(\(\) => \{/,
+  );
+  assert.match(component, /return \(\) => window\.cancelAnimationFrame\(frame\);\s*\}, \[open, position, autoWalk\]\);/);
+});
+
+test("starts each new voice turn with a fresh reply while retaining the latest chat context", () => {
+  assert.match(component, /const messagesRef = useRef<PetMessage\[\]>\(messages\);/);
+  assert.match(component, /useEffect\(\(\) => \{\s*messagesRef\.current = messages;\s*\}, \[messages\]\);/);
+  assert.match(
+    component,
+    /setCallPhase\("thinking"\);\s*setCallReply\(""\);\s*setCallTranscript\(transcript\);/,
+  );
+  assert.match(component, /const history = messagesRef\.current\.slice\(-12\)\.map\(\(message\) => \(\{/);
+});
+
+test("uses the latest call speaker setting when a later TTS response begins", () => {
+  assert.match(component, /const speakerEnabledRef = useRef\(true\);/);
+  assert.match(component, /audio\.muted = options\.callSessionId !== undefined && !speakerEnabledRef\.current;/);
+  assert.match(component, /speakerEnabledRef\.current = true;\s*setSpeakerEnabled\(true\);/);
+  assert.match(component, /const nextEnabled = !speakerEnabledRef\.current;\s*speakerEnabledRef\.current = nextEnabled;/);
+});
+
+test("keeps the supplied floating pixel-loader compact inside a message bubble and recolored leaf green", () => {
+  assert.match(component, /className="thinking-ghost__scene"/);
+  assert.match(styles, /\.thinking-ghost\s*\{[\s\S]*?width:\s*48px[\s\S]*?height:\s*48px/);
+  assert.match(styles, /\.thinking-ghost__scene\s*\{[\s\S]*?width:\s*140px[\s\S]*?height:\s*140px[\s\S]*?scale:\s*0\.34/);
+  assert.match(styles, /\.thinking-ghost__piece\[data-piece\^="top"\],[\s\S]*?background:\s*#4fb86b/);
+  assert.match(styles, /\.thinking-ghost__shadow\s*\{[\s\S]*?width:\s*140px[\s\S]*?height:\s*140px[\s\S]*?transform:\s*rotateX\(80deg\)[\s\S]*?filter:\s*blur\(20px\)/);
+});
+
+test("keeps only the inner icon button outlined in the call controls", () => {
+  const controlRule = styles.match(/\.pet-call__control\s*\{([\s\S]*?)\n\}/)?.[1] ?? "";
+  const endControlRule = styles.match(/\.pet-call__control--end\s*\{([\s\S]*?)\n\}/)?.[1] ?? "";
+  assert.doesNotMatch(controlRule, /\bborder\s*:/);
+  assert.match(styles, /\.pet-call__control svg\s*\{[\s\S]*?border:\s*1px solid/);
+  assert.doesNotMatch(endControlRule, /\bborder-color\s*:/);
+});
+
+test("keeps the call-card pet out of the compact floating-pet sprite rule", () => {
+  assert.match(styles, /\.home-page \.science-pet__button \.science-pet__sprite\s*\{/);
+  assert.doesNotMatch(styles, /\.home-page \.science-pet__sprite\s*\{/);
+});

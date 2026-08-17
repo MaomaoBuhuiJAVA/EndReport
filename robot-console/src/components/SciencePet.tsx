@@ -136,13 +136,56 @@ const petAnimations: Record<
   working: { row: 8, durations: [150, 150, 150, 150, 150, 280] },
 };
 
-const callPhaseLabels: Record<Exclude<CallPhase, "idle" | "error">, string> = {
-  preparing: "正在准备麦克风",
-  listening: "正在聆听",
-  thinking: "科小贝正在回答",
-  speaking: "科小贝正在播报",
-  muted: "麦克风已静音",
-};
+const thinkingGhostPieces = [
+  "top0",
+  "top1",
+  "top2",
+  "top3",
+  "top4",
+  "st0",
+  "st1",
+  "st2",
+  "st3",
+  "st4",
+  "st5",
+  "an1",
+  "an2",
+  "an3",
+  "an4",
+  "an5",
+  "an6",
+  "an7",
+  "an8",
+  "an9",
+  "an10",
+  "an11",
+  "an12",
+  "an13",
+  "an14",
+  "an15",
+  "an16",
+  "an17",
+  "an18",
+] as const;
+
+function ThinkingGhost() {
+  return (
+    <span className="thinking-ghost" role="img" aria-label="科小贝正在思考">
+      <span className="thinking-ghost__scene" aria-hidden="true">
+        <span className="thinking-ghost__body">
+          <span className="thinking-ghost__eye thinking-ghost__eye--left" />
+          <span className="thinking-ghost__eye thinking-ghost__eye--right" />
+          <span className="thinking-ghost__pupil thinking-ghost__pupil--left" />
+          <span className="thinking-ghost__pupil thinking-ghost__pupil--right" />
+          {thinkingGhostPieces.map((piece) => (
+            <span key={piece} className="thinking-ghost__piece" data-piece={piece} />
+          ))}
+        </span>
+        <span className="thinking-ghost__shadow" />
+      </span>
+    </span>
+  );
+}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), Math.max(min, max));
@@ -177,6 +220,7 @@ export function SciencePet() {
   const [callNotice, setCallNotice] = useState("");
   const [callTranscript, setCallTranscript] = useState("");
   const [callReply, setCallReply] = useState("");
+  const [speakerEnabled, setSpeakerEnabled] = useState(true);
   const [dragging, setDragging] = useState(false);
   const [spriteFrame, setSpriteFrame] = useState(0);
   const [autoWalk, setAutoWalk] = useState<WalkDirection | null>(null);
@@ -190,6 +234,7 @@ export function SciencePet() {
       text: "你好，我是科小贝。想找科学诗、科学故事、实验教案或园所资料，都可以问我。",
     },
   ]);
+  const messagesRef = useRef<PetMessage[]>(messages);
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageIdRef = useRef(2);
   const dragRef = useRef<DragState | null>(null);
@@ -209,6 +254,7 @@ export function SciencePet() {
   const callSessionIdRef = useRef(0);
   const callActiveRef = useRef(false);
   const callMutedRef = useRef(false);
+  const speakerEnabledRef = useRef(true);
   const callFinalTimerRef = useRef<number | null>(null);
   const callFinalTranscriptRef = useRef("");
   const callRestartTimerRef = useRef<number | null>(null);
@@ -223,6 +269,10 @@ export function SciencePet() {
 
     return () => window.cancelAnimationFrame(frame);
   }, []);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const animationState: PetAnimationState = busy
     ? "working"
@@ -388,27 +438,31 @@ export function SciencePet() {
   useLayoutEffect(() => {
     if (!open) return;
 
-    const bounds = petRootRef.current?.getBoundingClientRect();
-    if (!bounds) return;
+    const frame = window.requestAnimationFrame(() => {
+      const bounds = petRootRef.current?.getBoundingClientRect();
+      if (!bounds) return;
 
-    const isMobile = window.innerWidth <= 720;
-    const preferredWidth = Math.max(160, Math.min(360, window.innerWidth - (isMobile ? 24 : 20)));
-    const preferredHeight = Math.max(160, Math.min(isMobile ? 680 : 640, window.innerHeight - (isMobile ? 84 : 154)));
-    const leftSpace = Math.max(0, bounds.left - chatGap - viewportMargin);
-    const rightSpace = Math.max(0, window.innerWidth - bounds.right - chatGap - viewportMargin);
-    const placeChatLeft = leftSpace >= preferredWidth || leftSpace >= rightSpace;
-    const availableWidth = placeChatLeft ? leftSpace : rightSpace;
-    const aboveSpace = Math.max(0, bounds.bottom - viewportMargin);
-    const belowSpace = Math.max(0, window.innerHeight - bounds.bottom - chatGap - viewportMargin);
-    const placeChatBelow = aboveSpace < preferredHeight && belowSpace > aboveSpace;
-    const availableHeight = placeChatBelow ? belowSpace : aboveSpace;
+      const isMobile = window.innerWidth <= 720;
+      const preferredWidth = Math.max(160, Math.min(360, window.innerWidth - (isMobile ? 24 : 20)));
+      const preferredHeight = Math.max(160, Math.min(isMobile ? 680 : 640, window.innerHeight - (isMobile ? 84 : 154)));
+      const leftSpace = Math.max(0, bounds.left - chatGap - viewportMargin);
+      const rightSpace = Math.max(0, window.innerWidth - bounds.right - chatGap - viewportMargin);
+      const placeChatLeft = leftSpace >= preferredWidth || leftSpace >= rightSpace;
+      const availableWidth = placeChatLeft ? leftSpace : rightSpace;
+      const aboveSpace = Math.max(0, bounds.bottom - viewportMargin);
+      const belowSpace = Math.max(0, window.innerHeight - bounds.bottom - chatGap - viewportMargin);
+      const placeChatBelow = aboveSpace < preferredHeight && belowSpace > aboveSpace;
+      const availableHeight = placeChatBelow ? belowSpace : aboveSpace;
 
-    setDock({ left: !placeChatLeft, top: placeChatBelow });
-    setChatSize({
-      width: Math.max(160, Math.min(preferredWidth, availableWidth || preferredWidth)),
-      height: Math.max(160, Math.min(preferredHeight, availableHeight || preferredHeight)),
+      setDock({ left: !placeChatLeft, top: placeChatBelow });
+      setChatSize({
+        width: Math.max(160, Math.min(preferredWidth, availableWidth || preferredWidth)),
+        height: Math.max(160, Math.min(preferredHeight, availableHeight || preferredHeight)),
+      });
     });
-  }, [open, position]);
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, position, autoWalk]);
 
   const stopPressAndHoldVoice = useCallback(() => {
     voicePressedRef.current = false;
@@ -583,6 +637,7 @@ export function SciencePet() {
 
       const objectUrl = URL.createObjectURL(blob);
       audio = new Audio(objectUrl);
+      audio.muted = options.callSessionId !== undefined && !speakerEnabledRef.current;
       audioRef.current = audio;
       audioObjectUrlRef.current = objectUrl;
       if (options.messageId !== undefined) setSpeakingMessageId(options.messageId);
@@ -653,12 +708,13 @@ export function SciencePet() {
     if (thinking.phase !== "thinking") return;
     callSessionRef.current = thinking;
     setCallPhase("thinking");
+    setCallReply("");
     setCallTranscript(transcript);
     setCallNotice("科小贝正在整理并回答。");
 
     const userMessageId = messageIdRef.current++;
     const assistantMessageId = messageIdRef.current++;
-    const history = messages.slice(-12).map((message) => ({
+    const history = messagesRef.current.slice(-12).map((message) => ({
       role: message.role,
       content: message.text,
     }));
@@ -796,6 +852,8 @@ export function SciencePet() {
     callSessionIdRef.current = session.id;
     callActiveRef.current = true;
     callMutedRef.current = false;
+    speakerEnabledRef.current = true;
+    setSpeakerEnabled(true);
     setCallPhase("preparing");
     setCallNotice("正在准备麦克风。");
     setCallTranscript("");
@@ -825,6 +883,15 @@ export function SciencePet() {
     clearCallTimers();
     setCallPhase("muted");
     setCallNotice("麦克风已静音，恢复后可以继续对话。");
+  }
+
+  function toggleCallSpeaker() {
+    const nextEnabled = !speakerEnabledRef.current;
+    speakerEnabledRef.current = nextEnabled;
+    if (audioRef.current && callActiveRef.current) {
+      audioRef.current.muted = !nextEnabled;
+    }
+    setSpeakerEnabled(nextEnabled);
   }
 
   function endVoiceCall() {
@@ -1068,11 +1135,6 @@ export function SciencePet() {
     "--pet-y": `${(animation.row / 10) * 100}%`,
   } as CSSProperties;
   const callInputLocked = callPhase !== "idle" && callPhase !== "error";
-  const callStatusText = callPhase === "error"
-    ? callNotice
-    : callPhase === "idle"
-      ? ""
-      : callPhaseLabels[callPhase];
 
   return (
     <div
@@ -1102,71 +1164,111 @@ export function SciencePet() {
             exit={{ opacity: 0, y: 10, scale: 0.97 }}
             transition={{ type: "spring", stiffness: 300, damping: 25 }}
           >
-            <header className="pet-chat__header">
-              <span>
-                <GardenSeal glyph="贝" size="mini" tone="gold" />
-                科小贝
-              </span>
-              <div className="pet-chat__header-actions">
-                <button
-                  type="button"
-                  onClick={startVoiceCall}
-                  disabled={callPhase !== "idle" && callPhase !== "error"}
-                  aria-label="开启语音通话"
-                  title="开启语音通话"
-                >
-                  <PhoneCall size={16} />
-                </button>
-                <button type="button" onClick={handleCloseChat} aria-label="关闭对话" title="关闭对话">
-                  <X size={17} />
-                </button>
-              </div>
-            </header>
+            {callPhase === "idle" ? (
+              <header className="pet-chat__header">
+                <span>
+                  <GardenSeal glyph="贝" size="mini" tone="gold" />
+                  科小贝
+                </span>
+                <div className="pet-chat__header-actions">
+                  <button
+                    type="button"
+                    onClick={startVoiceCall}
+                    disabled={callPhase !== "idle" && callPhase !== "error"}
+                    aria-label="开启语音通话"
+                    title="开启语音通话"
+                  >
+                    <PhoneCall size={16} />
+                  </button>
+                  <button type="button" onClick={handleCloseChat} aria-label="关闭对话" title="关闭对话">
+                    <X size={17} />
+                  </button>
+                </div>
+              </header>
+            ) : null}
 
             {callPhase !== "idle" ? (
-              <section className="pet-call" aria-label="科小贝语音通话" aria-live="polite">
-                <div className="pet-call__status">
-                  <span className={`pet-call__indicator pet-call__indicator--${callPhase}`} aria-hidden="true" />
-                  <strong>{callStatusText}</strong>
-                  <p>{callNotice}</p>
-                </div>
-                <div className="pet-call__turns">
-                  <div>
-                    <span>你说</span>
-                    <p>{callTranscript || "等待你说话"}</p>
-                  </div>
-                  <div>
-                    <span>科小贝回答</span>
-                    <p>{callReply || "回答会显示在这里"}</p>
+              <section className="pet-call" aria-label="科小贝通话" aria-live="polite">
+                <div className="pet-call__pet-stage" aria-hidden="true">
+                  <div className="pet-call__pet-orbit">
+                    <span className="science-pet__sprite pet-call__pet" data-pet-state={animationState} style={spriteStyle} />
                   </div>
                 </div>
-                <div className="pet-call__controls">
+
+                <div className={`pet-call__wave pet-call__wave--${callPhase}`} aria-label="声纹动态">
+                  {Array.from({ length: 13 }, (_, index) => <i key={index} />)}
+                </div>
+
+                <span className="sr-only" role="status">{callNotice}</span>
+                <div className="pet-call__messages" aria-label="通话中的聊天内容">
+                  {!callReply && !callTranscript ? (
+                    <div className="pet-call__bubble pet-call__bubble--assistant">
+                      <span className="pet-call__who">科小贝</span>
+                      <p>你好，我可以帮你准备科学活动。</p>
+                    </div>
+                  ) : null}
+                  {callTranscript ? (
+                    <div className="pet-call__bubble pet-call__bubble--user">
+                      <span className="pet-call__who">你</span>
+                      <p>{callTranscript}</p>
+                    </div>
+                  ) : null}
+                  {callPhase === "thinking" && !callReply ? (
+                    <div className="pet-call__bubble pet-call__bubble--assistant">
+                      <span className="thinking-copy">
+                        <ThinkingGhost />
+                        <span>正在思考</span>
+                      </span>
+                    </div>
+                  ) : null}
+                  {callReply ? (
+                    <div className="pet-call__bubble pet-call__bubble--assistant">
+                      <span className="pet-call__who">科小贝</span>
+                      <p>{callReply}</p>
+                    </div>
+                  ) : null}
                   {callPhase === "error" ? (
-                    <button type="button" className="pet-call__text-action" onClick={endVoiceCall}>
-                      返回文字对话
-                    </button>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        className={`pet-call__control${callPhase === "muted" ? " is-muted" : ""}`}
-                        onClick={toggleCallMute}
-                        aria-label={callPhase === "muted" ? "恢复麦克风" : "静音麦克风"}
-                        title={callPhase === "muted" ? "恢复麦克风" : "静音麦克风"}
-                      >
-                        {callPhase === "muted" ? <Mic size={18} /> : <MicOff size={18} />}
+                    <div className="pet-call__error" role="alert">
+                      <p>{callNotice}</p>
+                      <button type="button" className="pet-call__text-action" onClick={endVoiceCall}>
+                        返回文字对话
                       </button>
-                      <button
-                        type="button"
-                        className="pet-call__control pet-call__control--end"
-                        onClick={endVoiceCall}
-                        aria-label="结束通话"
-                        title="结束通话"
-                      >
-                        <PhoneOff size={18} />
-                      </button>
-                    </>
-                  )}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="pet-call__controls">
+                  <button
+                    type="button"
+                    className={`pet-call__control${callPhase === "muted" ? " is-muted" : ""}`}
+                    onClick={toggleCallMute}
+                    disabled={callPhase === "error"}
+                    aria-label={callPhase === "muted" ? "恢复麦克风" : "静音麦克风"}
+                    title={callPhase === "muted" ? "恢复麦克风" : "静音麦克风"}
+                  >
+                    {callPhase === "muted" ? <Mic size={19} /> : <MicOff size={19} />}
+                    <span>静音</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="pet-call__control pet-call__control--end"
+                    onClick={endVoiceCall}
+                    aria-label="结束通话"
+                    title="结束通话"
+                  >
+                    <PhoneOff size={19} />
+                    <span>挂断</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`pet-call__control${speakerEnabled ? "" : " is-muted"}`}
+                    onClick={toggleCallSpeaker}
+                    aria-label="扬声器"
+                    title={speakerEnabled ? "关闭扬声器" : "打开扬声器"}
+                  >
+                    {speakerEnabled ? <Volume2 size={19} /> : <VolumeX size={19} />}
+                    <span>扬声器</span>
+                  </button>
                 </div>
               </section>
             ) : (
@@ -1231,10 +1333,9 @@ export function SciencePet() {
                   ))}
                   {busy ? (
                     <div className="pet-message pet-message--assistant">
-                      <span className="typing-dots" aria-label="科小贝正在检索">
-                        <i />
-                        <i />
-                        <i />
+                      <span className="thinking-copy">
+                        <ThinkingGhost />
+                        <span>正在思考</span>
                       </span>
                     </div>
                   ) : null}
@@ -1250,43 +1351,45 @@ export function SciencePet() {
               </>
             )}
 
-            <div className="pet-chat__composer">
-              {voiceNotice ? (
-                <p className="pet-chat__voice-feedback" role="status">
-                  {voiceNotice}
-                </p>
-              ) : null}
-              <form className="pet-chat__form" onSubmit={handleSubmit}>
-                <input
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  placeholder={voiceStatus === "listening" ? "正在聆听..." : "问问科小贝..."}
-                  aria-label="向科小贝提问"
-                  disabled={busy || callInputLocked}
-                />
-                <button
-                  type="button"
-                  className={`pet-chat__voice${voiceStatus === "listening" || voiceStatus === "starting" ? " is-listening" : ""}`}
-                  disabled={busy || callPhase !== "idle" || voiceStatus === "processing"}
-                  onContextMenu={(event) => event.preventDefault()}
-                  onPointerCancel={stopVoiceInput}
-                  onPointerDown={startVoiceInput}
-                  onPointerUp={stopVoiceInput}
-                  aria-label="按住进行语音输入"
-                  aria-pressed={voiceStatus === "listening"}
-                  title="按住说话，松开完成"
-                >
-                  <Mic size={17} />
-                </button>
-                <button
-                  type="submit"
-                  disabled={!input.trim() || busy || callInputLocked || voiceStatus === "listening" || voiceStatus === "starting" || voiceStatus === "processing"}
-                  title="发送"
-                >
-                  <Send size={17} />
-                </button>
-              </form>
-            </div>
+            {callPhase === "idle" ? (
+              <div className="pet-chat__composer">
+                {voiceNotice ? (
+                  <p className="pet-chat__voice-feedback" role="status">
+                    {voiceNotice}
+                  </p>
+                ) : null}
+                <form className="pet-chat__form" onSubmit={handleSubmit}>
+                  <input
+                    value={input}
+                    onChange={(event) => setInput(event.target.value)}
+                    placeholder={voiceStatus === "listening" ? "正在聆听..." : "问问科小贝..."}
+                    aria-label="向科小贝提问"
+                    disabled={busy || callInputLocked}
+                  />
+                  <button
+                    type="button"
+                    className={`pet-chat__voice${voiceStatus === "listening" || voiceStatus === "starting" ? " is-listening" : ""}`}
+                    disabled={busy || callPhase !== "idle" || voiceStatus === "processing"}
+                    onContextMenu={(event) => event.preventDefault()}
+                    onPointerCancel={stopVoiceInput}
+                    onPointerDown={startVoiceInput}
+                    onPointerUp={stopVoiceInput}
+                    aria-label="按住进行语音输入"
+                    aria-pressed={voiceStatus === "listening"}
+                    title="按住说话，松开完成"
+                  >
+                    <Mic size={17} />
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!input.trim() || busy || callInputLocked || voiceStatus === "listening" || voiceStatus === "starting" || voiceStatus === "processing"}
+                    title="发送"
+                  >
+                    <Send size={17} />
+                  </button>
+                </form>
+              </div>
+            ) : null}
           </motion.section>
         ) : null}
       </AnimatePresence>
