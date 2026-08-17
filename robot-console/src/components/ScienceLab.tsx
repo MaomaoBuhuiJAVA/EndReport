@@ -15,6 +15,7 @@ import {
   LoaderCircle,
   PlayCircle,
   Search,
+  Sparkles,
   X,
 } from "lucide-react";
 import { GardenSeal } from "@/components/GardenSeal";
@@ -66,6 +67,8 @@ const labHeroPhotos = [
   "/gallery/campus-03.webp",
   "/gallery/campus-07.webp",
 ];
+
+type ExperimentAgentAction = "analyze" | "similar";
 
 function ResourceIcon({ type }: { type: string }) {
   if (type === "图片资源") return <ImageIcon size={14} />;
@@ -161,21 +164,69 @@ function literatureTone(item: ScienceKnowledgeSummary) {
   return `tone-${score % 4}`;
 }
 
+function scienceStoryCoverPath(item: ScienceKnowledgeSummary) {
+  return item.category === "科学故事" ? `/science-story-covers/${item.id}.webp` : "";
+}
+
+function isDirectVideoUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return /\.(?:mp4|webm|mov|m4v)(?:$|[?#])/iu.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function KnowledgeCard({
   item,
   onOpen,
+  onAgentAction,
 }: {
   item: ScienceKnowledgeSummary;
   onOpen: () => void;
+  onAgentAction: (item: ScienceKnowledgeSummary, action: ExperimentAgentAction) => void;
 }) {
   const thumbnail = publicImages(item)[0];
   const isLiterature = item.category === "科学诗" || item.category === "科学故事";
+  const isStory = item.category === "科学故事";
+  const [storyCoverFailed, setStoryCoverFailed] = useState(false);
   const categoryVisual =
     categoryVisuals[item.category as keyof typeof categoryVisuals] ?? categoryVisuals.科学实验;
   const CategoryIcon = categoryVisual.icon;
   const mediaVariant = item.category === "科学诗" ? "poetry" : item.category === "科学故事" ? "story" : "experiment";
+  const storyCover = scienceStoryCoverPath(item);
+  const literatureImage = isStory && storyCover
+    ? storyCoverFailed ? categoryVisual.image : storyCover
+    : categoryVisual.image;
+  const [agentMenuOpen, setAgentMenuOpen] = useState(false);
+  const agentActionsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!agentMenuOpen) return;
+
+    function closeAgentMenu(event: PointerEvent) {
+      if (!agentActionsRef.current?.contains(event.target as Node)) setAgentMenuOpen(false);
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setAgentMenuOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeAgentMenu);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeAgentMenu);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [agentMenuOpen]);
+
+  function chooseAgentAction(action: ExperimentAgentAction) {
+    setAgentMenuOpen(false);
+    onAgentAction(item, action);
+  }
 
   return (
+    <div className="knowledge-card-shell">
     <button
       type="button"
       className={`knowledge-card${isLiterature ? ` knowledge-card--literature knowledge-card--${literatureTone(item)}` : ""}`}
@@ -188,11 +239,12 @@ function KnowledgeCard({
         {isLiterature ? (
           <>
             <Image
-              src={categoryVisual.image}
+              src={literatureImage}
               alt=""
               fill
               sizes="(min-width: 720px) 30vw, 46vw"
               className="knowledge-card__literature-art"
+              onError={isStory ? () => setStoryCoverFailed(true) : undefined}
               aria-hidden="true"
             />
             <span className="knowledge-card__literature-shade" aria-hidden="true" />
@@ -224,10 +276,17 @@ function KnowledgeCard({
             </span>
           </span>
         )}
-        <span className="knowledge-card__semester">{item.ageLabel}</span>
+        {item.category !== "科学实验" ? (
+          <span className="knowledge-card__semester">{item.ageLabel}</span>
+        ) : null}
       </span>
       <span className={`knowledge-card__body${isLiterature ? " knowledge-card__body--literature" : ""}`}>
-        <span className="knowledge-card__category">{item.category}</span>
+        <span className="knowledge-card__category-row">
+          {item.category === "科学实验" && item.ageLabel ? (
+            <span className="knowledge-card__experiment-age">{item.ageLabel}</span>
+          ) : null}
+          <span className="knowledge-card__category">{item.category}</span>
+        </span>
         <strong className="knowledge-card__body-title">{item.title}</strong>
         <span className="knowledge-card__excerpt">{item.excerpt}</span>
         <span className="knowledge-card__footer">
@@ -245,6 +304,32 @@ function KnowledgeCard({
         </span>
       </span>
     </button>
+      {item.category === "科学实验" ? (
+        <div className="knowledge-card__agent-actions" ref={agentActionsRef}>
+          <button
+            type="button"
+            className="knowledge-card__agent-trigger"
+            aria-label={`打开《${item.title}》的 AI 操作`}
+            aria-expanded={agentMenuOpen}
+            aria-haspopup="menu"
+            title="AI 实验操作"
+            onClick={() => setAgentMenuOpen((isOpen) => !isOpen)}
+          >
+            <Sparkles size={15} />
+          </button>
+          {agentMenuOpen ? (
+            <div className="knowledge-card__agent-menu" role="menu" aria-label={`${item.title} 的 AI 操作`}>
+              <button type="button" role="menuitem" onClick={() => chooseAgentAction("analyze")}>
+                AI 解析这个实验
+              </button>
+              <button type="button" role="menuitem" onClick={() => chooseAgentAction("similar")}>
+                生成类似主题方案
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -361,6 +446,7 @@ function KnowledgeDetail({
                   const videoLabel = `视频资源 ${index + 1}`;
                   const videoUrl =
                     videoResource.externalUrl || (index === 0 ? item?.videoUrl : "");
+                  const isPlayableVideo = Boolean(videoUrl && isDirectVideoUrl(videoUrl));
                   const qrContent = videoResource.publicPath ? (
                     <>
                       <Image
@@ -378,6 +464,18 @@ function KnowledgeDetail({
                     <div className="video-resource__item" key={videoResource.id}>
                       {videoResources.length > 1 ? (
                         <span className="video-resource__label">{videoLabel}</span>
+                      ) : null}
+                      {isPlayableVideo ? (
+                        <video
+                          className="video-resource__player"
+                          controls
+                          playsInline
+                          preload="metadata"
+                          aria-label={`播放${display.title}的${videoLabel}`}
+                        >
+                          <source src={videoUrl} type="video/mp4" />
+                          您的浏览器不支持视频播放，请使用下方链接打开。
+                        </video>
                       ) : null}
                       <div className="video-resource__actions">
                         {videoUrl ? (
@@ -583,6 +681,16 @@ export function ScienceLab({
     }
   }, []);
 
+  const openExperimentAgent = useCallback(
+    (item: ScienceKnowledgeSummary, action: ExperimentAgentAction) => {
+      const prompt = action === "analyze"
+        ? `请解析科学实验《${item.title}》。年龄段：${item.ageLabel || "未指定"}；主题：${item.topic || "未指定"}；资源 ID：${item.id}。我会继续补充现场观察或图片。`
+        : `请参考科学实验《${item.title}》生成类似主题活动方案。年龄段：${item.ageLabel || "未指定"}；主题：${item.topic || "未指定"}；资源 ID：${item.id}。`;
+      window.dispatchEvent(new CustomEvent("kexiaobei:open", { detail: { prompt } }));
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!initialResourceId || autoOpenedResourceId.current === initialResourceId) return;
 
@@ -716,6 +824,7 @@ export function ScienceLab({
                     key={item.id}
                     item={item}
                     onOpen={() => void openDetail(item)}
+                    onAgentAction={openExperimentAgent}
                   />
                 ))}
               </div>

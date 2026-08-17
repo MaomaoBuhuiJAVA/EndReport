@@ -6,7 +6,7 @@
 
 - 艺术化管理后台首页：设备总览、班级机器人列表、设备状态、教学任务、运行日志。
 - 教师端控制面板：前进、后退、左转、右转、停止、学习模式、陪伴模式、休眠、故事、儿歌。
-- AI 悬浮窗：服务端 API 调用 DeepSeek，未配置密钥时自动使用本地模拟回复。
+- AI 悬浮窗：服务端 API 调用 Dify Chatflow，未配置密钥时自动使用本地资料兜底回复。
 - 硬件预留接口：设备心跳上报接口和教师指令下发接口已经完成。
 - 数据库模型：Prisma 定义了用户、设备、指令、日志、AI 对话、学习任务等表，后续可接 Vercel Postgres。
 
@@ -17,7 +17,7 @@
 - Tailwind CSS
 - Prisma ORM
 - Vercel Postgres / Neon PostgreSQL
-- DeepSeek Chat API
+- Dify Chatflow API
 - lucide-react 图标组件
 
 ## 本地运行
@@ -39,8 +39,8 @@ http://localhost:3000
 
 ```bash
 DATABASE_URL="Vercel Postgres 提供的连接字符串"
-DEEPSEEK_API_KEY="你的 DeepSeek API Key"
-DEEPSEEK_API_URL="https://api.deepseek.com/chat/completions"
+DIFY_API_KEY="你的 Dify API Key"
+DIFY_API_URL="https://api.dify.ai/v1/chat-messages"
 ```
 
 注意：`.env.local` 已被 `.gitignore` 忽略，不能把真实密钥提交到 GitHub。
@@ -58,7 +58,7 @@ POST /api/devices/[id]/heartbeat
 开发板/模拟设备上报电量、模式、心跳。
 
 POST /api/ai-chat
-调用 DeepSeek 生成校园问答回复。
+调用 Dify 智能体生成园所问答回复。
 ```
 
 ## 源码结构
@@ -69,7 +69,7 @@ app/
   api/overview/route.ts             总览接口
   api/commands/route.ts             指令下发接口
   api/devices/[id]/heartbeat/route.ts
-  api/ai-chat/route.ts              DeepSeek 对话接口
+  api/ai-chat/route.ts              Dify 对话接口
 
 src/components/
   FloatingChat.tsx                  右下角 AI 悬浮窗
@@ -90,7 +90,7 @@ prisma/
 1. 将代码推送到 GitHub 仓库。
 2. 在 Vercel 中导入 GitHub 项目。
 3. 在 Vercel 项目中添加 Postgres 数据库。
-4. 将 `DATABASE_URL` 和 `DEEPSEEK_API_KEY` 添加到 Vercel 环境变量。
+4. 将 `DATABASE_URL` 和 `DIFY_API_KEY` 添加到 Vercel 环境变量。
 5. 部署后运行 Prisma 建表，或在本地使用 Vercel 提供的连接字符串执行：
 
 ```bash

@@ -3,8 +3,34 @@
 import Image from "next/image";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
-import { Check, Copy, Mic, MicOff, PhoneCall, PhoneOff, Send, Volume2, VolumeX, X } from "lucide-react";
+import {
+  Camera,
+  Check,
+  Copy,
+  ChevronUp,
+  FileText,
+  Keyboard,
+  Mic,
+  MicOff,
+  PhoneCall,
+  PhoneOff,
+  ClipboardList,
+  Send,
+  Sparkles,
+  Upload,
+  Volume2,
+  VolumeX,
+  X,
+} from "lucide-react";
 import { GardenSeal } from "@/components/GardenSeal";
+import { AgentResultCard } from "@/components/AgentResultCard";
+import {
+  readAiChatResponse,
+  type AiChatAttachmentStatus,
+  type AiChatStreamEvent,
+} from "@/lib/ai-chat-stream";
+import type { AgentResult } from "@/lib/agent-result";
+import { createDifyWebUserId } from "@/lib/dify-session";
 import type { ScienceLabLink } from "@/lib/science-lab-links";
 import {
   beginVoiceSession,
@@ -23,6 +49,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ChangeEvent,
   type CSSProperties,
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
@@ -41,6 +68,8 @@ type PetMessage = {
   text: string;
   photos?: PetPhoto[];
   labLinks?: ScienceLabLink[];
+  attachment?: AiChatAttachmentStatus;
+  agentResult?: AgentResult;
 };
 
 type PetPosition = {
@@ -63,12 +92,15 @@ type DragState = {
 };
 
 type VoiceStatus = "idle" | "starting" | "listening" | "processing" | "error" | "unsupported";
+type ComposerMode = "text" | "voice";
 type CallPhase = "idle" | "preparing" | "listening" | "thinking" | "speaking" | "muted" | "error";
 
 type AssistantReply = {
   text: string;
   photos?: PetPhoto[];
   labLinks?: ScienceLabLink[];
+  attachment?: AiChatAttachmentStatus;
+  agentResult?: AgentResult;
 };
 
 type SpeechRecognitionResultLike = {
@@ -119,9 +151,48 @@ const starters = [
   "找一首小班科学诗",
   "生成《玩转纸片》完整教案",
 ];
+
+const creationActions = [
+  { type: "upload", label: "上传文件" },
+  { type: "photo", label: "拍照提问" },
+  { type: "plan", label: "完整教案" },
+  { type: "document", label: "课件 / 文档" },
+  { type: "analysis", label: "教案 / 研修分析" },
+] as const;
+
+type CreationAction = (typeof creationActions)[number]["type"];
+type CreationDialogKind = Exclude<CreationAction, "upload" | "photo">;
+type CreationFormState = {
+  ageGroup: string;
+  topic: string;
+  duration: string;
+  purpose: string;
+  format: string;
+};
+
+const emptyCreationForm: CreationFormState = {
+  ageGroup: "",
+  topic: "",
+  duration: "",
+  purpose: "",
+  format: "Word 文档",
+};
+
+const creationDialogTitles: Record<CreationDialogKind, string> = {
+  plan: "生成完整教案",
+  document: "生成课件 / 文档",
+  analysis: "教案 / 研修分析",
+};
+
+const creationAgeGroups = ["托班", "小班", "中班", "大班"];
+const creationDurations = ["15 分钟", "20 分钟", "30 分钟", "40 分钟"];
+const creationFormats = ["Word 文档", "PDF 文档", "课件提纲"];
+
 const petWidth = 116;
 const petHeight = 122;
 const viewportMargin = 6;
+const mobilePetBottom = 82;
+const mobileNavigationGap = 12;
 const chatGap = 14;
 const patrolDuration = 2200;
 const petAnimations: Record<
@@ -191,6 +262,20 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), Math.max(min, max));
 }
 
+function getPetBottomBounds() {
+  const navigation = window.innerWidth <= 1023
+    ? document.querySelector<HTMLElement>(".home-bottom-nav")
+    : null;
+  const navigationHeight = navigation?.getBoundingClientRect().height ?? 0;
+  const navigationInset = navigationHeight > 0
+    ? navigationHeight + mobileNavigationGap
+    : viewportMargin;
+  const minBottom = Math.max(viewportMargin, navigationInset);
+  const maxBottom = Math.max(minBottom, window.innerHeight - petHeight - viewportMargin);
+
+  return { minBottom, maxBottom };
+}
+
 function getSpeechRecognitionConstructor() {
   const voiceWindow = window as typeof window & {
     SpeechRecognition?: SpeechRecognitionConstructor;
@@ -208,9 +293,24 @@ function toSpeechText(value: string) {
     .trim();
 }
 
+function assistantDisplayText(message: PetMessage) {
+  if (message.agentResult?.kind !== "poetry_cover") return message.text;
+  return message.text
+    .replace(/!\[[^\]]*\]\([^)]*\)/gu, "")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim();
+}
+
 export function SciencePet() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
+  const [composerMode, setComposerMode] = useState<ComposerMode>("text");
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [creationDialog, setCreationDialog] = useState<CreationDialogKind | null>(null);
+  const [creationForm, setCreationForm] = useState<CreationFormState>(emptyCreationForm);
+  const [creationDialogError, setCreationDialogError] = useState("");
+  const [selectedAttachment, setSelectedAttachment] = useState<File | null>(null);
+  const [attachmentPreviewUrl, setAttachmentPreviewUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("idle");
   const [voiceNotice, setVoiceNotice] = useState("");
@@ -225,8 +325,10 @@ export function SciencePet() {
   const [spriteFrame, setSpriteFrame] = useState(0);
   const [autoWalk, setAutoWalk] = useState<WalkDirection | null>(null);
   const [position, setPosition] = useState<PetPosition>({ right: 18, bottom: 10 });
+  const [positionReady, setPositionReady] = useState(false);
   const [dock, setDock] = useState({ left: false, top: false });
   const [chatSize, setChatSize] = useState<PetChatSize>({ width: 360, height: 640 });
+  const [difyUserId] = useState(createDifyWebUserId);
   const [messages, setMessages] = useState<PetMessage[]>([
     {
       id: 1,
@@ -235,7 +337,13 @@ export function SciencePet() {
     },
   ]);
   const messagesRef = useRef<PetMessage[]>(messages);
+  const difyConversationIdRef = useRef<string | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const attachmentPreviewUrlRef = useRef<string | null>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
   const messageIdRef = useRef(2);
   const dragRef = useRef<DragState | null>(null);
   const petRootRef = useRef<HTMLDivElement>(null);
@@ -260,11 +368,16 @@ export function SciencePet() {
   const callRestartTimerRef = useRef<number | null>(null);
 
   useLayoutEffect(() => {
-    if (window.innerWidth > 720) return;
     const frame = window.requestAnimationFrame(() => {
-      const mobilePosition = { right: 8, bottom: 82 };
-      positionRef.current = mobilePosition;
-      setPosition(mobilePosition);
+      if (window.innerWidth <= 1023) {
+        const mobilePosition = {
+          right: 8,
+          bottom: Math.max(mobilePetBottom, getPetBottomBounds().minBottom),
+        };
+        positionRef.current = mobilePosition;
+        setPosition(mobilePosition);
+      }
+      setPositionReady(true);
     });
 
     return () => window.cancelAnimationFrame(frame);
@@ -273,6 +386,10 @@ export function SciencePet() {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  useEffect(() => () => {
+    if (attachmentPreviewUrlRef.current) URL.revokeObjectURL(attachmentPreviewUrlRef.current);
+  }, []);
 
   const animationState: PetAnimationState = busy
     ? "working"
@@ -319,6 +436,7 @@ export function SciencePet() {
     const schedulePatrol = () => {
       startTimer = window.setTimeout(() => {
         const current = positionRef.current;
+        const { minBottom, maxBottom } = getPetBottomBounds();
         const maxRight = window.innerWidth - petWidth - viewportMargin;
         const availableWidth = Math.max(0, maxRight - viewportMargin);
         if (availableWidth < 40) {
@@ -341,7 +459,7 @@ export function SciencePet() {
             viewportMargin,
             maxRight,
           ),
-          bottom: current.bottom,
+          bottom: clamp(current.bottom, minBottom, maxBottom),
         };
 
         setAutoWalk(direction);
@@ -373,9 +491,12 @@ export function SciencePet() {
 
   useLayoutEffect(() => {
     const assistantWindow = window as KexiaobeiWindow;
-    function openChat() {
+    function openChat(event?: Event) {
       assistantWindow.__kexiaobeiOpenRequested = false;
+      const prompt = (event as CustomEvent<{ prompt?: string }> | undefined)?.detail?.prompt?.trim();
+      if (prompt) setInput(prompt);
       setOpen(true);
+      window.requestAnimationFrame(() => inputRef.current?.focus());
     }
 
     window.addEventListener("kexiaobei:open", openChat);
@@ -383,6 +504,25 @@ export function SciencePet() {
 
     return () => window.removeEventListener("kexiaobei:open", openChat);
   }, []);
+
+  useEffect(() => {
+    if (!moreMenuOpen) return;
+
+    function closeMoreMenu(event: PointerEvent) {
+      if (!moreMenuRef.current?.contains(event.target as Node)) setMoreMenuOpen(false);
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setMoreMenuOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeMoreMenu);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeMoreMenu);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [moreMenuOpen]);
 
   useEffect(() => {
     if (open) {
@@ -396,6 +536,7 @@ export function SciencePet() {
   useEffect(() => {
     function keepInViewport() {
       const current = positionRef.current;
+      const { minBottom, maxBottom } = getPetBottomBounds();
       const right = clamp(
         current.right,
         viewportMargin,
@@ -403,8 +544,8 @@ export function SciencePet() {
       );
       const bottom = clamp(
         current.bottom,
-        viewportMargin,
-        window.innerHeight - petHeight - viewportMargin,
+        minBottom,
+        maxBottom,
       );
       const next = { right, bottom };
       const centerX = window.innerWidth - right - petWidth / 2;
@@ -445,6 +586,11 @@ export function SciencePet() {
       const isMobile = window.innerWidth <= 720;
       const preferredWidth = Math.max(160, Math.min(360, window.innerWidth - (isMobile ? 24 : 20)));
       const preferredHeight = Math.max(160, Math.min(isMobile ? 680 : 640, window.innerHeight - (isMobile ? 84 : 154)));
+      if (isMobile) {
+        setDock({ left: false, top: false });
+        setChatSize({ width: preferredWidth, height: preferredHeight });
+        return;
+      }
       const leftSpace = Math.max(0, bounds.left - chatGap - viewportMargin);
       const rightSpace = Math.max(0, window.innerWidth - bounds.right - chatGap - viewportMargin);
       const placeChatLeft = leftSpace >= preferredWidth || leftSpace >= rightSpace;
@@ -573,25 +719,88 @@ export function SciencePet() {
     content: string,
     history: Array<{ role: "user" | "assistant"; content: string }>,
     signal?: AbortSignal,
+    onEvent?: (event: AiChatStreamEvent) => void,
+    attachment?: File | null,
   ): Promise<AssistantReply> {
+    const formData = attachment ? new FormData() : null;
+    if (formData && attachment) {
+      formData.append("message", content);
+      formData.append("history", JSON.stringify(history));
+      formData.append("userId", difyUserId);
+      if (difyConversationIdRef.current) {
+        formData.append("conversationId", difyConversationIdRef.current);
+      }
+      formData.append("attachment", attachment);
+    }
+
+    const headers: Record<string, string> = { Accept: "text/event-stream" };
+    if (!formData) headers["Content-Type"] = "application/json";
     const response = await fetch("/api/ai-chat", {
       method: "POST",
       signal,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: content, history }),
+      headers,
+      body: formData ?? JSON.stringify({
+        message: content,
+        history,
+        userId: difyUserId,
+        conversationId: difyConversationIdRef.current,
+      }),
     });
-    if (!response.ok) throw new Error("Assistant request failed");
+    if (!response.ok) {
+      let errorMessage = "我现在没有连上知识服务，请稍后再问一次。";
+      try {
+        const payload = (await response.json()) as { error?: unknown };
+        if (typeof payload.error === "string" && payload.error.trim()) {
+          errorMessage = payload.error.trim();
+        }
+      } catch {
+        // Keep the generic fallback for network errors or non-JSON responses.
+      }
+      throw new Error(errorMessage);
+    }
 
-    const data = (await response.json()) as {
-      reply?: string;
-      photos?: PetPhoto[];
-      labLinks?: ScienceLabLink[];
-    };
+    const data = await readAiChatResponse(response, onEvent);
+    if (data.conversationId) difyConversationIdRef.current = data.conversationId;
     return {
       text: data.reply?.trim() || "资料库暂时没有返回内容，请换个问法试试。",
       photos: data.photos,
       labLinks: data.labLinks,
+      attachment: data.attachment,
+      agentResult: data.agentResult,
     };
+  }
+
+  function updatePetMessage(messageId: number, update: (message: PetMessage) => PetMessage) {
+    setMessages((current) => current.map((message) => (message.id === messageId ? update(message) : message)));
+  }
+
+  function applyAssistantStreamEvent(
+    messageId: number,
+    event: AiChatStreamEvent,
+    onText?: (text: string, mode: "delta" | "complete") => void,
+  ) {
+    if (event.type === "meta") {
+      updatePetMessage(messageId, (message) => ({
+        ...message,
+        photos: event.photos,
+        labLinks: event.labLinks,
+        attachment: event.attachment ?? message.attachment,
+        agentResult: event.agentResult ?? message.agentResult,
+      }));
+    } else if (event.type === "delta") {
+      updatePetMessage(messageId, (message) => ({ ...message, text: `${message.text}${event.delta}` }));
+      onText?.(event.delta, "delta");
+    } else if (event.type === "done") {
+      updatePetMessage(messageId, (message) => ({
+        ...message,
+        text: event.reply,
+        photos: event.photos,
+        labLinks: event.labLinks,
+        attachment: event.attachment ?? message.attachment,
+        agentResult: event.agentResult ?? message.agentResult,
+      }));
+      onText?.(event.reply, "complete");
+    }
   }
 
   function resumeVoiceCallListening(sessionId: number) {
@@ -718,24 +927,34 @@ export function SciencePet() {
       role: message.role,
       content: message.text,
     }));
-    setMessages((current) => [...current, { id: userMessageId, role: "user", text: transcript }]);
+    setMessages((current) => [
+      ...current,
+      { id: userMessageId, role: "user", text: transcript },
+      { id: assistantMessageId, role: "assistant", text: "" },
+    ]);
     setBusy(true);
 
     try {
-      const reply = await requestAssistantReply(transcript, history, thinking.abortController.signal);
+      const reply = await requestAssistantReply(
+        transcript,
+        history,
+        thinking.abortController.signal,
+        (event) =>
+          applyAssistantStreamEvent(assistantMessageId, event, (text, mode) => {
+            setCallReply((current) => (mode === "complete" ? text : `${current}${text}`));
+          }),
+      );
       if (!isCurrentVoiceCall(sessionId)) return;
 
       setCallReply(reply.text);
-      setMessages((current) => [
-        ...current,
-        {
-          id: assistantMessageId,
-          role: "assistant",
-          text: reply.text,
-          photos: reply.photos,
-          labLinks: reply.labLinks,
-        },
-      ]);
+      updatePetMessage(assistantMessageId, (message) => ({
+        ...message,
+        text: reply.text,
+        photos: reply.photos,
+        labLinks: reply.labLinks,
+        attachment: reply.attachment,
+        agentResult: reply.agentResult,
+      }));
 
       const current = callSessionRef.current;
       if (!current) return;
@@ -751,14 +970,10 @@ export function SciencePet() {
       if (!started && isCurrentVoiceCall(sessionId)) resumeVoiceCallListening(sessionId);
     } catch {
       if (!isCurrentVoiceCall(sessionId)) return;
-      setMessages((current) => [
-        ...current,
-        {
-          id: assistantMessageId,
-          role: "assistant",
-          text: "我现在没有连上知识服务，请稍后再问一次。",
-        },
-      ]);
+      updatePetMessage(assistantMessageId, (message) => ({
+        ...message,
+        text: "我现在没有连上知识服务，请稍后再问一次。",
+      }));
       setVoiceCallError(sessionId, "对话服务暂时不可用，可以返回文字对话。");
     } finally {
       if (callActiveRef.current && callSessionIdRef.current === sessionId) setBusy(false);
@@ -900,7 +1115,112 @@ export function SciencePet() {
 
   function handleCloseChat() {
     stopAllVoice();
+    setMoreMenuOpen(false);
+    setCreationDialog(null);
     setOpen(false);
+  }
+
+  function resizeComposerInput(element = inputRef.current) {
+    if (!element) return;
+    element.style.setProperty("height", "auto");
+    element.style.setProperty("height", `${Math.min(element.scrollHeight, 112)}px`);
+  }
+
+  useEffect(() => {
+    resizeComposerInput();
+  }, [input, open]);
+
+  function focusComposerInput() {
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      resizeComposerInput();
+    });
+  }
+
+  function openCreationDialog(kind: CreationDialogKind) {
+    setMoreMenuOpen(false);
+    setCreationDialog(kind);
+    setCreationDialogError("");
+    setCreationForm(emptyCreationForm);
+  }
+
+  function handleMoreAction(action: CreationAction) {
+    setMoreMenuOpen(false);
+    if (action === "upload") {
+      attachmentInputRef.current?.click();
+      return;
+    }
+    if (action === "photo") {
+      photoInputRef.current?.click();
+      return;
+    }
+    openCreationDialog(action);
+  }
+
+  function handleCreationFieldChange(field: keyof CreationFormState, value: string) {
+    setCreationForm((current) => ({ ...current, [field]: value }));
+    setCreationDialogError("");
+  }
+
+  function submitCreationDialog(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!creationDialog) return;
+
+    const { ageGroup, topic, duration, purpose, format } = creationForm;
+    if (creationDialog === "analysis" && !selectedAttachment) {
+      setCreationDialogError("请先上传教案或研修材料");
+      return;
+    }
+    if (creationDialog !== "analysis" && !ageGroup) {
+      setCreationDialogError("请选择适用年龄段");
+      return;
+    }
+    if (creationDialog === "plan" && (!topic.trim() || !duration)) {
+      setCreationDialogError("请填写主题并选择活动时长");
+      return;
+    }
+    if (creationDialog === "document" && (!topic.trim() || !purpose.trim())) {
+      setCreationDialogError("请填写主题和使用用途");
+      return;
+    }
+
+    const attachmentName = selectedAttachment?.name ?? "已上传材料";
+    const prompt = creationDialog === "plan"
+      ? `请生成一份完整教案。年龄段：${ageGroup}；主题：${topic.trim()}；活动时长：${duration}；输出格式：${format}。`
+      : creationDialog === "document"
+        ? `请策划课件或教学文档。年龄段：${ageGroup}；主题：${topic.trim()}；使用用途：${purpose.trim()}；输出格式：${format}。`
+        : `请分析我上传的《${attachmentName}》教案或研修材料，给出结构、目标、过程和可执行的改进建议。${purpose.trim() ? `重点关注：${purpose.trim()}。` : ""}`;
+
+    setInput(prompt);
+    setCreationDialog(null);
+    setCreationDialogError("");
+    focusComposerInput();
+  }
+
+  function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>, mode: "file" | "photo" = "file") {
+    const attachment = event.target.files?.[0];
+    if (!attachment) return;
+
+    if (attachmentPreviewUrlRef.current) URL.revokeObjectURL(attachmentPreviewUrlRef.current);
+    const previewUrl = attachment.type.startsWith("image/")
+      ? URL.createObjectURL(attachment)
+      : null;
+    attachmentPreviewUrlRef.current = previewUrl;
+    setAttachmentPreviewUrl(previewUrl);
+    setSelectedAttachment(attachment);
+    if (mode === "photo") {
+      setInput("请识别这张图片中的科学内容，并给出适合幼儿的观察建议。");
+      focusComposerInput();
+    }
+  }
+
+  function removeAttachment() {
+    if (attachmentPreviewUrlRef.current) URL.revokeObjectURL(attachmentPreviewUrlRef.current);
+    attachmentPreviewUrlRef.current = null;
+    setAttachmentPreviewUrl(null);
+    setSelectedAttachment(null);
+    if (attachmentInputRef.current) attachmentInputRef.current.value = "";
+    if (photoInputRef.current) photoInputRef.current.value = "";
   }
 
   async function sendMessage(prompt: string) {
@@ -909,44 +1229,82 @@ export function SciencePet() {
 
     const userMessageId = messageIdRef.current++;
     const assistantMessageId = messageIdRef.current++;
+    const attachment = selectedAttachment;
     const history = messages.slice(-12).map((message) => ({
       role: message.role,
       content: message.text,
     }));
 
-    setMessages((current) => [...current, { id: userMessageId, role: "user", text: content }]);
+    setMessages((current) => [
+      ...current,
+      { id: userMessageId, role: "user", text: content },
+      { id: assistantMessageId, role: "assistant", text: "" },
+    ]);
     setInput("");
+    window.requestAnimationFrame(() => resizeComposerInput());
     setBusy(true);
 
+    let requestSucceeded = false;
     try {
-      const reply = await requestAssistantReply(content, history);
-      setMessages((current) => [
-        ...current,
-        {
-          id: assistantMessageId,
-          role: "assistant",
-          text: reply.text,
-          photos: reply.photos,
-          labLinks: reply.labLinks,
-        },
-      ]);
-    } catch {
-      setMessages((current) => [
-        ...current,
-        {
-          id: assistantMessageId,
-          role: "assistant",
-          text: "我现在没有连上知识服务，请稍后再问一次。",
-        },
-      ]);
+      const reply = await requestAssistantReply(
+        content,
+        history,
+        undefined,
+        (event) => applyAssistantStreamEvent(assistantMessageId, event),
+        attachment,
+      );
+      updatePetMessage(assistantMessageId, (message) => ({
+        ...message,
+        text: reply.text,
+        photos: reply.photos,
+        labLinks: reply.labLinks,
+        attachment: reply.attachment,
+        agentResult: reply.agentResult,
+      }));
+      requestSucceeded = true;
+    } catch (error) {
+      const errorMessage = error instanceof Error && error.message.trim()
+        ? error.message
+        : "我现在没有连上知识服务，请稍后再问一次。";
+      updatePetMessage(assistantMessageId, (message) => ({
+        ...message,
+        text: errorMessage,
+      }));
     } finally {
       setBusy(false);
+      if (attachment && requestSucceeded) removeAttachment();
     }
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void sendMessage(input);
+  }
+
+  function toggleComposerMode() {
+    if (busy || callPhase !== "idle" || voiceStatus === "processing") return;
+
+    setMoreMenuOpen(false);
+
+    if (composerMode === "voice") {
+      voicePressedRef.current = false;
+      const recognition = recognitionRef.current;
+      if (recognition) {
+        try {
+          recognition.stop();
+        } catch {
+          recognition.abort();
+        }
+      }
+      setComposerMode("text");
+      setVoiceStatus("idle");
+      setVoiceNotice("");
+      window.requestAnimationFrame(() => focusComposerInput());
+      return;
+    }
+
+    setComposerMode("voice");
+    setVoiceNotice("");
   }
 
   function startVoiceInput(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -1048,9 +1406,10 @@ export function SciencePet() {
 
     if (autoWalk && petRootRef.current) {
       const bounds = petRootRef.current.getBoundingClientRect();
+      const { minBottom, maxBottom } = getPetBottomBounds();
       const current = {
         right: window.innerWidth - bounds.right,
-        bottom: window.innerHeight - bounds.bottom,
+        bottom: clamp(window.innerHeight - bounds.bottom, minBottom, maxBottom),
       };
       positionRef.current = current;
       setPosition(current);
@@ -1083,6 +1442,7 @@ export function SciencePet() {
     drag.moved = true;
     setDragging(true);
 
+    const { minBottom, maxBottom } = getPetBottomBounds();
     const right = clamp(
       drag.startRight - deltaX,
       viewportMargin,
@@ -1090,8 +1450,8 @@ export function SciencePet() {
     );
     const bottom = clamp(
       drag.startBottom - deltaY,
-      viewportMargin,
-      window.innerHeight - petHeight - viewportMargin,
+      minBottom,
+      maxBottom,
     );
     const centerX = window.innerWidth - right - petWidth / 2;
     const centerY = window.innerHeight - bottom - petHeight / 2;
@@ -1148,7 +1508,7 @@ export function SciencePet() {
       ]
         .filter(Boolean)
         .join(" ")}
-      style={{ right: position.right, bottom: position.bottom }}
+      style={positionReady ? { right: position.right, bottom: position.bottom } : undefined}
     >
       <AnimatePresence>
         {open ? (
@@ -1281,11 +1641,14 @@ export function SciencePet() {
                     >
                       {message.role === "assistant" ? (
                         <div className="pet-message__markdown">
-                          <Markdown>{message.text}</Markdown>
+                          <Markdown>{assistantDisplayText(message)}</Markdown>
                         </div>
                       ) : (
                         message.text
                       )}
+                      {message.role === "assistant" && message.agentResult ? (
+                        <AgentResultCard result={message.agentResult} />
+                      ) : null}
                       {message.photos?.length ? (
                         <div className="pet-message__photos">
                           {message.photos.slice(0, 4).map((photo) => (
@@ -1307,7 +1670,12 @@ export function SciencePet() {
                           ))}
                         </div>
                       ) : null}
-                      {message.role === "assistant" ? (
+                      {message.attachment?.status === "unavailable" && message.attachment.message ? (
+                        <p className="pet-message__attachment-status" role="status">
+                          {message.attachment.message}
+                        </p>
+                      ) : null}
+                      {message.role === "assistant" && message.text ? (
                         <div className="pet-message__actions">
                           <button
                             type="button"
@@ -1358,36 +1726,256 @@ export function SciencePet() {
                     {voiceNotice}
                   </p>
                 ) : null}
+                {selectedAttachment ? (
+                  <div className="pet-chat__attachment-preview">
+                    {attachmentPreviewUrl ? (
+                      <>
+                        {/* Local object URLs are preview-only and cannot use Next image optimization. */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          className="pet-chat__attachment-thumbnail"
+                          src={attachmentPreviewUrl}
+                          alt="附件缩略图"
+                        />
+                      </>
+                    ) : (
+                      <span className="pet-chat__attachment-file-icon" aria-hidden="true">
+                        <FileText size={17} />
+                      </span>
+                    )}
+                    <span className="pet-chat__attachment-name" title={selectedAttachment.name}>
+                      {selectedAttachment.name}
+                    </span>
+                    <button
+                      type="button"
+                      className="pet-chat__attachment-remove"
+                      aria-label={`移除附件 ${selectedAttachment.name}`}
+                      title="移除附件"
+                      onClick={removeAttachment}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ) : null}
+                <input
+                  ref={attachmentInputRef}
+                  className="pet-chat__attachment-input"
+                  type="file"
+                  accept="image/*,.txt,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
+                  onChange={handleAttachmentChange}
+                  aria-hidden="true"
+                  tabIndex={-1}
+                />
+                <input
+                  ref={photoInputRef}
+                  className="pet-chat__attachment-input"
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(event) => handleAttachmentChange(event, "photo")}
+                  aria-hidden="true"
+                  tabIndex={-1}
+                />
                 <form className="pet-chat__form" onSubmit={handleSubmit}>
-                  <input
-                    value={input}
-                    onChange={(event) => setInput(event.target.value)}
-                    placeholder={voiceStatus === "listening" ? "正在聆听..." : "问问科小贝..."}
-                    aria-label="向科小贝提问"
-                    disabled={busy || callInputLocked}
-                  />
+                  <div className="pet-chat__more" ref={moreMenuRef}>
+                    <button
+                      type="button"
+                      className="pet-chat__composer-control pet-chat__more-trigger"
+                      aria-label="更多功能"
+                      aria-expanded={moreMenuOpen}
+                      aria-haspopup="menu"
+                      title="更多功能"
+                      disabled={busy || callInputLocked}
+                      onClick={() => setMoreMenuOpen((isOpen) => !isOpen)}
+                    >
+                      <ChevronUp size={18} />
+                    </button>
+                    {moreMenuOpen ? (
+                      <div className="pet-chat__more-menu" role="menu" aria-label="更多功能">
+                        {creationActions.map((action) => (
+                          <button
+                            key={action.type}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => handleMoreAction(action.type)}
+                          >
+                            {action.type === "upload" ? <Upload size={16} /> : null}
+                            {action.type === "photo" ? <Camera size={16} /> : null}
+                            {action.type === "plan" ? <Sparkles size={16} /> : null}
+                            {action.type === "document" ? <FileText size={16} /> : null}
+                            {action.type === "analysis" ? <ClipboardList size={16} /> : null}
+                            <span>{action.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                   <button
                     type="button"
-                    className={`pet-chat__voice${voiceStatus === "listening" || voiceStatus === "starting" ? " is-listening" : ""}`}
-                    disabled={busy || callPhase !== "idle" || voiceStatus === "processing"}
-                    onContextMenu={(event) => event.preventDefault()}
-                    onPointerCancel={stopVoiceInput}
-                    onPointerDown={startVoiceInput}
-                    onPointerUp={stopVoiceInput}
-                    aria-label="按住进行语音输入"
-                    aria-pressed={voiceStatus === "listening"}
-                    title="按住说话，松开完成"
+                    className="pet-chat__composer-control pet-chat__voice-mode"
+                    aria-label={composerMode === "voice" ? "切换文字输入" : "切换语音输入"}
+                    title={composerMode === "voice" ? "切换文字输入" : "切换语音输入"}
+                    aria-pressed={composerMode === "voice"}
+                    disabled={busy || callInputLocked || voiceStatus === "starting" || voiceStatus === "listening" || voiceStatus === "processing"}
+                    onClick={toggleComposerMode}
                   >
-                    <Mic size={17} />
+                    {composerMode === "voice" ? <Keyboard size={17} /> : <Volume2 size={17} />}
                   </button>
+                  {composerMode === "voice" ? (
+                    <button
+                      type="button"
+                      className={`pet-chat__voice-button${voiceStatus === "listening" || voiceStatus === "starting" ? " is-listening" : ""}`}
+                      disabled={busy || callPhase !== "idle" || voiceStatus === "processing"}
+                      onContextMenu={(event) => event.preventDefault()}
+                      onPointerCancel={stopVoiceInput}
+                      onPointerDown={startVoiceInput}
+                      onPointerUp={stopVoiceInput}
+                      aria-label="按住说话"
+                      aria-pressed={voiceStatus === "listening"}
+                      title="按住说话，松开完成"
+                    >
+                      <Mic size={17} />
+                      <span>{voiceStatus === "listening" ? "松开完成" : "按住说话"}</span>
+                    </button>
+                  ) : (
+                    <textarea
+                      ref={inputRef}
+                      className="pet-chat__input"
+                      value={input}
+                      rows={1}
+                      onChange={(event) => {
+                        setInput(event.target.value);
+                        resizeComposerInput(event.currentTarget);
+                      }}
+                      placeholder="问问科小贝..."
+                      aria-label="向科小贝提问"
+                      disabled={busy || callInputLocked}
+                    />
+                  )}
                   <button
                     type="submit"
+                    className="pet-chat__send"
                     disabled={!input.trim() || busy || callInputLocked || voiceStatus === "listening" || voiceStatus === "starting" || voiceStatus === "processing"}
+                    aria-label="发送"
                     title="发送"
                   >
                     <Send size={17} />
                   </button>
                 </form>
+                {creationDialog ? (
+                  <div className="pet-chat__dialog-layer">
+                    <form
+                      className="pet-chat__dialog"
+                      role="dialog"
+                      aria-modal="true"
+                      aria-labelledby="pet-chat-dialog-title"
+                      onSubmit={submitCreationDialog}
+                    >
+                      <div className="pet-chat__dialog-header">
+                        <h3 id="pet-chat-dialog-title">{creationDialogTitles[creationDialog]}</h3>
+                        <button
+                          type="button"
+                          className="pet-chat__dialog-close"
+                          aria-label="关闭弹窗"
+                          title="关闭"
+                          onClick={() => setCreationDialog(null)}
+                        >
+                          <X size={17} />
+                        </button>
+                      </div>
+
+                      {creationDialog === "analysis" ? (
+                        <>
+                          <p className="pet-chat__dialog-hint">上传教案或研修材料后，再填写希望重点关注的内容。</p>
+                          <button
+                            type="button"
+                            className="pet-chat__dialog-upload"
+                            onClick={() => attachmentInputRef.current?.click()}
+                          >
+                            <Upload size={16} />
+                            <span>选择教案或研修材料</span>
+                          </button>
+                          <p className="pet-chat__dialog-file">
+                            {selectedAttachment ? `已选择：${selectedAttachment.name}` : "支持 PDF、Word、PPT、TXT 等文件"}
+                          </p>
+                          <label className="pet-chat__field">
+                            <span>重点关注（可选）</span>
+                            <input
+                              value={creationForm.purpose}
+                              onChange={(event) => handleCreationFieldChange("purpose", event.target.value)}
+                              placeholder="例如：活动目标和幼儿参与度"
+                            />
+                          </label>
+                        </>
+                      ) : (
+                        <>
+                          <label className="pet-chat__field">
+                            <span>年龄段 <i>*</i></span>
+                            <select
+                              required
+                              value={creationForm.ageGroup}
+                              onChange={(event) => handleCreationFieldChange("ageGroup", event.target.value)}
+                            >
+                              <option value="">请选择年龄段</option>
+                              {creationAgeGroups.map((ageGroup) => <option key={ageGroup}>{ageGroup}</option>)}
+                            </select>
+                          </label>
+                          <label className="pet-chat__field">
+                            <span>主题 <i>*</i></span>
+                            <input
+                              required
+                              value={creationForm.topic}
+                              onChange={(event) => handleCreationFieldChange("topic", event.target.value)}
+                              placeholder="例如：纸片的力量"
+                            />
+                          </label>
+                          {creationDialog === "document" ? (
+                            <label className="pet-chat__field">
+                              <span>使用用途 <i>*</i></span>
+                              <input
+                                required
+                                value={creationForm.purpose}
+                                onChange={(event) => handleCreationFieldChange("purpose", event.target.value)}
+                                placeholder="例如：家长会展示"
+                              />
+                            </label>
+                          ) : (
+                            <label className="pet-chat__field">
+                              <span>活动时长 <i>*</i></span>
+                              <select
+                                required
+                                value={creationForm.duration}
+                                onChange={(event) => handleCreationFieldChange("duration", event.target.value)}
+                              >
+                                <option value="">请选择时长</option>
+                                {creationDurations.map((duration) => <option key={duration}>{duration}</option>)}
+                              </select>
+                            </label>
+                          )}
+                          <label className="pet-chat__field">
+                            <span>输出格式</span>
+                            <select
+                              value={creationForm.format}
+                              onChange={(event) => handleCreationFieldChange("format", event.target.value)}
+                            >
+                              {creationFormats.map((format) => <option key={format}>{format}</option>)}
+                            </select>
+                          </label>
+                        </>
+                      )}
+
+                      {creationDialogError ? <p className="pet-chat__dialog-error" role="alert">{creationDialogError}</p> : null}
+                      <div className="pet-chat__dialog-actions">
+                        <button type="button" className="pet-chat__dialog-cancel" onClick={() => setCreationDialog(null)}>
+                          取消
+                        </button>
+                        <button type="submit" className="pet-chat__dialog-submit">
+                          填入对话框
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </motion.section>

@@ -14,6 +14,7 @@
     "prisma:push": "prisma db push",
     "seed": "node scripts/prepare-assets.mjs && node prisma/seed.mjs",
     "seed:science": "node scripts/seed-science-knowledge.mjs",
+    "upload:science-stories": "node scripts/upload-science-story-videos.mjs",
     "import:science": "node scripts/import-local-science-materials.mjs",
     "export:dify": "node scripts/export-dify-teaching-knowledge.mjs",
     "attach:science-step-images": "node scripts/attach-local-experiment-step-images.mjs",
@@ -21,7 +22,8 @@
     "test:science": "node --no-warnings --test src/lib/science-navigation.test.mjs scripts/science-source-layout.test.mjs scripts/attach-experiment-video-resources.test.mjs scripts/science-catalog.contract.test.mjs src/components/ScienceLab.hero.contract.test.mjs scripts/seed-science-on-build.test.mjs"
   },
   "dependencies": {
-    "@prisma/client": "^6.16.3",
+    "@prisma/client": "^6.19.3",
+    "@vercel/blob": "^2.8.0",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

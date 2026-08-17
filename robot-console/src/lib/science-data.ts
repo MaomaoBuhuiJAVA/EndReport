@@ -5,6 +5,11 @@ import type {
   ScienceKnowledgeSummary,
   ScienceResource,
 } from "@/lib/science-types";
+import {
+  SCIENCE_AGE_GROUPS,
+  SCIENCE_CATEGORIES,
+  SCIENCE_RESOURCE_TYPES,
+} from "@/lib/science-types";
 
 const fallbackItems = fallbackPayload as unknown as ScienceKnowledgeItem[];
 const correctedScienceTopics = new Map([
@@ -12,6 +17,128 @@ const correctedScienceTopics = new Map([
 ]);
 
 const knowledgeVersionSuffix = /\s*(?:[-_—]\s*\d+|[（(]\s*(?:\d+|[一二三四五六七八九十]+|初稿|初版|定稿|最终稿|终稿|修改稿|修订稿|送审稿)\s*[）)])\s*$/i;
+
+const scienceSearchStopWords = new Set([
+  "推荐",
+  "适合",
+  "关于",
+  "一首",
+  "一个",
+  "什么",
+  "正文",
+  "内容",
+  "怎么",
+  "如何",
+  "说明",
+  "介绍",
+  "查看",
+  "资料",
+  "资源",
+  "请问",
+  "的",
+  "和",
+  "并",
+]);
+
+const scienceResourceQueryAliases: Array<[string, ScienceResource["type"]]> = [
+  ["视频", "视频资源"],
+  ["二维码", "视频资源"],
+  ["图片", "图片资源"],
+  ["步骤图", "图片资源"],
+  ["教案", "教案资源"],
+  ["文档", "文档资源"],
+];
+
+function compactScienceSearchText(value: string) {
+  return value.replace(/[\s，。！？、；：,.!?;:()[\]{}《》〈〉「」“”‘’"'的]/g, "").toLocaleLowerCase("zh-CN");
+}
+
+function scienceQueryTerms(query: string) {
+  const normalized = query.replace(/[，。！？、；：,.!?;:()[\]{}《》〈〉「」“”‘’"']/g, " ");
+  return normalized
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length > 1 && !scienceSearchStopWords.has(term));
+}
+
+function scienceQueryTitle(query: string) {
+  return query.match(/[《〈「“"]\s*([^》〉」”"]+?)\s*[》〉」”"]/u)?.[1]?.trim() ?? "";
+}
+
+function scienceQueryMatches(value: string, query: string) {
+  const compactValue = compactScienceSearchText(value);
+  return compactValue.length > 0 && compactScienceSearchText(query).includes(compactValue);
+}
+
+/**
+ * Ranks catalog summaries without relying on an embedding or rerank provider.
+ * Explicit age/category/media constraints are treated as hard filters so a
+ * resource from a neighboring age group cannot win on a broad topic match.
+ */
+export function searchScienceSummaries(
+  items: ScienceKnowledgeSummary[],
+  query: string,
+  limit = 10,
+) {
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) return [];
+
+  const requestedCategory = SCIENCE_CATEGORIES.find((category) => normalizedQuery.includes(category));
+  const requestedAge = SCIENCE_AGE_GROUPS.find((age) => normalizedQuery.includes(age));
+  const requestedResourceType = scienceResourceQueryAliases.find(([alias]) => normalizedQuery.includes(alias))?.[1]
+    ?? SCIENCE_RESOURCE_TYPES.find((type) => normalizedQuery.includes(type));
+  const title = scienceQueryTitle(normalizedQuery);
+  const titleCompact = compactScienceSearchText(title);
+  const terms = scienceQueryTerms(normalizedQuery);
+  const explicitTitles = items
+    .map((item) => item.title.trim())
+    .filter((itemTitle) => itemTitle.length > 1 && scienceQueryMatches(itemTitle, normalizedQuery))
+    .sort((left, right) => right.length - left.length);
+  const requestedTitle = titleCompact || compactScienceSearchText(explicitTitles[0] ?? "");
+  const requestedTopics = Array.from(new Set(
+    items
+      .map((item) => item.topic.trim())
+      .filter((topic) => topic.length > 0 && scienceQueryMatches(topic, normalizedQuery)),
+  ));
+
+  return items
+    .map((item, index) => {
+      if (requestedCategory && item.category !== requestedCategory) return null;
+      if (requestedAge && item.ageLabel !== requestedAge) return null;
+      if (requestedResourceType && !item.resourceTypes.includes(requestedResourceType)) return null;
+
+      const searchable = compactScienceSearchText(
+        [item.title, item.category, item.ageLabel, item.topic, item.author, item.excerpt, ...item.tags].join(" "),
+      );
+      const itemTitle = compactScienceSearchText(item.title);
+      if (requestedTitle && !itemTitle.includes(requestedTitle)) return null;
+      if (requestedTopics.length > 0 && !requestedTopics.includes(item.topic.trim())) return null;
+      let score = 0;
+
+      if (requestedTitle && itemTitle === requestedTitle) score += 2000;
+      else if (requestedTitle && itemTitle.includes(requestedTitle)) score += 1200;
+      if (requestedCategory) score += 280;
+      if (requestedAge) score += 240;
+      if (requestedResourceType) score += 180;
+      if (item.topic && compactScienceSearchText(normalizedQuery).includes(compactScienceSearchText(item.topic))) {
+        score += 260;
+      }
+
+      for (const term of terms) {
+        const compactTerm = compactScienceSearchText(term);
+        if (compactTerm && searchable.includes(compactTerm)) score += Math.min(compactTerm.length * 12, 120);
+      }
+
+      return { item, score, index };
+    })
+    .filter(
+      (candidate): candidate is { item: ScienceKnowledgeSummary; score: number; index: number } =>
+        candidate !== null && candidate.score > 0,
+    )
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, Math.max(0, limit))
+    .map(({ item }) => item);
+}
 
 function cleanKnowledgeName(value: string) {
   const extension = value.match(/\.[a-z0-9]{1,8}$/i)?.[0] ?? "";

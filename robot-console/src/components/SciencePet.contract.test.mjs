@@ -27,7 +27,7 @@ test("keeps the external home-page open event listener available", () => {
 test("anchors the chat window to the draggable pet instead of the viewport", () => {
   assert.match(styles, /\.pet-chat\s*\{[\s\S]*?position:\s*absolute[\s\S]*?right:\s*calc\(100% \+ 14px\)/);
   assert.match(styles, /\.science-pet\.is-left \.pet-chat\s*\{[\s\S]*?left:\s*calc\(100% \+ 14px\)/);
-  assert.match(component, /style=\{\{ right: position\.right, bottom: position\.bottom \}\}/);
+  assert.match(component, /style=\{positionReady \? \{ right: position\.right, bottom: position\.bottom \} : undefined\}/);
   assert.match(component, /setDock\(\{[\s\S]*?left: centerX < window\.innerWidth \/ 2/);
   assert.match(styles, /\.science-pet\.is-top \.pet-chat\s*\{[\s\S]*?top:\s*calc\(100% \+ 14px\)/);
 });
@@ -44,7 +44,9 @@ test("does not lock the home-page pet away from its inline drag position", () =>
 
 test("keeps the pet position stable during SSR hydration before applying mobile placement", () => {
   assert.match(component, /const \[position, setPosition\] = useState<PetPosition>\(\{ right: 18, bottom: 10 \}\);/);
-  assert.match(component, /useLayoutEffect\(\(\) => \{\s*if \(window\.innerWidth > 720\) return;[\s\S]*?positionRef\.current = mobilePosition;[\s\S]*?setPosition\(mobilePosition\);/);
+  assert.match(component, /const \[positionReady, setPositionReady\] = useState\(false\);/);
+  assert.match(component, /useLayoutEffect\(\(\) => \{[\s\S]*?requestAnimationFrame\([\s\S]*?if \(window\.innerWidth <= 1023\) \{[\s\S]*?positionRef\.current = mobilePosition;[\s\S]*?setPosition\(mobilePosition\);[\s\S]*?setPositionReady\(true\);/);
+  assert.match(component, /setPositionReady\(true\);/);
   assert.doesNotMatch(component, /useState<PetPosition>\(\(\) => \{\s*const isMobile = typeof window/);
 });
 
@@ -52,7 +54,7 @@ test("gives the 科小贝 chat a full usable mobile viewport instead of a half-h
   assert.match(styles, /\.pet-chat__messages\s*\{[\s\S]*?flex:\s*1[\s\S]*?max-height:\s*none/);
   assert.match(styles, /\.pet-chat\s*\{[\s\S]*?max-height:\s*min\(640px,\s*calc\(100dvh - 154px\)[^;]*;/);
   assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.pet-chat\s*\{[\s\S]*?height:\s*min\(680px,\s*calc\(100dvh - 84px\)[^;]*;/);
-  assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.pet-chat\s*\{[\s\S]*?width:\s*min\(360px,\s*calc\(100dvw - 24px\)[^;]*;/);
+  assert.match(styles, /\.pet-chat\s*\{\s*position:\s*fixed;[\s\S]*?left:\s*6px;[\s\S]*?width:\s*auto;[\s\S]*?max-width:\s*none;/);
 });
 
 test("keeps generated lesson plans readable inside the chat bubble", () => {

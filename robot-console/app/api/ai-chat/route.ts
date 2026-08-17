@@ -1,27 +1,129 @@
 import { NextResponse } from "next/server";
 import type { ConversationMessage } from "@/lib/types";
-import { generateDeepSeekReply } from "@/lib/deepseek";
+import { generateDifyReply, openDifyStream, parseDifyStream, uploadDifyFile, type DifyFileReference } from "@/lib/dify";
+import { parseAgentResult, type AgentResult } from "@/lib/agent-result";
 import { buildScienceLabLinks } from "@/lib/science-lab-links";
 import { searchKnowledge, wantsPhotoResults } from "@/lib/search";
 
-export const maxDuration = 35;
-
-const knowledgePrompt = `你是“科小贝”，龙湾区国科温州第二幼儿园的幼儿科学教育智能体。
-回答规则：
-1. 优先依据园所资料库与科小贝资源库中的科学诗、科学故事、科学实验内容回答。
-2. 如果资料库没有明确内容，不要编造，请说明“资料库暂未收录明确内容”。
-3. 回答要适合家长、访客和教师阅读，简洁、温和、可信。
-4. 当用户问功能室、空间、环境、有没有照片、图片、参观等内容时，提醒用户可以查看下方相关照片。
-5. 不向普通用户提供云宝设备状态、实时监控、日志或控制细节。`;
-
-const casualPrompt = `你是“科小贝”，龙湾区国科温州第二幼儿园的幼儿科学教育智能体。
-日常闲聊规则：
-1. 对问候、心情、天气、笑话和关于你的问题，用自然、简洁、友好的中文连续回应。
-2. 当前没有提供资料库上下文时，不要杜撰园所环境、课程安排、照片或实验资源，也不要提示用户查看并不存在的下方内容。
-3. 可以顺着用户的话题继续聊，并在合适时自然邀请对方探索一个科学现象。
-4. 不向普通用户提供云宝设备状态、实时监控、日志或控制细节。`;
+export const maxDuration = 60;
 
 type SearchChunk = Awaited<ReturnType<typeof searchKnowledge>>["chunks"][number];
+
+// Keep the file ceiling below Vercel's request-body limit so multipart overhead
+// cannot turn an otherwise valid upload into a platform-level 413 response.
+const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+const SUPPORTED_ATTACHMENT_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/bmp",
+  "image/heic",
+  "image/heif",
+  "text/plain",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]);
+const SUPPORTED_ATTACHMENT_EXTENSIONS = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".webp",
+  ".bmp",
+  ".heic",
+  ".heif",
+  ".txt",
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".ppt",
+  ".pptx",
+  ".xls",
+  ".xlsx",
+]);
+
+type AttachmentStatus = {
+  name: string;
+  status: "uploaded" | "unavailable";
+  message?: string;
+};
+
+type ChatRequestBody = {
+  message?: string;
+  history?: ConversationMessage[];
+  userId?: string;
+  conversationId?: string;
+};
+
+type ParsedChatRequest = {
+  body: ChatRequestBody;
+  attachment?: File;
+};
+
+function isFileValue(value: FormDataEntryValue | null): value is File {
+  return typeof File !== "undefined" && value instanceof File;
+}
+
+function parseHistory(value: FormDataEntryValue | null) {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed as ConversationMessage[] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function attachmentExtension(name: string) {
+  const normalized = name.trim().toLowerCase();
+  const index = normalized.lastIndexOf(".");
+  return index >= 0 ? normalized.slice(index) : "";
+}
+
+function validateAttachment(file: File) {
+  if (!file.name.trim()) return "附件文件名无效";
+  if (file.size <= 0) return "附件内容为空";
+  if (file.size > MAX_ATTACHMENT_BYTES) return "附件不能超过 4MB";
+  const mimeType = file.type.trim().toLowerCase();
+  const extension = attachmentExtension(file.name);
+  if (!SUPPORTED_ATTACHMENT_MIME_TYPES.has(mimeType) && !SUPPORTED_ATTACHMENT_EXTENSIONS.has(extension)) {
+    return "暂不支持该附件格式，请上传图片、PDF、Word、PPT、Excel 或 TXT 文件";
+  }
+  return null;
+}
+
+async function parseChatRequest(request: Request): Promise<ParsedChatRequest> {
+  const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.includes("multipart/form-data")) {
+    return { body: (await request.json()) as ChatRequestBody };
+  }
+
+  const formData = await request.formData();
+  const attachmentValue = formData.get("attachment");
+  if (attachmentValue !== null && !isFileValue(attachmentValue)) {
+    throw new Error("附件字段无效");
+  }
+  if (attachmentValue) {
+    const attachmentError = validateAttachment(attachmentValue);
+    if (attachmentError) throw new Error(attachmentError);
+  }
+
+  return {
+    body: {
+      message: typeof formData.get("message") === "string" ? String(formData.get("message")) : undefined,
+      history: parseHistory(formData.get("history")),
+      userId: typeof formData.get("userId") === "string" ? String(formData.get("userId")) : undefined,
+      conversationId: typeof formData.get("conversationId") === "string" ? String(formData.get("conversationId")) : undefined,
+    },
+    attachment: attachmentValue ?? undefined,
+  };
+}
 
 function namedTitle(message: string) {
   return Array.from(message.matchAll(/[《〈「“\"]\s*([^》〉」”\"]+?)\s*[》〉」”\"]/g))
@@ -271,19 +373,60 @@ function fallbackReply(context: string, sources: string[], message: string, casu
   return `我从资料库中检索到这些相关信息：\n${snippets || context.slice(0, 620)}${sourceText}`;
 }
 
-export async function POST(request: Request) {
-  const body = (await request.json()) as {
-    message?: string;
-    history?: ConversationMessage[];
-  };
+function difyUserId(value: unknown) {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  if (/^[A-Za-z0-9_-]{1,80}$/.test(candidate)) return candidate;
+  return `web-${crypto.randomUUID()}`;
+}
 
-  const message = body.message?.trim();
-  if (!message) {
-    return NextResponse.json({ error: "message is required" }, { status: 400 });
-  }
+function difyConversationId(value: unknown) {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  return candidate && candidate.length <= 255 ? candidate : undefined;
+}
 
-  const casualMessage = isCasualMessage(message);
-  const search = casualMessage ? null : await searchKnowledge(message);
+type ChatEnrichment = {
+  requestedLessonPlan: SearchChunk | null;
+  context: string;
+  sources: string[];
+  photos: Awaited<ReturnType<typeof searchKnowledge>>["photos"];
+  uniqueSources: string[];
+  labLinks: ReturnType<typeof buildScienceLabLinks>;
+};
+
+type ChatResult = {
+  reply: string;
+  provider: "dify" | "fallback";
+  conversationId?: string;
+  attachment?: AttachmentStatus;
+  agentResult?: AgentResult;
+  photos: ChatEnrichment["photos"];
+  sources: string[];
+  labLinks: ChatEnrichment["labLinks"];
+};
+
+function parseDifyAgentResult(
+  answer: string | null | undefined,
+  query: string,
+  metadata: unknown,
+  files: unknown,
+  request: Request,
+  difyApiUrl?: string,
+) {
+  return parseAgentResult({
+    text: answer,
+    query,
+    metadata,
+    files,
+    sameOrigin: request.url,
+    difyApiUrl,
+  }) ?? undefined;
+}
+
+function buildChatEnrichment(
+  search: Awaited<ReturnType<typeof searchKnowledge>> | null,
+  message: string,
+  casualMessage: boolean,
+): ChatEnrichment {
   const chunks = search?.chunks ?? [];
   const requestedLessonPlan = lessonPlanChunk(message, chunks);
   const selectedChunks = requestedLessonPlan ? [requestedLessonPlan] : chunks;
@@ -293,19 +436,26 @@ export async function POST(request: Request) {
   const uniqueSources = Array.from(new Set(sources)).slice(0, 5);
   const labLinks = buildScienceLabLinks(selectedChunks, message);
 
-  const modelReply = await generateDeepSeekReply({
-    apiKey: process.env.DEEPSEEK_API_KEY,
-    apiUrl: process.env.DEEPSEEK_API_URL ?? "https://api.deepseek.com/chat/completions",
-    systemPrompt: requestedLessonPlan
-      ? `${knowledgePrompt}\n6. 当用户要求“完整教案”时，必须按“活动目标、活动准备、活动过程、观察与小结、延伸与安全提示”完整输出；活动过程不可省略。`
-      : casualMessage
-        ? casualPrompt
-        : knowledgePrompt,
+  return {
+    requestedLessonPlan,
     context,
-    history: body.history ?? [],
-    message,
-    maxTokens: requestedLessonPlan ? 1600 : undefined,
-  });
+    sources,
+    photos,
+    uniqueSources,
+    labLinks,
+  };
+}
+
+function buildChatResult(
+  enrichment: ChatEnrichment,
+  message: string,
+  casualMessage: boolean,
+  modelReply: string | null,
+  conversationId?: string,
+  attachment?: AttachmentStatus,
+  agentResult?: AgentResult,
+): ChatResult {
+  const { requestedLessonPlan } = enrichment;
   const incompleteLessonPlan = requestedLessonPlan && modelReply && !hasCompleteLessonPlan(modelReply);
   const usedLessonPlanFallback = Boolean(requestedLessonPlan && !modelReply);
   const reply = incompleteLessonPlan
@@ -314,11 +464,207 @@ export async function POST(request: Request) {
       ? buildLessonPlanReply(requestedLessonPlan!)
       : modelReply;
 
-  return NextResponse.json({
-    reply: reply ?? fallbackReply(context, sources, message, casualMessage),
-    provider: reply && !usedLessonPlanFallback ? "deepseek" : "fallback",
-    photos,
-    sources: uniqueSources,
-    labLinks,
+  return {
+    reply: reply ?? fallbackReply(enrichment.context, enrichment.sources, message, casualMessage),
+    provider: reply && !usedLessonPlanFallback ? "dify" : "fallback",
+    conversationId,
+    ...(attachment ? { attachment } : {}),
+    ...(agentResult ? { agentResult } : {}),
+    photos: enrichment.photos,
+    sources: enrichment.uniqueSources,
+    labLinks: enrichment.labLinks,
+  };
+}
+
+function acceptsEventStream(request: Request) {
+  return request.headers
+    .get("accept")
+    ?.split(",")
+    .some((value) => value.trim().toLowerCase() === "text/event-stream") ?? false;
+}
+
+function eventFrame(payload: unknown, encoder: TextEncoder) {
+  return encoder.encode(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function streamChatResponse(
+  searchPromise: Promise<Awaited<ReturnType<typeof searchKnowledge>> | null>,
+  difyStream: Response,
+  message: string,
+  casualMessage: boolean,
+  request: Request,
+  difyApiUrl?: string,
+  attachment?: AttachmentStatus,
+) {
+  const body = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      try {
+        const search = await searchPromise;
+        const enrichment = buildChatEnrichment(search, message, casualMessage);
+        controller.enqueue(
+          eventFrame(
+            {
+              type: "meta",
+              photos: enrichment.photos,
+              sources: enrichment.uniqueSources,
+              labLinks: enrichment.labLinks,
+              ...(attachment ? { attachment } : {}),
+            },
+            encoder,
+          ),
+        );
+
+        if (!difyStream.body) {
+          const result = buildChatResult(enrichment, message, casualMessage, null, undefined, attachment);
+          controller.enqueue(eventFrame({ type: "done", ...result }, encoder));
+          controller.close();
+          return;
+        }
+
+        let answer = "";
+        let conversationId: string | undefined;
+        let metadata: unknown;
+        let files: unknown;
+        for await (const event of parseDifyStream(difyStream.body)) {
+          if (request.signal.aborted) return;
+          if (event.answer) {
+            answer += event.answer;
+            controller.enqueue(eventFrame({ type: "delta", delta: event.answer }, encoder));
+          }
+          if (event.conversationId) conversationId = event.conversationId;
+          if (event.metadata !== undefined) metadata = event.metadata;
+          if (event.files !== undefined) files = event.files;
+          if (event.error) {
+            controller.enqueue(eventFrame({ type: "error", message: event.error }, encoder));
+          }
+        }
+
+        const agentResult = parseDifyAgentResult(answer || null, message, metadata, files, request, difyApiUrl);
+        const result = buildChatResult(
+          enrichment,
+          message,
+          casualMessage,
+          answer || null,
+          conversationId,
+          attachment,
+          agentResult,
+        );
+        const done = {
+          type: "done" as const,
+          provider: result.provider,
+          reply: result.reply,
+          ...(result.conversationId ? { conversationId: result.conversationId } : {}),
+          ...(result.attachment ? { attachment: result.attachment } : {}),
+          ...(result.agentResult ? { agentResult: result.agentResult } : {}),
+        };
+        controller.enqueue(eventFrame(done, encoder));
+        controller.close();
+      } catch {
+        if (!request.signal.aborted) {
+          controller.enqueue(eventFrame({ type: "error", message: "对话服务暂时不可用" }, encoder));
+          controller.close();
+        }
+      }
+    },
   });
+
+  return new Response(body, {
+    headers: {
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "Content-Type": "text/event-stream; charset=utf-8",
+    },
+  });
+}
+
+export async function POST(request: Request) {
+  let parsedRequest: ParsedChatRequest;
+  try {
+    parsedRequest = await parseChatRequest(request);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "请求格式无效";
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
+
+  const { body, attachment } = parsedRequest;
+
+  const message = body.message?.trim();
+  if (!message) {
+    return NextResponse.json({ error: "message is required" }, { status: 400 });
+  }
+
+  const casualMessage = isCasualMessage(message);
+  const searchPromise = casualMessage ? Promise.resolve(null) : searchKnowledge(message);
+  const apiKey = process.env.DIFY_API_KEY;
+  const apiUrl = process.env.DIFY_API_URL;
+  const user = difyUserId(body.userId);
+  const conversationId = difyConversationId(body.conversationId);
+  let attachmentStatus: AttachmentStatus | undefined;
+  let files: DifyFileReference[] | undefined;
+
+  if (attachment) {
+    const uploadedFile = await uploadDifyFile({
+      apiKey,
+      apiUrl,
+      file: attachment,
+      fileName: attachment.name,
+      user,
+      signal: request.signal,
+    });
+    if (uploadedFile) {
+      files = [uploadedFile];
+      attachmentStatus = { name: attachment.name, status: "uploaded" };
+    } else {
+      attachmentStatus = {
+        name: attachment.name,
+        status: "unavailable",
+        message: "附件暂未上传，已继续文字对话；请稍后重试或补充文字描述。",
+      };
+    }
+  }
+
+  const difyMessage = attachment && !files?.length
+    ? `${message}\n\n[系统提示：用户附件未能上传，请不要假设可以看到附件内容；明确说明证据不足，并请求用户补充文字描述。]`
+    : message;
+  const difyArgs = {
+    apiKey,
+    apiUrl,
+    message: difyMessage,
+    user,
+    conversationId,
+    ...(files ? { files } : {}),
+  };
+
+  if (acceptsEventStream(request)) {
+    const difyStream = await openDifyStream({ ...difyArgs, signal: request.signal });
+    if (difyStream) {
+      return streamChatResponse(
+        searchPromise,
+        difyStream,
+        message,
+        casualMessage,
+        request,
+        apiUrl,
+        attachmentStatus,
+      );
+    }
+  }
+
+  const difyReplyPromise = generateDifyReply(difyArgs);
+  const [search, difyReply] = await Promise.all([searchPromise, difyReplyPromise]);
+  const agentResult = difyReply
+    ? parseDifyAgentResult(difyReply.answer, message, difyReply.metadata, difyReply.files, request, apiUrl)
+    : undefined;
+  const result = buildChatResult(
+    buildChatEnrichment(search, message, casualMessage),
+    message,
+    casualMessage,
+    difyReply?.answer ?? null,
+    difyReply?.conversationId,
+    attachmentStatus,
+    agentResult,
+  );
+
+  return NextResponse.json(result);
 }

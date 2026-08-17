@@ -58,10 +58,34 @@ test("keeps the mobile assistant clear of module actions and bottom navigation",
   const homePetRule = styles.match(/\.home-page \.science-pet\s*\{([\s\S]*?)\}/)?.[1] ?? "";
   assert.match(homePetRule, /width:\s*62px[\s\S]*?height:\s*68px/);
   assert.doesNotMatch(homePetRule, /\b(?:position|top|right|left|bottom):[^;]*!important/);
-  assert.match(pet, /const mobilePosition = \{ right: 8, bottom: 82 \}/);
+  assert.match(
+    pet,
+    /const mobilePosition = \{\s*right: 8,\s*bottom: Math\.max\(mobilePetBottom, getPetBottomBounds\(\)\.minBottom\),\s*\};/,
+  );
   assert.match(
     styles,
     /\.lab-page \.science-pet\s*\{[\s\S]*?right:\s*max\(8px, env\(safe-area-inset-right\)\)[^;]*;[\s\S]*?bottom:\s*calc\(82px \+ env\(safe-area-inset-bottom\)\)[^;]*;/,
+  );
+  assert.match(styles, /\.science-pet\s*\{\s*z-index:\s*75;/);
+});
+
+test("keeps the draggable pet above the measured mobile bottom navigation", () => {
+  assert.match(pet, /const mobileNavigationGap = 12;/);
+  assert.match(
+    pet,
+    /function getPetBottomBounds\(\)\s*\{[\s\S]*?home-bottom-nav[\s\S]*?minBottom[\s\S]*?maxBottom/,
+  );
+  assert.match(
+    pet,
+    /const mobilePosition = \{\s*right: 8,\s*bottom: Math\.max\(mobilePetBottom, getPetBottomBounds\(\)\.minBottom\),\s*\};/,
+  );
+  assert.match(
+    pet,
+    /const \{ minBottom, maxBottom \} = getPetBottomBounds\(\);[\s\S]*?const bottom = clamp\(\s*current\.bottom,\s*minBottom,\s*maxBottom,/,
+  );
+  assert.match(
+    pet,
+    /const \{ minBottom, maxBottom \} = getPetBottomBounds\(\);[\s\S]*?drag\.startBottom - deltaY,\s*minBottom,\s*maxBottom,/,
   );
 });
 

@@ -52,7 +52,7 @@
 - 参数缺失：`400`。
 - 未配置或豆包调用失败：`503` JSON 错误，不泄露凭证和上游详细信息。
 
-服务端变量只使用非公开名称，例如 `DOUBAO_APP_ID`、`DOUBAO_API_KEY`、`DOUBAO_API_SECRET`、`DOUBAO_TTS_RESOURCE_ID`；不使用 `NEXT_PUBLIC_` 前缀，不写入仓库或返回给浏览器。默认音色为 `x4_doudou`，资源 ID 支持通过环境变量覆盖。
+服务端只使用非公开名称 `DOUBAO_API_KEY` 和可选的 `DOUBAO_TTS_RESOURCE_ID`；不使用 `NEXT_PUBLIC_` 前缀，不写入仓库或返回给浏览器。新版单向 WebSocket 使用 `X-Api-Key` 和 `X-Api-Resource-Id` 鉴权，默认资源 ID 为 `seed-tts-2.0`；默认音色为 `x4_doudou`。
 
 ## 数据流
 

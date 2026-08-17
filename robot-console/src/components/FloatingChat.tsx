@@ -1,8 +1,10 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, Bot, CornerDownLeft, MessageCircle, Minus, Sparkles } from "lucide-react";
+import { readAiChatResponse } from "@/lib/ai-chat-stream";
+import { createDifyWebUserId } from "@/lib/dify-session";
 import type { ScienceLabLink } from "@/lib/science-lab-links";
 import type { ConversationMessage } from "@/lib/types";
 
@@ -21,6 +23,8 @@ export function FloatingChat() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [difyUserId] = useState(createDifyWebUserId);
+  const difyConversationIdRef = useRef<string | undefined>(undefined);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
@@ -36,31 +40,103 @@ export function FloatingChat() {
 
     setInput("");
     setLoading(true);
-    setMessages((current) => [...current, { role: "user", content }]);
+    setMessages((current) => [
+      ...current,
+      { role: "user", content },
+      { role: "assistant", content: "" },
+    ]);
 
     try {
       const response = await fetch("/api/ai-chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: content, history }),
-      });
-      const data = (await response.json()) as {
-        reply?: string;
-        photos?: Array<{ id: string; title: string; url: string; description?: string | null }>;
-        labLinks?: ScienceLabLink[];
-      };
-
-      setMessages((current) => [
-        ...current,
-        {
-          role: "assistant",
-          content: data.reply ?? "暂时没有拿到回复，请稍后再试。",
-          photos: data.photos,
-          labLinks: data.labLinks,
+        headers: {
+          Accept: "text/event-stream",
+          "Content-Type": "application/json",
         },
-      ]);
+        body: JSON.stringify({
+          message: content,
+          history,
+          userId: difyUserId,
+          conversationId: difyConversationIdRef.current,
+        }),
+      });
+      if (!response.ok) throw new Error("Assistant request failed");
+      const data = await readAiChatResponse(response, (event) => {
+        if (event.type === "meta") {
+          setMessages((current) => {
+            const index = current.length - 1;
+            const pending = current[index];
+            if (!pending || pending.role !== "assistant") return current;
+            return current.map((message, messageIndex) =>
+              messageIndex === index
+                ? { ...message, photos: event.photos, labLinks: event.labLinks }
+                : message,
+            );
+          });
+        } else if (event.type === "delta") {
+          setMessages((current) => {
+            const index = current.length - 1;
+            const pending = current[index];
+            if (!pending || pending.role !== "assistant") return current;
+            return current.map((message, messageIndex) =>
+              messageIndex === index
+                ? { ...message, content: `${message.content}${event.delta}` }
+                : message,
+            );
+          });
+        } else if (event.type === "done") {
+          setMessages((current) => {
+            const index = current.length - 1;
+            const pending = current[index];
+            if (!pending || pending.role !== "assistant") return current;
+            return current.map((message, messageIndex) =>
+              messageIndex === index
+                ? { ...message, content: event.reply }
+                : message,
+            );
+          });
+        }
+      });
+      if (data.conversationId) difyConversationIdRef.current = data.conversationId;
+
+      setMessages((current) => {
+        const index = current.length - 1;
+        const pending = current[index];
+        if (!pending || pending.role !== "assistant") {
+          return [
+            ...current,
+            {
+              role: "assistant",
+              content: data.reply || "暂时没有拿到回复，请稍后再试。",
+              photos: data.photos,
+              labLinks: data.labLinks,
+            },
+          ];
+        }
+        return current.map((message, messageIndex) =>
+          messageIndex === index
+            ? {
+                ...message,
+                content: data.reply || "暂时没有拿到回复，请稍后再试。",
+                photos: data.photos ?? message.photos,
+                labLinks: data.labLinks ?? message.labLinks,
+              }
+            : message,
+        );
+      });
     } catch {
-      setMessages((current) => [...current, { role: "assistant", content: "网络暂时不稳定，请稍后重试。" }]);
+      setMessages((current) => {
+        const index = current.length - 1;
+        const pending = current[index];
+        if (!pending || pending.role !== "assistant") {
+          return [...current, { role: "assistant", content: "网络暂时不稳定，请稍后重试。" }];
+        }
+        return current.map((message, messageIndex) =>
+          messageIndex === index
+            ? { ...message, content: "网络暂时不稳定，请稍后重试。" }
+            : message,
+        );
+      });
     } finally {
       setLoading(false);
     }

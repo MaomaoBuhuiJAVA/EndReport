@@ -91,6 +91,16 @@ test("shows every collected video QR and links the resources that have a playbac
   assert.match(styles, /\.video-qr-code\s*\{/);
 });
 
+test("embeds public video resources for direct playback in the detail dialog", () => {
+  const component = fs.readFileSync(componentPath, "utf8");
+  const styles = fs.readFileSync(stylesPath, "utf8");
+
+  assert.match(component, /<video[\s\S]*controls[\s\S]*playsInline[\s\S]*preload="metadata"/);
+  assert.match(component, /<source[\s\S]*src=\{videoUrl\}[\s\S]*type="video\/mp4"/);
+  assert.match(component, /className="video-resource__player"/);
+  assert.match(styles, /\.video-resource__player\s*\{/);
+});
+
 test("adds a compact mobile return-home control beside the lab search", () => {
   const component = fs.readFileSync(componentPath, "utf8");
   const styles = fs.readFileSync(stylesPath, "utf8");
@@ -115,6 +125,41 @@ test("uses two-column illustrated cover cards for science poems and stories", ()
   assert.match(styles, /\.knowledge-card--literature[\s\S]*?box-shadow:/);
 });
 
+test("uses each science story video cover with an illustrated fallback", () => {
+  const component = fs.readFileSync(componentPath, "utf8");
+
+  assert.match(component, /function scienceStoryCoverPath\(item: ScienceKnowledgeSummary\)/);
+  assert.match(component, /science-story-covers\/\$\{item\.id\}\.webp/);
+  assert.match(component, /const \[storyCoverFailed, setStoryCoverFailed\] = useState\(false\)/);
+  assert.match(component, /onError=\{isStory \? \(\) => setStoryCoverFailed\(true\) : undefined\}/);
+  assert.match(component, /storyCoverFailed \? categoryVisual\.image : storyCover/);
+});
+
+test("ships one generated cover for every science story record", () => {
+  const catalog = JSON.parse(
+    fs.readFileSync(path.resolve("src/data/science-knowledge.json"), "utf8"),
+  );
+  const storyIds = catalog
+    .filter((item) => item.category === "科学故事")
+    .map((item) => item.id);
+  const coverDirectory = path.resolve("public/science-story-covers");
+  const coverFiles = new Set(fs.readdirSync(coverDirectory));
+
+  assert.equal(storyIds.length, 28);
+  for (const storyId of storyIds) {
+    assert.ok(coverFiles.has(`${storyId}.webp`), `missing cover for ${storyId}`);
+  }
+});
+
+test("only embeds direct video URLs and keeps QR redirects as links", () => {
+  const component = fs.readFileSync(componentPath, "utf8");
+
+  assert.match(component, /function isDirectVideoUrl\(value: string\)/);
+  assert.match(component, /const isPlayableVideo = Boolean\(videoUrl && isDirectVideoUrl\(videoUrl\)\)/);
+  assert.match(component, /\{isPlayableVideo \? \([\s\S]*?<video/);
+  assert.match(component, /\{videoUrl \? \([\s\S]*?className="video-link"/);
+});
+
 test("keeps literature card icons and age labels in separate top corners", () => {
   const styles = fs.readFileSync(stylesPath, "utf8");
   const literatureSemesterRule =
@@ -126,4 +171,23 @@ test("keeps literature card icons and age labels in separate top corners", () =>
   assert.match(literatureSemesterRule, /right:\s*10px/);
   assert.match(literatureSemesterRule, /z-index:\s*3/);
   assert.match(mobileLiteratureSemesterRule, /right:\s*8px/);
+});
+
+test("moves experiment age labels into the body before the category", () => {
+  const component = fs.readFileSync(componentPath, "utf8");
+  const styles = fs.readFileSync(stylesPath, "utf8");
+
+  assert.match(
+    component,
+    /className="knowledge-card__category-row"[\s\S]*?item\.category === "科学实验"[\s\S]*?className="knowledge-card__experiment-age"[\s\S]*?className="knowledge-card__category"/,
+  );
+  assert.match(
+    styles,
+    /\.knowledge-card__category-row\s*\{[\s\S]*?display:\s*flex[\s\S]*?flex-wrap:\s*wrap/,
+  );
+  const experimentAgeRule =
+    styles.match(/\.knowledge-card__experiment-age\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+  assert.match(experimentAgeRule, /position:\s*static/);
+  assert.match(experimentAgeRule, /background:\s*#e3f3ed/);
+  assert.match(experimentAgeRule, /border:\s*1px\s+solid\s+#b8ddd1/);
 });
