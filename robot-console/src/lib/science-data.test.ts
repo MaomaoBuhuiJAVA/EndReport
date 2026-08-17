@@ -61,6 +61,27 @@ describe("mergeScienceKnowledgeSummaries", () => {
     ]);
   });
 
+  it("does not append a stale experiment record when the packaged experiment was re-imported with a new ID", () => {
+    const packaged = [
+      {
+        ...summary("EXP-current", "玩转纸片"),
+        category: "科学实验" as const,
+        ageLabel: "大班",
+        topic: "力与物理运动",
+      },
+    ];
+    const database = [
+      {
+        ...summary("EXP-legacy", "玩转纸片"),
+        category: "科学实验" as const,
+        ageLabel: "大班",
+        topic: "力与物理运动",
+      },
+    ];
+
+    expect(mergeScienceKnowledgeSummaries(packaged, database)).toEqual(packaged);
+  });
+
   it("fills a legacy database record with a packaged video resource", () => {
     const video = resource("视频资源", "视频二维码", {
       publicPath: "/science-assets/video-qr/example.png",

@@ -124,19 +124,30 @@ function normalizeFallbackItem(item: ScienceKnowledgeItem) {
   });
 }
 
+function packagedExperimentKey(item: ScienceKnowledgeSummary) {
+  if (item.category !== "科学实验") return "";
+  return `${item.category}\u0000${item.ageLabel}\u0000${item.title.trim().toLocaleLowerCase("zh-CN")}`;
+}
+
 export function mergeScienceKnowledgeSummaries(
   packagedItems: ScienceKnowledgeSummary[],
   databaseItems: ScienceKnowledgeSummary[],
 ): ScienceKnowledgeSummary[] {
   const databaseById = new Map(databaseItems.map((item) => [item.id, item]));
   const packagedIds = new Set(packagedItems.map((item) => item.id));
+  const packagedExperimentKeys = new Set(
+    packagedItems.map(packagedExperimentKey).filter(Boolean),
+  );
 
   return [
     ...packagedItems.map((item) => {
       const databaseItem = databaseById.get(item.id);
       return databaseItem ? mergeScienceKnowledgeRecord(item, databaseItem) : item;
     }),
-    ...databaseItems.filter((item) => !packagedIds.has(item.id)),
+    ...databaseItems.filter(
+      (item) =>
+        !packagedIds.has(item.id) && !packagedExperimentKeys.has(packagedExperimentKey(item)),
+    ),
   ].map(applyScienceTopicCorrection);
 }
 
