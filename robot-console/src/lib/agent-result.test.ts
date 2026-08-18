@@ -313,6 +313,35 @@ describe("parseAgentResult", () => {
     });
   });
 
+  it("prefers a trusted Tongyi image when stale metadata contains an untrusted cover URL", () => {
+    const result = parseAgentResult({
+      metadata: {
+        agent_result: {
+          kind: "poetry_cover",
+          cover_url: "https://untrusted.example/stale-cover.png",
+          alt_text: "旧封面",
+          theme_keywords: ["风"],
+          generation_prompt: "幼儿绘本卡通风格",
+          model_name: "通义 AIGC",
+          retry: false,
+        },
+      },
+      text: [
+        "## 科学诗封面",
+        "已由通义 AIGC 生成封面图片：",
+        "![风的旅行幼儿绘本封面](https://upload.dify.ai/files/wind-trip-signed.png?timestamp=1&sign=test=)",
+      ].join("\n"),
+      sameOrigin: "https://www.qyfck.icu/api/ai-chat",
+      difyApiUrl: "https://api.dify.ai/v1/chat-messages",
+    });
+
+    expect(result).toMatchObject({
+      kind: "poetry_cover",
+      cover_url: "https://upload.dify.ai/files/wind-trip-signed.png?timestamp=1&sign=test=",
+      retry: false,
+    });
+  });
+
   it("rejects an untrusted Tongyi-style Markdown cover URL", () => {
     const result = parseAgentResult({
       text: [
