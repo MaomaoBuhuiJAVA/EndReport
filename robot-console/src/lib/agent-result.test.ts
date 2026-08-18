@@ -2,6 +2,64 @@ import { describe, expect, it } from "vitest";
 import { parseAgentResult } from "./agent-result";
 
 describe("parseAgentResult", () => {
+  it("parses the full visual observation schema from the vision model", () => {
+    const expected = {
+      kind: "vision_observation" as const,
+      image_type: "experiment_process",
+      visible_materials: ["清水", "蓝色纸片"],
+      visible_equipment: ["透明杯", "滴管"],
+      observable_steps: ["一只手正在把水滴入杯中"],
+      observable_phenomena: ["纸片漂浮在水面"],
+      possible_science_concepts: ["可能与浮力有关"],
+      safety_risks: ["滴管尖端应避免接触眼睛"],
+      evidence_gaps: ["未看到实验开始前的材料摆放"],
+      confidence: 0.72,
+      privacy_risk: {
+        contains_face_or_child: true,
+        contains_name_or_identifier: false,
+        recommended_visibility: "teacher_only",
+      },
+    };
+
+    const result = parseAgentResult({
+      metadata: { agent_result: expected },
+    });
+
+    expect(result).toEqual(expected);
+  });
+
+  it("accepts a privacy-risk object alongside the compact visual schema", () => {
+    const result = parseAgentResult({
+      metadata: {
+        agent_result: {
+          kind: "vision_observation",
+          image_type: "作品照片",
+          facts: ["画面中有一张纸桥"],
+          judgements: ["可能在比较纸桥承重"],
+          missing_evidence: ["缺少承重数量记录"],
+          actions: ["补充不同折法的对照照片"],
+          safety: ["使用轻质积木并由教师控制数量"],
+          confidence: 0.61,
+          privacy_visibility: "teacher_only",
+          privacy_risk: {
+            contains_face_or_child: false,
+            contains_name_or_identifier: true,
+            recommended_visibility: "teacher_only",
+          },
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      kind: "vision_observation",
+      privacy_risk: {
+        contains_face_or_child: false,
+        contains_name_or_identifier: true,
+        recommended_visibility: "teacher_only",
+      },
+    });
+  });
+
   it("parses a vision observation result from a dedicated model-text fence", () => {
     const result = parseAgentResult({
       text: [
@@ -232,6 +290,48 @@ describe("parseAgentResult", () => {
       message: "图片服务暂时不可用，请稍后重试。",
       retry: true,
       retry_reason: "当前图像模型未返回可用图片。",
+    });
+  });
+
+  it.each([
+    ["true", true],
+    ["false", false],
+  ] as const)("parses clear string boolean retry value %s from Dify degraded metadata", (retryValue, expectedRetry) => {
+    const result = parseAgentResult({
+      metadata: {
+        agent_result: {
+          kind: "degraded",
+          code: "model_unavailable",
+          message: "视觉模型暂时不可用，请稍后重试。",
+          retry: retryValue,
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      kind: "degraded",
+      code: "model_unavailable",
+      message: "视觉模型暂时不可用，请稍后重试。",
+      retry: expectedRetry,
+    });
+  });
+
+  it("rejects non-boolean retry strings from Dify degraded metadata", () => {
+    const result = parseAgentResult({
+      metadata: {
+        agent_result: {
+          kind: "degraded",
+          code: "model_unavailable",
+          message: "视觉模型暂时不可用，请稍后重试。",
+          retry: "yes",
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      kind: "degraded",
+      code: "invalid_result",
+      retry: true,
     });
   });
 

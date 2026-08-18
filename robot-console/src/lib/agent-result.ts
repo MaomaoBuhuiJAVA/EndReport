@@ -1,16 +1,33 @@
 export type PrivacyVisibility = "teacher_only" | "public_after_review";
 
+export type VisionPrivacyVisibility = "teacher_only" | "internal_team" | "safe_to_share";
+
+export type VisionPrivacyRisk = {
+  contains_face_or_child: boolean;
+  contains_name_or_identifier: boolean;
+  recommended_visibility: VisionPrivacyVisibility;
+};
+
 export type VisionObservationResult = {
   kind: "vision_observation";
   image_type: string;
-  facts: string[];
-  judgements: string[];
-  missing_evidence: string[];
-  actions: string[];
-  safety: string[];
+  /** Compact fields emitted by the final advice node. */
+  facts?: string[];
+  judgements?: string[];
+  missing_evidence?: string[];
+  actions?: string[];
+  safety?: string[];
+  /** Detailed fields emitted by the dedicated vision model. */
+  visible_materials?: string[];
+  visible_equipment?: string[];
+  observable_steps?: string[];
+  observable_phenomena?: string[];
+  possible_science_concepts?: string[];
+  safety_risks?: string[];
+  evidence_gaps?: string[];
   confidence: number;
-  privacy_visibility: PrivacyVisibility;
-  privacy_risk: boolean;
+  privacy_visibility?: PrivacyVisibility;
+  privacy_risk: boolean | VisionPrivacyRisk;
 };
 
 export type PoetryCoverResult = {
@@ -125,21 +142,84 @@ function stringArray(value: unknown): string[] | null {
   return value.map((item) => item.trim());
 }
 
+function optionalStringArray(value: Record<string, unknown>, key: string): string[] | undefined | null {
+  if (!(key in value)) return undefined;
+  return stringArray(value[key]);
+}
+
+function parseVisionPrivacyRisk(value: unknown): boolean | VisionPrivacyRisk | null {
+  if (typeof value === "boolean") return value;
+  if (!isRecord(value)) return null;
+
+  const containsFaceOrChild = value.contains_face_or_child;
+  const containsNameOrIdentifier = value.contains_name_or_identifier;
+  const recommendedVisibility = value.recommended_visibility;
+  if (
+    typeof containsFaceOrChild !== "boolean" ||
+    typeof containsNameOrIdentifier !== "boolean" ||
+    (recommendedVisibility !== "teacher_only" &&
+      recommendedVisibility !== "internal_team" &&
+      recommendedVisibility !== "safe_to_share")
+  ) {
+    return null;
+  }
+
+  return {
+    contains_face_or_child: containsFaceOrChild,
+    contains_name_or_identifier: containsNameOrIdentifier,
+    recommended_visibility: recommendedVisibility,
+  };
+}
+
 function parseVisionObservation(value: Record<string, unknown>): VisionObservationResult | null {
   const imageType = typeof value.image_type === "string" ? value.image_type.trim() : "";
-  const facts = stringArray(value.facts);
-  const judgements = stringArray(value.judgements);
-  const missingEvidence = stringArray(value.missing_evidence);
-  const actions = stringArray(value.actions);
-  const safety = stringArray(value.safety);
+  const facts = optionalStringArray(value, "facts");
+  const judgements = optionalStringArray(value, "judgements");
+  const missingEvidence = optionalStringArray(value, "missing_evidence");
+  const actions = optionalStringArray(value, "actions");
+  const safety = optionalStringArray(value, "safety");
+  const visibleMaterials = optionalStringArray(value, "visible_materials");
+  const visibleEquipment = optionalStringArray(value, "visible_equipment");
+  const observableSteps = optionalStringArray(value, "observable_steps");
+  const observablePhenomena = optionalStringArray(value, "observable_phenomena");
+  const possibleScienceConcepts = optionalStringArray(value, "possible_science_concepts");
+  const safetyRisks = optionalStringArray(value, "safety_risks");
+  const evidenceGaps = optionalStringArray(value, "evidence_gaps");
   const confidence = value.confidence;
   const privacyVisibility = value.privacy_visibility;
+  const privacyRisk = parseVisionPrivacyRisk(value.privacy_risk);
+  const hasFullFields = [
+    "visible_materials",
+    "visible_equipment",
+    "observable_steps",
+    "observable_phenomena",
+    "possible_science_concepts",
+    "safety_risks",
+    "evidence_gaps",
+  ].some((key) => key in value);
+  const hasCompactFields = ["facts", "judgements", "missing_evidence", "actions", "safety"].some((key) => key in value);
+  const compactFieldsComplete = [facts, judgements, missingEvidence, actions, safety].every((field) => field !== undefined && field !== null);
+  const fullFieldsComplete = [
+    visibleMaterials,
+    visibleEquipment,
+    observableSteps,
+    observablePhenomena,
+    possibleScienceConcepts,
+    safetyRisks,
+    evidenceGaps,
+  ].every((field) => field !== undefined && field !== null);
+  const validPrivacyVisibility =
+    privacyVisibility === undefined ||
+    privacyVisibility === "teacher_only" ||
+    privacyVisibility === "public_after_review";
 
   if (
-    !imageType || !facts || !judgements || !missingEvidence || !actions || !safety ||
+    !imageType ||
+    privacyRisk === null ||
+    (hasFullFields ? !fullFieldsComplete : !hasCompactFields || !compactFieldsComplete) ||
+    !validPrivacyVisibility ||
     typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 1 ||
-    (privacyVisibility !== "teacher_only" && privacyVisibility !== "public_after_review") ||
-    typeof value.privacy_risk !== "boolean"
+    (!hasFullFields && privacyVisibility === undefined)
   ) {
     return null;
   }
@@ -147,19 +227,36 @@ function parseVisionObservation(value: Record<string, unknown>): VisionObservati
   return {
     kind: "vision_observation",
     image_type: imageType,
-    facts,
-    judgements,
-    missing_evidence: missingEvidence,
-    actions,
-    safety,
+    ...(facts ? { facts } : {}),
+    ...(judgements ? { judgements } : {}),
+    ...(missingEvidence ? { missing_evidence: missingEvidence } : {}),
+    ...(actions ? { actions } : {}),
+    ...(safety ? { safety } : {}),
+    ...(visibleMaterials ? { visible_materials: visibleMaterials } : {}),
+    ...(visibleEquipment ? { visible_equipment: visibleEquipment } : {}),
+    ...(observableSteps ? { observable_steps: observableSteps } : {}),
+    ...(observablePhenomena ? { observable_phenomena: observablePhenomena } : {}),
+    ...(possibleScienceConcepts ? { possible_science_concepts: possibleScienceConcepts } : {}),
+    ...(safetyRisks ? { safety_risks: safetyRisks } : {}),
+    ...(evidenceGaps ? { evidence_gaps: evidenceGaps } : {}),
     confidence,
-    privacy_visibility: privacyVisibility,
-    privacy_risk: value.privacy_risk,
+    ...(privacyVisibility ? { privacy_visibility: privacyVisibility } : {}),
+    privacy_risk: privacyRisk,
   };
 }
 
 function requiredString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function parseBoolean(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return null;
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+  return null;
 }
 
 function isDifyHost(hostname: string) {
@@ -362,11 +459,12 @@ const FAILURE_CODES = new Set<AgentResultFailureCode>([
 function parseFailureResult(value: Record<string, unknown>): AgentFailureResult | null {
   const code = value.code;
   const message = requiredString(value.message);
+  const retry = parseBoolean(value.retry);
   const retryReason = value.retry_reason === undefined ? undefined : requiredString(value.retry_reason);
   if (
     (value.kind !== "degraded" && value.kind !== "error") ||
     typeof code !== "string" || !FAILURE_CODES.has(code as AgentResultFailureCode) ||
-    !message || typeof value.retry !== "boolean" ||
+    !message || retry === null ||
     (value.retry_reason !== undefined && !retryReason)
   ) {
     return null;
@@ -376,7 +474,7 @@ function parseFailureResult(value: Record<string, unknown>): AgentFailureResult 
     kind: value.kind,
     code: code as AgentResultFailureCode,
     message,
-    retry: value.retry,
+    retry,
     ...(retryReason ? { retry_reason: retryReason } : {}),
   };
 }

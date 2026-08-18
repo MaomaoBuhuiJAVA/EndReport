@@ -24,8 +24,8 @@ type AgentResultCardProps = {
 
 const MAX_ITEMS = 4;
 
-function CompactList({ label, items }: { label: string; items: string[] }) {
-  if (!items.length) return null;
+function CompactList({ label, items }: { label: string; items?: string[] }) {
+  if (!items?.length) return null;
   const visibleItems = items.slice(0, MAX_ITEMS);
   const remaining = items.length - visibleItems.length;
 
@@ -38,6 +38,20 @@ function CompactList({ label, items }: { label: string; items: string[] }) {
       {remaining > 0 ? <span className="agent-result-card__more">另有 {remaining} 项</span> : null}
     </section>
   );
+}
+
+function privacyWarning(risk: VisionObservationResult["privacy_risk"]): string | null {
+  if (typeof risk === "boolean") {
+    return risk ? "图片可能包含隐私信息，仅供教师查看。" : null;
+  }
+
+  if (risk.contains_face_or_child || risk.contains_name_or_identifier || risk.recommended_visibility === "teacher_only") {
+    return "图片可能包含隐私信息，仅供教师查看。";
+  }
+  if (risk.recommended_visibility === "internal_team") {
+    return "图片建议仅供园内教研使用，暂不公开。";
+  }
+  return null;
 }
 
 function CardHeader({
@@ -91,17 +105,23 @@ function PoetryCoverCard({ result }: { result: PoetryCoverResult }) {
 
 function VisionObservationCard({ result }: { result: VisionObservationResult }) {
   const confidence = `${Math.round(result.confidence * 100)}%`;
+  const privacyMessage = privacyWarning(result.privacy_risk);
   return (
     <article className="agent-result-card agent-result-card--vision" aria-label="图片观察">
       <CardHeader icon={<Eye size={15} />} title="图片观察" meta={`${result.image_type} · 置信度 ${confidence}`} />
+      <CompactList label="可见材料" items={result.visible_materials} />
+      <CompactList label="可见器材" items={result.visible_equipment} />
+      <CompactList label="可观察步骤" items={result.observable_steps} />
+      <CompactList label="实验现象或作品特征" items={result.observable_phenomena} />
+      <CompactList label="可能的科学概念" items={result.possible_science_concepts} />
+      <CompactList label="安全风险" items={result.safety_risks} />
+      <CompactList label="证据不足" items={result.evidence_gaps} />
       <CompactList label="观察到的事实" items={result.facts} />
       <CompactList label="专业判断" items={result.judgements} />
       <CompactList label="还需确认" items={result.missing_evidence} />
       <CompactList label="建议行动" items={result.actions} />
       <CompactList label="安全提醒" items={result.safety} />
-      {result.privacy_risk ? (
-        <p className="agent-result-card__warning" role="status">图片可能包含隐私信息，仅供教师查看。</p>
-      ) : null}
+      {privacyMessage ? <p className="agent-result-card__warning" role="status">{privacyMessage}</p> : null}
     </article>
   );
 }
