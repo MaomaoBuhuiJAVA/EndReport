@@ -246,7 +246,7 @@ describe("Dify streaming chat", () => {
       });
       await vi.advanceTimersByTimeAsync(30_000);
       expect(settled).toBe(false);
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(120_000);
       await expect(pending).resolves.toBeNull();
     } finally {
       vi.useRealTimers();

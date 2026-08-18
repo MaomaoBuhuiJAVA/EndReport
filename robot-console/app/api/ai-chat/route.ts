@@ -6,7 +6,9 @@ import { parseAgentResult, type AgentResult } from "@/lib/agent-result";
 import { buildScienceLabLinks } from "@/lib/science-lab-links";
 import { searchKnowledge, wantsPhotoResults } from "@/lib/search";
 
-export const maxDuration = 60;
+// Image-generation branches can take longer than a normal text response.
+// Keep the function alive long enough for Tongyi/Qwen to return its file.
+export const maxDuration = 120;
 
 type SearchChunk = Awaited<ReturnType<typeof searchKnowledge>>["chunks"][number];
 
