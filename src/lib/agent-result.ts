@@ -595,8 +595,9 @@ function parseFailureResult(value: Record<string, unknown>): AgentFailureResult 
 function parseCandidate(value: unknown, input: AgentResultParseInput): AgentResult | null {
   if (!isRecord(value)) return null;
   // Dify structured-output responses can contain the complete document schema
-  // without echoing its discriminator. Accept only the full strict shape.
-  if (!("kind" in value)) return parseDocumentDiagnosis(value);
+  // without echoing its discriminator. Recap responses have the same legacy
+  // omission, so identify that strict shape before trying document diagnosis.
+  if (!("kind" in value)) return parseExperimentRecap(value) ?? parseDocumentDiagnosis(value);
   if (value.kind === "vision_observation") return parseVisionObservation(value);
   if (value.kind === "poetry_cover") return parsePoetryCover(value, input);
   if (value.kind === "experiment_recap") return parseExperimentRecap(value);
@@ -853,11 +854,14 @@ export function parseAgentResult(input: AgentResultParseInput): AgentResult | nu
       // Plain/json fences are accepted only when the model explicitly marks
       // the payload as an agent result; otherwise ordinary document JSON must
       // remain unclassified. Keep the cover URL safety fallback intact.
-      if (isRecord(candidate) && typeof candidate.kind === "string") {
+      if (isRecord(candidate)) {
+        const hasExplicitKind = typeof candidate.kind === "string";
         const parsed = parseCandidate(candidate, input);
-        if (parsed) return parsed;
-        const invalid = invalidCandidateResult(candidate, input);
-        if (invalid.code === "untrusted_url") deferredFailure ??= invalid;
+        if (parsed && (hasExplicitKind || parsed.kind === "experiment_recap")) return parsed;
+        if (hasExplicitKind) {
+          const invalid = invalidCandidateResult(candidate, input);
+          if (invalid.code === "untrusted_url") deferredFailure ??= invalid;
+        }
       }
     } catch {
       // Ordinary Markdown/JSON fences are not structured agent results.

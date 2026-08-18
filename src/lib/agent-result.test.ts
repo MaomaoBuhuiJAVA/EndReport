@@ -251,6 +251,34 @@ describe("parseAgentResult", () => {
     });
   });
 
+  it("infers an experiment recap when Dify omits the kind discriminator", () => {
+    const result = parseAgentResult({
+      text: [
+        "复盘结果：",
+        "```agent-result",
+        JSON.stringify({
+          facts: ["两组幼儿均完成了纸桥搭建"],
+          goal_analysis: ["推测/待验证：承重差异还需要更多记录"],
+          issues: {
+            materials: ["纸张厚度不一致"],
+            steps: ["部分幼儿跳过预测"],
+            questions: ["需要增加比较性提问"],
+            organization: ["材料分发顺序需要统一"],
+          },
+          improvements: ["先完成预测，再进行承重比较"],
+          validation_points: ["记录每种纸桥可承受的积木数量"],
+          safety: ["重物由教师控制"],
+        }),
+        "```",
+      ].join("\n"),
+    });
+
+    expect(result).toMatchObject({
+      kind: "experiment_recap",
+      facts: ["两组幼儿均完成了纸桥搭建"],
+    });
+  });
+
   it("parses work feedback and an optional inquiry task card", () => {
     const result = parseAgentResult({
       text: [
