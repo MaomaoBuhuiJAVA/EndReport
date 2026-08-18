@@ -14,9 +14,12 @@ import {
   MicOff,
   PhoneCall,
   PhoneOff,
+  PencilLine,
   ClipboardList,
   Send,
   Sparkles,
+  ThumbsDown,
+  ThumbsUp,
   Upload,
   Volume2,
   VolumeX,
@@ -67,10 +70,13 @@ type PetMessage = {
   id: number;
   role: "user" | "assistant";
   text: string;
+  responseId?: string;
   photos?: PetPhoto[];
   labLinks?: ScienceLabLink[];
   attachment?: AiChatAttachmentStatus;
   agentResult?: AgentResult;
+  feedbackRating?: FeedbackRating;
+  feedbackStatus?: "saving" | "recorded" | "error";
 };
 
 type PetPosition = {
@@ -95,9 +101,11 @@ type DragState = {
 type VoiceStatus = "idle" | "starting" | "listening" | "processing" | "error" | "unsupported";
 type ComposerMode = "text" | "voice";
 type CallPhase = "idle" | "preparing" | "listening" | "thinking" | "speaking" | "muted" | "error";
+type FeedbackRating = "adopted" | "needs_revision" | "not_helpful";
 
 type AssistantReply = {
   text: string;
+  responseId?: string;
   photos?: PetPhoto[];
   labLinks?: ScienceLabLink[];
   attachment?: AiChatAttachmentStatus;
@@ -189,6 +197,7 @@ const creationAgeGroups = ["托班", "小班", "中班", "大班"];
 const creationDurations = ["15 分钟", "20 分钟", "30 分钟", "40 分钟"];
 const creationFormats = ["Word 文档", "PDF 文档", "课件提纲"];
 
+const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
 const petWidth = 116;
 const petHeight = 122;
 const viewportMargin = 6;
@@ -196,16 +205,18 @@ const mobilePetBottom = 82;
 const mobileNavigationGap = 12;
 const chatGap = 14;
 const patrolDuration = 2200;
+const spriteColumns = 6;
+const spriteRows = 8;
 const petAnimations: Record<
   PetAnimationState,
   { row: number; durations: readonly number[] }
 > = {
-  idle: { row: 0, durations: [1680, 660, 660, 840, 840, 1920] },
-  "running-right": { row: 1, durations: [120, 120, 120, 120, 120, 120, 120, 220] },
-  "running-left": { row: 2, durations: [120, 120, 120, 120, 120, 120, 120, 220] },
-  waiting: { row: 6, durations: [150, 150, 150, 150, 150, 260] },
-  moving: { row: 7, durations: [120, 120, 120, 120, 120, 220] },
-  working: { row: 8, durations: [150, 150, 150, 150, 150, 280] },
+  idle: { row: 0, durations: [1680, 660, 660, 840, 840] },
+  "running-right": { row: 1, durations: [120, 120, 120, 120, 120, 220] },
+  "running-left": { row: 2, durations: [120, 120, 120, 120, 120, 220] },
+  waiting: { row: 4, durations: [150, 150, 150, 150, 150, 260] },
+  moving: { row: 5, durations: [120, 120, 120, 120, 120, 220] },
+  working: { row: 6, durations: [150, 150, 150, 150, 150, 280] },
 };
 
 const thinkingGhostPieces = [
@@ -304,6 +315,7 @@ export function SciencePet() {
   const [creationDialogError, setCreationDialogError] = useState("");
   const [selectedAttachment, setSelectedAttachment] = useState<File | null>(null);
   const [attachmentPreviewUrl, setAttachmentPreviewUrl] = useState<string | null>(null);
+  const [attachmentNotice, setAttachmentNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("idle");
   const [voiceNotice, setVoiceNotice] = useState("");
@@ -756,6 +768,7 @@ export function SciencePet() {
     if (data.conversationId) difyConversationIdRef.current = data.conversationId;
     return {
       text: data.reply?.trim() || "资料库暂时没有返回内容，请换个问法试试。",
+      responseId: data.responseId,
       photos: data.photos,
       labLinks: data.labLinks,
       attachment: data.attachment,
@@ -787,6 +800,7 @@ export function SciencePet() {
       updatePetMessage(messageId, (message) => ({
         ...message,
         text: event.reply,
+        responseId: event.responseId ?? message.responseId,
         photos: event.photos,
         labLinks: event.labLinks,
         attachment: event.attachment ?? message.attachment,
@@ -901,6 +915,32 @@ export function SciencePet() {
     void playSpeech(message.text, { messageId: message.id });
   }
 
+  async function submitAssistantFeedback(message: PetMessage, rating: FeedbackRating) {
+    if (!message.responseId || message.feedbackStatus === "saving" || message.feedbackStatus === "recorded") return;
+
+    updatePetMessage(message.id, (current) => ({ ...current, feedbackStatus: "saving" }));
+    try {
+      const response = await fetch("/api/ai-feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          responseId: message.responseId,
+          rating,
+          userId: difyUserId,
+          ...(message.agentResult ? { kind: message.agentResult.kind } : {}),
+        }),
+      });
+      if (!response.ok) throw new Error("feedback request failed");
+      updatePetMessage(message.id, (current) => ({
+        ...current,
+        feedbackRating: rating,
+        feedbackStatus: "recorded",
+      }));
+    } catch {
+      updatePetMessage(message.id, (current) => ({ ...current, feedbackStatus: "error" }));
+    }
+  }
+
   async function processVoiceCallTranscript(transcript: string, sessionId: number) {
     const session = callSessionRef.current;
     if (!session || !isCurrentVoiceCallListening(sessionId)) return;
@@ -943,6 +983,7 @@ export function SciencePet() {
       updatePetMessage(assistantMessageId, (message) => ({
         ...message,
         text: reply.text,
+        responseId: reply.responseId,
         photos: reply.photos,
         labLinks: reply.labLinks,
         attachment: reply.attachment,
@@ -1194,6 +1235,12 @@ export function SciencePet() {
     const attachment = event.target.files?.[0];
     if (!attachment) return;
 
+    if (attachment.size > MAX_ATTACHMENT_BYTES) {
+      event.currentTarget.value = "";
+      setAttachmentNotice("附件不能超过 4MB，请压缩后重试。");
+      return;
+    }
+
     if (attachmentPreviewUrlRef.current) URL.revokeObjectURL(attachmentPreviewUrlRef.current);
     const previewUrl = attachment.type.startsWith("image/")
       ? URL.createObjectURL(attachment)
@@ -1201,6 +1248,7 @@ export function SciencePet() {
     attachmentPreviewUrlRef.current = previewUrl;
     setAttachmentPreviewUrl(previewUrl);
     setSelectedAttachment(attachment);
+    setAttachmentNotice("");
     if (mode === "photo") {
       setInput("请识别这张图片中的科学内容，并给出适合幼儿的观察建议。");
       focusComposerInput();
@@ -1212,6 +1260,7 @@ export function SciencePet() {
     attachmentPreviewUrlRef.current = null;
     setAttachmentPreviewUrl(null);
     setSelectedAttachment(null);
+    setAttachmentNotice("");
     if (attachmentInputRef.current) attachmentInputRef.current.value = "";
     if (photoInputRef.current) photoInputRef.current.value = "";
   }
@@ -1249,6 +1298,7 @@ export function SciencePet() {
       updatePetMessage(assistantMessageId, (message) => ({
         ...message,
         text: reply.text,
+        responseId: reply.responseId,
         photos: reply.photos,
         labLinks: reply.labLinks,
         attachment: reply.attachment,
@@ -1484,8 +1534,8 @@ export function SciencePet() {
 
   const visibleFrame = spriteFrame % animation.durations.length;
   const spriteStyle = {
-    "--pet-x": `${(visibleFrame / 7) * 100}%`,
-    "--pet-y": `${(animation.row / 10) * 100}%`,
+    "--pet-x": `${(visibleFrame / (spriteColumns - 1)) * 100}%`,
+    "--pet-y": `${(animation.row / (spriteRows - 1)) * 100}%`,
   } as CSSProperties;
   const callInputLocked = callPhase !== "idle" && callPhase !== "error";
 
@@ -1688,6 +1738,55 @@ export function SciencePet() {
                             {speakingMessageId === message.id ? <VolumeX size={13} /> : <Volume2 size={13} />}
                             <span>{speakingMessageId === message.id ? "停止" : "播放"}</span>
                           </button>
+                          {message.role === "assistant" && message.responseId ? (
+                            <>
+                              <button
+                                type="button"
+                                className={message.feedbackRating === "adopted" ? "is-active" : undefined}
+                                disabled={message.feedbackStatus === "saving" || message.feedbackStatus === "recorded"}
+                                onClick={() => void submitAssistantFeedback(message, "adopted")}
+                                aria-label="标记为已采用"
+                                aria-pressed={message.feedbackRating === "adopted"}
+                                title="已采用"
+                              >
+                                <ThumbsUp size={13} />
+                                <span>已采用</span>
+                              </button>
+                              <button
+                                type="button"
+                                className={message.feedbackRating === "needs_revision" ? "is-active" : undefined}
+                                disabled={message.feedbackStatus === "saving" || message.feedbackStatus === "recorded"}
+                                onClick={() => void submitAssistantFeedback(message, "needs_revision")}
+                                aria-label="标记为需修改"
+                                aria-pressed={message.feedbackRating === "needs_revision"}
+                                title="需修改"
+                              >
+                                <PencilLine size={13} />
+                                <span>需修改</span>
+                              </button>
+                              <button
+                                type="button"
+                                className={message.feedbackRating === "not_helpful" ? "is-active" : undefined}
+                                disabled={message.feedbackStatus === "saving" || message.feedbackStatus === "recorded"}
+                                onClick={() => void submitAssistantFeedback(message, "not_helpful")}
+                                aria-label="标记为无帮助"
+                                aria-pressed={message.feedbackRating === "not_helpful"}
+                                title="无帮助"
+                              >
+                                <ThumbsDown size={13} />
+                                <span>无帮助</span>
+                              </button>
+                              {message.feedbackStatus ? (
+                                <span className="pet-message__feedback-status" role="status">
+                                  {message.feedbackStatus === "saving"
+                                    ? "正在记录"
+                                    : message.feedbackStatus === "recorded"
+                                      ? "已记录"
+                                      : "未记录"}
+                                </span>
+                              ) : null}
+                            </>
+                          ) : null}
                         </div>
                       ) : null}
                     </div>
@@ -1717,6 +1816,11 @@ export function SciencePet() {
                 {voiceNotice ? (
                   <p className="pet-chat__voice-feedback" role="status">
                     {voiceNotice}
+                  </p>
+                ) : null}
+                {attachmentNotice ? (
+                  <p className="pet-chat__attachment-notice" role="alert">
+                    {attachmentNotice}
                   </p>
                 ) : null}
                 {selectedAttachment ? (
@@ -1984,12 +2088,12 @@ export function SciencePet() {
         onPointerMove={handlePointerMove}
         onPointerUp={finishPointer}
         aria-label={open ? "收起科小贝，可拖动" : "问问科小贝，可拖动"}
-        title="拖动小树芽，点击问科小贝"
+        title="拖动科小贝，点击开始对话"
       >
         <span
           className="science-pet__sprite"
           role="img"
-          aria-label="Seedy 小树芽科小贝"
+          aria-label="科小贝科学实验员"
           data-pet-state={animationState}
           style={spriteStyle}
         />

@@ -3,12 +3,14 @@ import {
   AlertTriangle,
   ClipboardCheck,
   Eye,
+  FileText,
   MessageCircleHeart,
   Sparkles,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import type {
   AgentResult,
+  DocumentDiagnosisResult,
   ExperimentRecapResult,
   InquiryTaskCard,
   PoetryCoverResult,
@@ -121,6 +123,37 @@ function ExperimentRecapCard({ result }: { result: ExperimentRecapResult }) {
   );
 }
 
+function DocumentDiagnosisCard({ result }: { result: DocumentDiagnosisResult }) {
+  return (
+    <article className="agent-result-card agent-result-card--diagnosis" aria-label="教研材料诊断">
+      <CardHeader icon={<FileText size={15} />} title="教研材料诊断" meta={result.title} />
+      <section className="agent-result-card__section">
+        <h4>问题清单</h4>
+        <CompactList label="目标与年龄适宜性" items={result.age_fit} />
+        <CompactList label="科学概念准确性" items={result.science_accuracy} />
+        <CompactList label="材料安全" items={result.material_safety} />
+        <CompactList label="幼儿探究机会" items={result.inquiry_opportunities} />
+        <CompactList label="教师提问" items={result.teacher_questions} />
+        <CompactList label="证据缺口与研究问题" items={result.evidence_gaps} />
+        <CompactList label="反思依据" items={result.reflection_basis} />
+      </section>
+      <section className="agent-result-card__section">
+        <h4>可替换修订文本</h4>
+        <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{result.revision_text}</p>
+      </section>
+      <section className="agent-result-card__section">
+        <h4>修订后框架</h4>
+        <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{result.revised_outline}</p>
+      </section>
+      <section className="agent-result-card__section">
+        <h4>导出稿</h4>
+        <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{result.delivery_markdown}</p>
+        <span className="agent-result-card__more">可继续整理为 Word 或 PDF</span>
+      </section>
+    </article>
+  );
+}
+
 function InquiryTask({ task }: { task: InquiryTaskCard }) {
   return (
     <section className="agent-result-card__task">
@@ -180,6 +213,8 @@ export function AgentResultCard({ result }: AgentResultCardProps) {
       return <VisionObservationCard result={result} />;
     case "experiment_recap":
       return <ExperimentRecapCard result={result} />;
+    case "document_diagnosis":
+      return <DocumentDiagnosisCard result={result} />;
     case "work_feedback":
       return <WorkFeedbackCard result={result} />;
     case "degraded":

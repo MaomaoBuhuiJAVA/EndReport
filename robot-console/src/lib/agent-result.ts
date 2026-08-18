@@ -41,6 +41,21 @@ export type ExperimentRecapResult = {
   safety: string[];
 };
 
+export type DocumentDiagnosisResult = {
+  kind: "document_diagnosis";
+  title: string;
+  age_fit: string[];
+  science_accuracy: string[];
+  material_safety: string[];
+  inquiry_opportunities: string[];
+  teacher_questions: string[];
+  evidence_gaps: string[];
+  reflection_basis: string[];
+  revision_text: string;
+  revised_outline: string;
+  delivery_markdown: string;
+};
+
 export type RecommendedResource = {
   resource_id: string;
   title: string;
@@ -84,7 +99,13 @@ export type AgentFailureResult = {
   retry_reason?: string;
 };
 
-export type AgentResult = VisionObservationResult | PoetryCoverResult | ExperimentRecapResult | WorkFeedbackResult | AgentFailureResult;
+export type AgentResult =
+  | VisionObservationResult
+  | PoetryCoverResult
+  | ExperimentRecapResult
+  | DocumentDiagnosisResult
+  | WorkFeedbackResult
+  | AgentFailureResult;
 
 export type AgentResultParseInput = {
   text?: unknown;
@@ -229,6 +250,43 @@ function parseExperimentRecap(value: Record<string, unknown>): ExperimentRecapRe
   };
 }
 
+function parseDocumentDiagnosis(value: Record<string, unknown>): DocumentDiagnosisResult | null {
+  const title = requiredString(value.title);
+  const ageFit = stringArray(value.age_fit);
+  const scienceAccuracy = stringArray(value.science_accuracy);
+  const materialSafety = stringArray(value.material_safety);
+  const inquiryOpportunities = stringArray(value.inquiry_opportunities);
+  const teacherQuestions = stringArray(value.teacher_questions);
+  const evidenceGaps = stringArray(value.evidence_gaps);
+  const reflectionBasis = stringArray(value.reflection_basis);
+  const revisionText = requiredString(value.revision_text);
+  const revisedOutline = requiredString(value.revised_outline);
+  const deliveryMarkdown = requiredString(value.delivery_markdown);
+
+  if (
+    !title || !ageFit || !scienceAccuracy || !materialSafety || !inquiryOpportunities ||
+    !teacherQuestions || !evidenceGaps || !reflectionBasis || !revisionText ||
+    !revisedOutline || !deliveryMarkdown
+  ) {
+    return null;
+  }
+
+  return {
+    kind: "document_diagnosis",
+    title,
+    age_fit: ageFit,
+    science_accuracy: scienceAccuracy,
+    material_safety: materialSafety,
+    inquiry_opportunities: inquiryOpportunities,
+    teacher_questions: teacherQuestions,
+    evidence_gaps: evidenceGaps,
+    reflection_basis: reflectionBasis,
+    revision_text: revisionText,
+    revised_outline: revisedOutline,
+    delivery_markdown: deliveryMarkdown,
+  };
+}
+
 function parseRecommendedResources(value: unknown): RecommendedResource[] | null {
   if (!Array.isArray(value)) return null;
   const resources: RecommendedResource[] = [];
@@ -328,6 +386,7 @@ function parseCandidate(value: unknown, input: AgentResultParseInput): AgentResu
   if (value.kind === "vision_observation") return parseVisionObservation(value);
   if (value.kind === "poetry_cover") return parsePoetryCover(value, input);
   if (value.kind === "experiment_recap") return parseExperimentRecap(value);
+  if (value.kind === "document_diagnosis") return parseDocumentDiagnosis(value);
   if (value.kind === "work_feedback") return parseWorkFeedback(value);
   if (value.kind === "degraded" || value.kind === "error") return parseFailureResult(value);
   return null;
