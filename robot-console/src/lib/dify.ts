@@ -49,7 +49,7 @@ type DifyChatResponse = {
 };
 
 const DEFAULT_DIFY_API_URL = "https://api.dify.ai/v1/chat-messages";
-const DIFY_REQUEST_TIMEOUT_MS = 60_000;
+const DIFY_REQUEST_TIMEOUT_MS = 120_000;
 
 function difyUploadUrl(apiUrl: string) {
   try {

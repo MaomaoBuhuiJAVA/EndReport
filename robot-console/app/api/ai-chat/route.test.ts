@@ -29,7 +29,7 @@ describe("POST /api/ai-chat", () => {
   });
 
   it("给通义图片生成保留足够的服务端执行时间", () => {
-    expect(maxDuration).toBeGreaterThanOrEqual(60);
+    expect(maxDuration).toBeGreaterThanOrEqual(120);
   });
 
   it("为每条非流式助手回复返回独立的 responseId", async () => {
