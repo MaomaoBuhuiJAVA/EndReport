@@ -192,6 +192,36 @@ describe("parseAgentResult", () => {
     });
   });
 
+  it("parses an experiment recap from Dify's plain JSON code fence", () => {
+    const result = parseAgentResult({
+      text: [
+        "本次复盘如下：",
+        "```",
+        JSON.stringify({
+          kind: "experiment_recap",
+          facts: ["第一次纸桥承重结果很低"],
+          goal_analysis: ["推测/待验证：幼儿尚未建立结构与承重的联系"],
+          issues: {
+            materials: ["纸张厚度不一致"],
+            steps: ["缺少预测环节"],
+            questions: ["需要增加比较性提问"],
+            organization: ["材料规格需要统一"],
+          },
+          improvements: ["统一纸张规格并先做预测"],
+          validation_points: ["记录不同结构的承重结果"],
+          safety: ["重物由教师控制投放"],
+        }),
+        "```",
+      ].join("\n"),
+    });
+
+    expect(result).toMatchObject({
+      kind: "experiment_recap",
+      facts: ["第一次纸桥承重结果很低"],
+      issues: { materials: ["纸张厚度不一致"] },
+    });
+  });
+
   it("parses work feedback and an optional inquiry task card", () => {
     const result = parseAgentResult({
       text: [

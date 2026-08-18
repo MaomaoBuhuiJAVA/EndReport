@@ -611,6 +611,11 @@ function fencedResultText(text: string): string | null {
   return match?.[1]?.trim() || null;
 }
 
+function plainJsonFenceText(text: string): string | null {
+  const match = text.match(/```(?:json)?\s*\n([\s\S]*?)\n```/iu);
+  return match?.[1]?.trim() || null;
+}
+
 function tongyiCoverContext(text: string, query: string) {
   return [text.trim(), query.trim()].filter(Boolean).join("\n");
 }
@@ -838,6 +843,17 @@ export function parseAgentResult(input: AgentResultParseInput): AgentResult | nu
       return parseCandidate(candidate, input) ?? invalidCandidateResult(candidate, input);
     } catch {
       return degradedResult("malformed_json", "结构化结果格式无效，请重新生成。", true);
+    }
+  }
+
+  const plainJsonText = plainJsonFenceText(text);
+  if (plainJsonText) {
+    try {
+      const candidate = JSON.parse(plainJsonText) as unknown;
+      const parsed = parseCandidate(candidate, input);
+      if (parsed) return parsed;
+    } catch {
+      // Ordinary Markdown/JSON fences are not structured agent results.
     }
   }
 
