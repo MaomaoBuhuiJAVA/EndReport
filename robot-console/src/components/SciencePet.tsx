@@ -30,6 +30,7 @@ import {
   type AiChatStreamEvent,
 } from "@/lib/ai-chat-stream";
 import type { AgentResult } from "@/lib/agent-result";
+import { assistantDisplayText } from "@/lib/assistant-display-text";
 import { createDifyWebUserId } from "@/lib/dify-session";
 import type { ScienceLabLink } from "@/lib/science-lab-links";
 import {
@@ -290,14 +291,6 @@ function toSpeechText(value: string) {
     .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
     .replace(/[`#>*_]/gu, " ")
     .replace(/\s+/gu, " ")
-    .trim();
-}
-
-function assistantDisplayText(message: PetMessage) {
-  if (message.agentResult?.kind !== "poetry_cover") return message.text;
-  return message.text
-    .replace(/!\[[^\]]*\]\([^)]*\)/gu, "")
-    .replace(/\n{3,}/gu, "\n\n")
     .trim();
 }
 
@@ -1641,7 +1634,7 @@ export function SciencePet() {
                     >
                       {message.role === "assistant" ? (
                         <div className="pet-message__markdown">
-                          <Markdown>{assistantDisplayText(message)}</Markdown>
+                          <Markdown>{assistantDisplayText(message.text, message.agentResult?.kind)}</Markdown>
                         </div>
                       ) : (
                         message.text

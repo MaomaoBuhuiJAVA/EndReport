@@ -33,7 +33,7 @@ describe("parseAiChatStream", () => {
     const response = new Response(
       'data: {"type":"meta","photos":[]}\n\n' +
         'data: {"type":"delta","delta":"先到"}\n\n' +
-        'data: {"type":"done","provider":"dify","reply":"先到后续","conversationId":"c-1"}\n\n',
+        'data: {"type":"done","provider":"dify","reply":"先到后续","conversationId":"c-1","responseId":"2b7aec24-b5d5-4e53-8d29-ddf98c8421a9"}\n\n',
       { headers: { "Content-Type": "text/event-stream" } },
     );
     const updates: AiChatStreamEvent[] = [];
@@ -42,6 +42,7 @@ describe("parseAiChatStream", () => {
       reply: "先到后续",
       provider: "dify",
       conversationId: "c-1",
+      responseId: "2b7aec24-b5d5-4e53-8d29-ddf98c8421a9",
       photos: [],
     });
     expect(updates.map((event) => event.type)).toEqual(["meta", "delta", "done"]);

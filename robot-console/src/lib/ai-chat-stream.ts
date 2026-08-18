@@ -14,6 +14,12 @@ export type AiChatAttachmentStatus = {
   message?: string;
 };
 
+const RESPONSE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isResponseId(value: unknown): value is string {
+  return typeof value === "string" && RESPONSE_ID_PATTERN.test(value);
+}
+
 function isAttachmentStatus(value: unknown): value is AiChatAttachmentStatus {
   if (!value || typeof value !== "object") return false;
   const candidate = value as { name?: unknown; status?: unknown; message?: unknown };
@@ -38,6 +44,7 @@ export type AiChatStreamEvent =
       type: "done";
       provider: "dify" | "fallback";
       reply: string;
+      responseId?: string;
       conversationId?: string;
       photos?: AiChatPhoto[];
       sources?: string[];
@@ -50,6 +57,7 @@ export type AiChatStreamEvent =
 export type AiChatResponse = {
   reply: string;
   provider?: "dify" | "fallback";
+  responseId?: string;
   conversationId?: string;
   photos?: AiChatPhoto[];
   sources?: string[];
@@ -99,11 +107,12 @@ function parseFrame(frame: string): AiChatStreamEvent | null {
     }
     if (type === "done" && typeof (value as { reply?: unknown }).reply === "string") {
       const payload = value as Record<string, unknown>;
-      const { attachment, agentResult, ...rest } = payload;
+      const { attachment, agentResult, responseId, ...rest } = payload;
       const result = parsedAgentResult(payload.reply, agentResult);
       return {
         ...rest,
         type: "done",
+        ...(isResponseId(responseId) ? { responseId } : {}),
         ...(isAttachmentStatus(attachment) ? { attachment } : {}),
         ...(result ? { agentResult: result } : {}),
       } as AiChatStreamEvent;
@@ -155,6 +164,7 @@ export async function readAiChatResponse(
       reply?: unknown;
       provider?: unknown;
       conversationId?: unknown;
+      responseId?: unknown;
       photos?: unknown;
       sources?: unknown;
       labLinks?: unknown;
@@ -165,6 +175,7 @@ export async function readAiChatResponse(
     return {
       reply: typeof payload.reply === "string" ? payload.reply : "",
       ...(payload.provider === "dify" || payload.provider === "fallback" ? { provider: payload.provider } : {}),
+      ...(isResponseId(payload.responseId) ? { responseId: payload.responseId } : {}),
       ...(typeof payload.conversationId === "string" && payload.conversationId ? { conversationId: payload.conversationId } : {}),
       ...(Array.isArray(payload.photos) ? { photos: payload.photos as AiChatPhoto[] } : {}),
       ...(Array.isArray(payload.sources) ? { sources: payload.sources.filter((source): source is string => typeof source === "string") } : {}),
@@ -193,6 +204,7 @@ export async function readAiChatResponse(
         ...result,
         reply: event.reply,
         provider: event.provider,
+        ...(event.responseId ? { responseId: event.responseId } : {}),
         ...(event.conversationId ? { conversationId: event.conversationId } : {}),
         ...(event.photos ? { photos: event.photos } : {}),
         ...(event.sources ? { sources: event.sources } : {}),

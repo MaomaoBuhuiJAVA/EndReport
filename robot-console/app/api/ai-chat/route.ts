@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import type { ConversationMessage } from "@/lib/types";
 import { generateDifyReply, openDifyStream, parseDifyStream, uploadDifyFile, type DifyFileReference } from "@/lib/dify";
 import { parseAgentResult, type AgentResult } from "@/lib/agent-result";
@@ -394,6 +395,7 @@ type ChatEnrichment = {
 };
 
 type ChatResult = {
+  responseId: string;
   reply: string;
   provider: "dify" | "fallback";
   conversationId?: string;
@@ -465,6 +467,7 @@ function buildChatResult(
       : modelReply;
 
   return {
+    responseId: randomUUID(),
     reply: reply ?? fallbackReply(enrichment.context, enrichment.sources, message, casualMessage),
     provider: reply && !usedLessonPlanFallback ? "dify" : "fallback",
     conversationId,
@@ -552,6 +555,7 @@ function streamChatResponse(
         );
         const done = {
           type: "done" as const,
+          responseId: result.responseId,
           provider: result.provider,
           reply: result.reply,
           ...(result.conversationId ? { conversationId: result.conversationId } : {}),

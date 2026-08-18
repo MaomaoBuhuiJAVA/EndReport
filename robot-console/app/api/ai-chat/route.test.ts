@@ -32,6 +32,22 @@ describe("POST /api/ai-chat", () => {
     expect(maxDuration).toBeGreaterThanOrEqual(60);
   });
 
+  it("为每条非流式助手回复返回独立的 responseId", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({ answer: "这是一次可评价的回复。" });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "给我一个小班科学活动建议" }),
+      }),
+    );
+
+    const payload = await response.json();
+    expect(payload.responseId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  });
+
   it("并行启动资料检索与 Dify 请求，避免两段等待时间相加", async () => {
     let searchStarted = false;
     let difyStarted = false;
@@ -125,6 +141,7 @@ describe("POST /api/ai-chat", () => {
         provider: "dify",
         reply: "可以试试空气动力小汽车。",
         conversationId: "conversation-stream-1",
+        responseId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
       },
     ]);
   });
