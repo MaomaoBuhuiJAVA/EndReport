@@ -329,6 +329,25 @@ describe("parseAgentResult", () => {
     });
   });
 
+  it("explains when the Tongyi plugin is blocked by an arrearage account state", () => {
+    const result = parseAgentResult({
+      text: [
+        "## 科学诗封面",
+        "已由通义 AIGC 生成封面图片：",
+        'API 响应状态码: 400 响应内容: {"code":"Arrearage","message":"Access denied, please make sure your account is in good standing."}',
+      ].join("\n"),
+      files: [],
+    });
+
+    expect(result).toEqual({
+      kind: "degraded",
+      code: "model_unavailable",
+      message: "通义 AIGC 当前账户状态受限，暂时无法生成封面图片。",
+      retry: true,
+      retry_reason: "请在 Dify 通义 AIGC 插件凭据对应的阿里云账户恢复服务后重试。",
+    });
+  });
+
   it("rejects an untrusted Tongyi Dify image file output", () => {
     const result = parseAgentResult({
       text: "## 科学诗封面\n已由通义 AIGC 生成封面图片：",

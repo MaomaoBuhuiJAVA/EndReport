@@ -374,6 +374,16 @@ function parseTongyiCoverMarkdown(text: string, input: AgentResultParseInput): A
 
 function parseTongyiCoverDegraded(text: string): AgentFailureResult | null {
   if (!/(?:科学诗封面|通义\s*AIGC)/iu.test(text)) return null;
+
+  if (/(?:\bArrearage\b|账户欠费|状态受限|account is in good standing)/iu.test(text)) {
+    return degradedResult(
+      "model_unavailable",
+      "通义 AIGC 当前账户状态受限，暂时无法生成封面图片。",
+      true,
+      "请在 Dify 通义 AIGC 插件凭据对应的阿里云账户恢复服务后重试。",
+    );
+  }
+
   return degradedResult(
     "generation_failed",
     "通义 AIGC 已执行，但没有返回可用的封面图片，请重试。",

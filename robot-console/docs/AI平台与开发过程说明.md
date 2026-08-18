@@ -7,7 +7,7 @@
 平台由以下技术组成：
 
 - **Dify Chatflow**：用于定义智能体角色、回答边界、知识库检索、分支路由和对话流程。网页服务端通过 Dify `POST /v1/chat-messages` 调用已发布的智能体，Dify 内部使用的模型由 Chatflow 配置管理。
-- **通义 AIGC 插件**：图片分支使用 Dify 工具节点 `Qwen-文生图`（`qwen-image-2.0-pro`）生成科学诗封面和教学配图，文件由“通义 AIGC 科学诗封面交付”节点传回；文字对话和资料检索仍由 Chatflow 的对话模型负责。
+- **通义 AIGC 插件**：使用 Dify Marketplace 插件 `sawyer-shi/tongyi_aigc`（v0.0.4）。图片分支使用其中的 `Qwen-文生图` 工具（`qwen-image-2.0-pro`）生成科学诗封面和教学配图，文件由“通义 AIGC 科学诗封面交付”节点传回；插件还提供图生图、图片翻译和视频生成工具。文字对话和资料检索仍由 Chatflow 的对话模型负责。该插件的“图生图/图片翻译”不等同于通用视觉问答；需要识别实验照片时，必须另接支持视觉输入的模型，并在未接入时明确提示无法直接识图。
 - **服务端适配器**：在 Next.js Route Handler 中保存 Dify API 密钥，向 Dify 发送 `inputs`、`query`、`response_mode`、`user` 和可选 `conversation_id`，只把 `answer` 和会话编号返回浏览器。
 - **Next.js + TypeScript**：用于实现官网页面、实验室资源中心、对话界面和服务端接口，前后端在同一项目中部署。
 - **Prisma + PostgreSQL**：存储园所资料、知识分块、科学资源、照片、功能室及用户数据。
@@ -78,7 +78,7 @@
 复现步骤如下：
 
 1. 在数据库中导入园所资料和科学资源，并为资料生成知识检索分块。
-2. 在 Dify 中发布 Chatflow，安装并配置通义 AIGC 工具节点（模型选择 `qwen-image-2.0-pro`），并在网页服务端配置 `DIFY_API_KEY`；如使用自建 Dify，再配置 `DIFY_API_URL`。
+2. 在 Dify 中发布 Chatflow，安装并配置 Marketplace 中的 `sawyer-shi/tongyi_aigc` v0.0.4 工具节点（`Qwen-文生图` 模型选择 `qwen-image-2.0-pro`），并在网页服务端配置 `DIFY_API_KEY`；如使用自建 Dify，再配置 `DIFY_API_URL`。
 3. 复制本说明中的角色提示词，配置 Dify 的系统提示词和知识库检索节点。
 4. 启动项目后访问网页，在智能体对话框中输入园所、科学实验或功能室相关问题。
 5. 分别测试普通问答和“生成《风的旅行》科学诗封面，3:4 竖版，无文字”；检查资料来源、详情入口和 `agentResult`。若通义节点返回空文件，确认页面展示可重试提示；断开模型服务后，确认资料库回退回答仍可用。
