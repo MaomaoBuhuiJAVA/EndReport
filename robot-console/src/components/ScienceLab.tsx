@@ -168,6 +168,10 @@ function scienceStoryCoverPath(item: ScienceKnowledgeSummary) {
   return item.category === "科学故事" ? `/science-story-covers/${item.id}.webp` : "";
 }
 
+function sciencePoemCoverPath(item: ScienceKnowledgeSummary) {
+  return item.category === "科学诗" ? `/science-poem-covers/${item.id}.webp` : "";
+}
+
 function isDirectVideoUrl(value: string) {
   try {
     const url = new URL(value);
@@ -189,15 +193,20 @@ function KnowledgeCard({
   const thumbnail = publicImages(item)[0];
   const isLiterature = item.category === "科学诗" || item.category === "科学故事";
   const isStory = item.category === "科学故事";
+  const isPoem = item.category === "科学诗";
   const [storyCoverFailed, setStoryCoverFailed] = useState(false);
+  const [poemCoverFailed, setPoemCoverFailed] = useState(false);
   const categoryVisual =
     categoryVisuals[item.category as keyof typeof categoryVisuals] ?? categoryVisuals.科学实验;
   const CategoryIcon = categoryVisual.icon;
   const mediaVariant = item.category === "科学诗" ? "poetry" : item.category === "科学故事" ? "story" : "experiment";
   const storyCover = scienceStoryCoverPath(item);
+  const poemCover = sciencePoemCoverPath(item);
   const literatureImage = isStory && storyCover
     ? storyCoverFailed ? categoryVisual.image : storyCover
-    : categoryVisual.image;
+    : isPoem && poemCover
+      ? poemCoverFailed ? categoryVisual.image : poemCover
+      : categoryVisual.image;
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const agentActionsRef = useRef<HTMLDivElement>(null);
 
@@ -244,7 +253,7 @@ function KnowledgeCard({
               fill
               sizes="(min-width: 720px) 30vw, 46vw"
               className="knowledge-card__literature-art"
-              onError={isStory ? () => setStoryCoverFailed(true) : undefined}
+              onError={isStory ? () => setStoryCoverFailed(true) : isPoem ? () => setPoemCoverFailed(true) : undefined}
               aria-hidden="true"
             />
             <span className="knowledge-card__literature-shade" aria-hidden="true" />

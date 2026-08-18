@@ -19,7 +19,7 @@
     "export:dify": "node scripts/export-dify-teaching-knowledge.mjs",
     "attach:science-step-images": "node scripts/attach-local-experiment-step-images.mjs",
     "attach:science-videos": "node scripts/attach-experiment-video-resources.mjs",
-    "test:science": "node --no-warnings --test src/lib/science-navigation.test.mjs scripts/science-source-layout.test.mjs scripts/attach-experiment-video-resources.test.mjs scripts/science-catalog.contract.test.mjs src/components/ScienceLab.hero.contract.test.mjs scripts/seed-science-on-build.test.mjs"
+    "test:science": "node --no-warnings --test src/lib/science-navigation.test.mjs scripts/science-source-layout.test.mjs scripts/attach-experiment-video-resources.test.mjs scripts/science-catalog.contract.test.mjs scripts/science-poem-covers.test.mjs src/components/ScienceLab.hero.contract.test.mjs scripts/seed-science-on-build.test.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
