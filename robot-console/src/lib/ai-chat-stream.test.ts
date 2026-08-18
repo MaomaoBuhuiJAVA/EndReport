@@ -58,6 +58,52 @@ describe("parseAiChatStream", () => {
     ).resolves.toEqual({ reply: "旧协议", provider: "fallback", sources: ["资料"] });
   });
 
+  it("preserves safe Dify document downloads from JSON responses", async () => {
+    const result = await readAiChatResponse(
+      new Response(JSON.stringify({
+          reply: "教案已生成。",
+          files: [
+            {
+              type: "document",
+              mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              name: "玩转纸片完整教案.docx",
+              url: "https://upload.dify.ai/files/paper-plan.docx",
+            },
+            {
+              type: "document",
+              name: "不应显示的文件.docx",
+              url: "https://untrusted.example/files/unsafe.docx",
+            },
+          ],
+        }), { headers: { "Content-Type": "application/json" } }),
+    );
+    expect(result.files).toEqual([
+      {
+        type: "document",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        name: "玩转纸片完整教案.docx",
+        url: "https://upload.dify.ai/files/paper-plan.docx",
+      },
+    ]);
+  });
+
+  it("preserves safe Dify document downloads from streaming done events", async () => {
+    const response = new Response(
+      'data: {"type":"done","provider":"dify","reply":"教案已生成。","files":[{"type":"document","mimeType":"application/vnd.openxmlformats-officedocument.wordprocessingml.document","name":"玩转纸片完整教案.docx","url":"https://upload.dify.ai/files/paper-plan.docx"},{"type":"document","name":"不应显示的文件.docx","url":"https://untrusted.example/files/unsafe.docx"}]}\n\n',
+      { headers: { "Content-Type": "text/event-stream" } },
+    );
+
+    const result = await readAiChatResponse(response);
+    expect(result.files).toEqual([
+      {
+        type: "document",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        name: "玩转纸片完整教案.docx",
+        url: "https://upload.dify.ai/files/paper-plan.docx",
+      },
+    ]);
+  });
+
   it("exposes a validated structured result embedded in a completed reply", async () => {
     const structuredResult = JSON.stringify({
       kind: "vision_observation",

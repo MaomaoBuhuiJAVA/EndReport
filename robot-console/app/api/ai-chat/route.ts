@@ -3,12 +3,20 @@ import { randomUUID } from "node:crypto";
 import type { ConversationMessage } from "@/lib/types";
 import { generateDifyReply, openDifyStream, parseDifyStream, uploadDifyFile, type DifyFileReference } from "@/lib/dify";
 import { parseAgentResult, type AgentResult } from "@/lib/agent-result";
+import {
+  mergeDifyOutputFileSources,
+  normalizeDifyOutputFiles,
+  sanitizeDifyOutputDocumentLinks,
+  type AiChatOutputFile,
+} from "@/lib/ai-chat-files";
+import { signAiChatOutputFiles } from "@/lib/ai-chat-download-server";
 import { buildScienceLabLinks } from "@/lib/science-lab-links";
 import { searchKnowledge, wantsPhotoResults } from "@/lib/search";
 
 // Image-generation branches can take longer than a normal text response.
 // Keep the function alive long enough for Tongyi/Qwen to return its file.
 export const maxDuration = 120;
+export const runtime = "nodejs";
 
 type SearchChunk = Awaited<ReturnType<typeof searchKnowledge>>["chunks"][number];
 
@@ -395,6 +403,7 @@ type ChatResult = {
   conversationId?: string;
   attachment?: AttachmentStatus;
   agentResult?: AgentResult;
+  files?: AiChatOutputFile[];
   photos: ChatEnrichment["photos"];
   sources: string[];
   labLinks: ChatEnrichment["labLinks"];
@@ -450,6 +459,7 @@ function buildChatResult(
   conversationId?: string,
   attachment?: AttachmentStatus,
   agentResult?: AgentResult,
+  files: AiChatOutputFile[] = [],
 ): ChatResult {
   const { requestedLessonPlan } = enrichment;
   const incompleteLessonPlan = requestedLessonPlan && modelReply && !hasCompleteLessonPlan(modelReply);
@@ -467,6 +477,7 @@ function buildChatResult(
     conversationId,
     ...(attachment ? { attachment } : {}),
     ...(agentResult ? { agentResult } : {}),
+    ...(files.length ? { files } : {}),
     photos: enrichment.photos,
     sources: enrichment.uniqueSources,
     labLinks: enrichment.labLinks,
@@ -491,6 +502,7 @@ function streamChatResponse(
   casualMessage: boolean,
   request: Request,
   difyApiUrl?: string,
+  difyApiKey?: string,
   attachment?: AttachmentStatus,
 ) {
   const body = new ReadableStream<Uint8Array>({
@@ -522,7 +534,8 @@ function streamChatResponse(
         let answer = "";
         let conversationId: string | undefined;
         let metadata: unknown;
-        let files: unknown;
+        const metadataSources: unknown[] = [];
+        const files: unknown[] = [];
         let streamError: string | undefined;
         for await (const event of parseDifyStream(difyStream.body)) {
           if (request.signal.aborted) return;
@@ -531,8 +544,13 @@ function streamChatResponse(
             controller.enqueue(eventFrame({ type: "delta", delta: event.answer }, encoder));
           }
           if (event.conversationId) conversationId = event.conversationId;
-          if (event.metadata !== undefined) metadata = event.metadata;
-          if (event.files !== undefined) files = event.files;
+          if (event.metadata !== undefined) {
+            metadata = event.metadata;
+            metadataSources.push(event.metadata);
+          }
+          if (event.files !== undefined) {
+            files.push(...(Array.isArray(event.files) ? event.files : [event.files]));
+          }
           if (event.error) {
             streamError = event.error;
             controller.enqueue(eventFrame({ type: "error", message: event.error }, encoder));
@@ -545,15 +563,30 @@ function streamChatResponse(
           return;
         }
 
-        const agentResult = parseDifyAgentResult(answer || null, message, metadata, files, request, difyApiUrl);
+        const outputFileSources = mergeDifyOutputFileSources(
+          { answer, files, metadata: metadataSources },
+          { sameOrigin: request.url, difyApiUrl },
+        );
+        const agentResult = parseDifyAgentResult(answer || null, message, metadata, outputFileSources, request, difyApiUrl);
+        const normalizedOutputFiles = normalizeDifyOutputFiles(outputFileSources, { sameOrigin: request.url, difyApiUrl });
+        const outputFiles = signAiChatOutputFiles(normalizedOutputFiles, {
+          apiKey: difyApiKey,
+          difyApiUrl,
+          requestUrl: request.url,
+        });
+        const safeAnswer = sanitizeDifyOutputDocumentLinks(answer, outputFileSources, {
+          sameOrigin: request.url,
+          difyApiUrl,
+        });
         const result = buildChatResult(
           enrichment,
           message,
           casualMessage,
-          answer || null,
+          safeAnswer || null,
           conversationId,
           attachment,
           agentResult,
+          outputFiles,
         );
         const done = {
           type: "done" as const,
@@ -563,6 +596,7 @@ function streamChatResponse(
           ...(result.conversationId ? { conversationId: result.conversationId } : {}),
           ...(result.attachment ? { attachment: result.attachment } : {}),
           ...(result.agentResult ? { agentResult: result.agentResult } : {}),
+          ...(result.files ? { files: result.files } : {}),
         };
         controller.enqueue(eventFrame(done, encoder));
         controller.close();
@@ -652,6 +686,7 @@ export async function POST(request: Request) {
         casualMessage,
         request,
         apiUrl,
+        apiKey,
         attachmentStatus,
       );
     }
@@ -659,17 +694,32 @@ export async function POST(request: Request) {
 
   const difyReplyPromise = generateDifyReply(difyArgs);
   const [search, difyReply] = await Promise.all([searchPromise, difyReplyPromise]);
+  const outputFileSources = mergeDifyOutputFileSources(
+    { answer: difyReply?.answer, files: difyReply?.files, metadata: difyReply?.metadata },
+    { sameOrigin: request.url, difyApiUrl: apiUrl },
+  );
   const agentResult = difyReply
-    ? parseDifyAgentResult(difyReply.answer, message, difyReply.metadata, difyReply.files, request, apiUrl)
+    ? parseDifyAgentResult(difyReply.answer, message, difyReply.metadata, outputFileSources, request, apiUrl)
     : undefined;
+  const normalizedOutputFiles = normalizeDifyOutputFiles(outputFileSources, { sameOrigin: request.url, difyApiUrl: apiUrl });
+  const outputFiles = signAiChatOutputFiles(normalizedOutputFiles, {
+    apiKey,
+    difyApiUrl: apiUrl,
+    requestUrl: request.url,
+  });
+  const safeReply = sanitizeDifyOutputDocumentLinks(difyReply?.answer ?? "", outputFileSources, {
+    sameOrigin: request.url,
+    difyApiUrl: apiUrl,
+  });
   const result = buildChatResult(
     buildChatEnrichment(search, message, casualMessage),
     message,
     casualMessage,
-    difyReply?.answer ?? null,
+    safeReply || null,
     difyReply?.conversationId,
     attachmentStatus,
     agentResult,
+    outputFiles,
   );
 
   return NextResponse.json(result);

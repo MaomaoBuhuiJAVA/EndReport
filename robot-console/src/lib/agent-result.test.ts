@@ -117,11 +117,39 @@ describe("parseAgentResult", () => {
     expect(result).toEqual({
       kind: "poetry_cover",
       cover_url: "https://qyfck.icu/generated/wind-trip.png",
+      title: "科学诗封面",
+      aspect_ratio: "3:4",
       alt_text: "一阵风带着蒲公英种子穿过蓝天和草地",
       theme_keywords: ["风", "蒲公英", "气流"],
       generation_prompt: "幼儿绘本卡通风格，无文字，3:4 竖版",
       model_name: "Nano Banana",
       retry: false,
+    });
+  });
+
+  it("preserves the structured Qwen cover title, author, and aspect ratio", () => {
+    const result = parseAgentResult({
+      metadata: {
+        agent_result: {
+          kind: "poetry_cover",
+          cover_url: "https://upload.dify.ai/files/wind-trip-square.png",
+          title: "风的旅行",
+          author: "林漪",
+          aspect_ratio: "1:1",
+          alt_text: "蒲公英种子在风中飞过草地的幼儿绘本画面",
+          theme_keywords: ["风", "蒲公英", "气流"],
+          generation_prompt: "幼儿绘本卡通风格，无文字",
+          model_name: "qwen-image-2.0-pro",
+          retry: false,
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      kind: "poetry_cover",
+      title: "风的旅行",
+      author: "林漪",
+      aspect_ratio: "1:1",
     });
   });
 
@@ -553,6 +581,68 @@ describe("parseAgentResult", () => {
     });
   });
 
+  it("uses Qwen file metadata for the cover presentation before query fallbacks", () => {
+    const result = parseAgentResult({
+      query: "请生成《雨后彩虹》科学诗封面",
+      text: "## 科学诗封面\n已由通义 AIGC 生成封面图片：",
+      files: [
+        {
+          type: "image",
+          remote_url: "https://upload.dify.ai/files/wind-trip-landscape.png",
+          metadata: {
+            title: "风的旅行",
+            author: "中班科学组",
+            width: 1920,
+            height: 1080,
+          },
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      kind: "poetry_cover",
+      title: "风的旅行",
+      author: "中班科学组",
+      aspect_ratio: "16:9",
+    });
+  });
+
+  it("enriches a structured cover result with metadata from its matching Qwen file", () => {
+    const result = parseAgentResult({
+      query: "请生成《雨后彩虹》科学诗封面",
+      metadata: {
+        agent_result: {
+          kind: "poetry_cover",
+          cover_url: "https://upload.dify.ai/files/wind-trip.png",
+          alt_text: "一阵风带着蒲公英种子飞过草地",
+          theme_keywords: ["风", "蒲公英"],
+          generation_prompt: "幼儿绘本卡通风格，无文字",
+          model_name: "qwen-image-2.0-pro",
+          retry: false,
+        },
+        files: [
+          {
+            type: "image",
+            remote_url: "https://upload.dify.ai/files/wind-trip.png",
+            metadata: {
+              title: "风的旅行",
+              author: "中班科学组",
+              width: 1728,
+              height: 2368,
+            },
+          },
+        ],
+      },
+    });
+
+    expect(result).toMatchObject({
+      kind: "poetry_cover",
+      title: "风的旅行",
+      author: "中班科学组",
+      aspect_ratio: "3:4",
+    });
+  });
+
   it("uses the original cover request when Dify returns an image file without answer text", () => {
     const result = parseAgentResult({
       query: "生成《风的旅行》科学诗封面",
@@ -568,8 +658,58 @@ describe("parseAgentResult", () => {
     expect(result).toMatchObject({
       kind: "poetry_cover",
       cover_url: "https://upload.dify.ai/files/wind-trip.png",
+      title: "风的旅行",
+      aspect_ratio: "3:4",
       theme_keywords: ["科学诗", "风的旅行", "幼儿绘本"],
     });
+  });
+
+  it("uses an explicitly labelled author from the Qwen cover request when the image file has no metadata", () => {
+    const result = parseAgentResult({
+      query: "请为《风的旅行》生成科学诗封面，作者：林漪，3:4竖版",
+      files: [{
+        type: "image",
+        remote_url: "https://upload.dify.ai/files/wind-trip-no-metadata.png",
+      }],
+    });
+
+    expect(result).toMatchObject({
+      kind: "poetry_cover",
+      title: "风的旅行",
+      author: "林漪",
+    });
+  });
+
+  it("prefers a Qwen file metadata author over an explicitly labelled query author", () => {
+    const result = parseAgentResult({
+      query: "请为《风的旅行》生成科学诗封面，作者为林漪，3:4竖版",
+      files: [{
+        type: "image",
+        remote_url: "https://upload.dify.ai/files/wind-trip-with-metadata.png",
+        metadata: { author: "中班科学组" },
+      }],
+    });
+
+    expect(result).toMatchObject({
+      kind: "poetry_cover",
+      author: "中班科学组",
+    });
+  });
+
+  it("does not infer an author for a Qwen cover request without an explicit author label", () => {
+    const result = parseAgentResult({
+      query: "请为《风的旅行》生成科学诗封面，3:4竖版",
+      files: [{
+        type: "image",
+        remote_url: "https://upload.dify.ai/files/wind-trip-no-author.png",
+      }],
+    });
+
+    expect(result).toMatchObject({
+      kind: "poetry_cover",
+      title: "风的旅行",
+    });
+    expect(result).not.toHaveProperty("author");
   });
 
   it("returns a retryable result when Tongyi finishes without an image file", () => {

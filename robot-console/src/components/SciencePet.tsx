@@ -8,6 +8,7 @@ import {
   Check,
   Copy,
   ChevronUp,
+  Download,
   FileText,
   Keyboard,
   Mic,
@@ -32,6 +33,8 @@ import {
   type AiChatAttachmentStatus,
   type AiChatStreamEvent,
 } from "@/lib/ai-chat-stream";
+import { buildAiChatDocumentDownloadUrl } from "@/lib/ai-chat-download";
+import type { AiChatOutputFile } from "@/lib/ai-chat-files";
 import type { AgentResult } from "@/lib/agent-result";
 import { assistantDisplayText } from "@/lib/assistant-display-text";
 import { createDifyWebUserId } from "@/lib/dify-session";
@@ -75,6 +78,7 @@ type PetMessage = {
   labLinks?: ScienceLabLink[];
   attachment?: AiChatAttachmentStatus;
   agentResult?: AgentResult;
+  files?: AiChatOutputFile[];
   feedbackRating?: FeedbackRating;
   feedbackStatus?: "saving" | "recorded" | "error";
 };
@@ -110,6 +114,7 @@ type AssistantReply = {
   labLinks?: ScienceLabLink[];
   attachment?: AiChatAttachmentStatus;
   agentResult?: AgentResult;
+  files?: AiChatOutputFile[];
 };
 
 type SpeechRecognitionResultLike = {
@@ -814,6 +819,7 @@ export function SciencePet() {
       labLinks: data.labLinks,
       attachment: data.attachment,
       agentResult: data.agentResult,
+      files: data.files,
     };
   }
 
@@ -833,6 +839,7 @@ export function SciencePet() {
         labLinks: event.labLinks,
         attachment: event.attachment ?? message.attachment,
         agentResult: event.agentResult ?? message.agentResult,
+        files: event.files ?? message.files,
       }));
     } else if (event.type === "delta") {
       updatePetMessage(messageId, (message) => ({ ...message, text: `${message.text}${event.delta}` }));
@@ -846,6 +853,7 @@ export function SciencePet() {
         labLinks: event.labLinks,
         attachment: event.attachment ?? message.attachment,
         agentResult: event.agentResult ?? message.agentResult,
+        files: event.files ?? message.files,
       }));
       onText?.(event.reply, "complete");
     }
@@ -1029,6 +1037,7 @@ export function SciencePet() {
         labLinks: reply.labLinks,
         attachment: reply.attachment,
         agentResult: reply.agentResult,
+        files: reply.files,
       }));
 
       const current = callSessionRef.current;
@@ -1351,6 +1360,7 @@ export function SciencePet() {
         labLinks: reply.labLinks,
         attachment: reply.attachment,
         agentResult: reply.agentResult,
+        files: reply.files,
       }));
       requestSucceeded = true;
     } catch (error) {
@@ -1739,6 +1749,32 @@ export function SciencePet() {
                       )}
                       {message.role === "assistant" && message.agentResult ? (
                         <AgentResultCard result={message.agentResult} />
+                      ) : null}
+                      {message.files?.length ? (
+                        <div className="pet-message__output-files" aria-label="生成文件">
+                          {message.files.map((file) => {
+                            const downloadUrl = buildAiChatDocumentDownloadUrl(file);
+                            if (!downloadUrl) return null;
+
+                            return (
+                              <a
+                                className="pet-message__output-file"
+                                download
+                                href={downloadUrl}
+                                key={file.url}
+                                aria-label={`下载文件 ${file.name}`}
+                                title={`下载 ${file.name}`}
+                              >
+                                <FileText aria-hidden="true" size={15} />
+                                <span className="pet-message__output-file-name">{file.name}</span>
+                                <span className="pet-message__output-file-action">
+                                  <Download aria-hidden="true" size={13} />
+                                  下载
+                                </span>
+                              </a>
+                            );
+                          })}
+                        </div>
                       ) : null}
                       {message.photos?.length ? (
                         <div className="pet-message__photos">
