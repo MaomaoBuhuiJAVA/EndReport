@@ -63,6 +63,20 @@ test("keeps generated lesson plans readable inside the chat bubble", () => {
   assert.match(styles, /\.pet-message__markdown\s+ul,[\s\S]*?padding-left:\s*18px/);
 });
 
+test("renders trusted Dify output files as explicit download controls", () => {
+  assert.match(component, /files\?: AiChatOutputFile\[\];/);
+  assert.match(component, /import \{ buildAiChatDocumentDownloadUrl \} from "@\/lib\/ai-chat-download";/);
+  assert.match(component, /message\.files\?\.length/);
+  assert.match(component, /className="pet-message__output-files"/);
+  assert.match(component, /className="pet-message__output-file"/);
+  assert.match(component, /const downloadUrl = buildAiChatDocumentDownloadUrl\(file\);/);
+  assert.match(component, /href=\{downloadUrl\}/);
+  assert.doesNotMatch(component, /href=\{file\.url\}/);
+  assert.match(component, /download/);
+  assert.match(component, /aria-label=\{`下载文件 \$\{file\.name\}`\}/);
+  assert.match(styles, /\.pet-message__output-file\s*\{/);
+});
+
 test("rejects oversized attachments before creating a local preview", () => {
   assert.match(component, /const MAX_ATTACHMENT_BYTES = 4 \* 1024 \* 1024;/);
   assert.match(

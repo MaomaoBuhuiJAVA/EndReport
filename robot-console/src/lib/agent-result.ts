@@ -30,9 +30,15 @@ export type VisionObservationResult = {
   privacy_risk: boolean | VisionPrivacyRisk;
 };
 
+export const POETRY_COVER_ASPECT_RATIOS = ["3:4", "1:1", "16:9"] as const;
+export type PoetryCoverAspectRatio = (typeof POETRY_COVER_ASPECT_RATIOS)[number];
+
 export type PoetryCoverResult = {
   kind: "poetry_cover";
   cover_url: string;
+  title: string;
+  author?: string;
+  aspect_ratio: PoetryCoverAspectRatio;
   alt_text: string;
   theme_keywords: string[];
   generation_prompt: string;
@@ -249,6 +255,104 @@ function requiredString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function coverMetadataRecords(value: Record<string, unknown>): Record<string, unknown>[] {
+  const records = [value];
+  for (const key of ["metadata", "source_metadata", "sourceMetadata", "image_metadata", "imageMetadata", "properties"]) {
+    const nested = value[key];
+    if (isRecord(nested)) records.push(nested);
+  }
+  return records;
+}
+
+function firstCoverMetadataString(records: Record<string, unknown>[], keys: string[]): string | null {
+  for (const record of records) {
+    for (const key of keys) {
+      const value = requiredString(record[key]);
+      if (value) return value;
+    }
+  }
+  return null;
+}
+
+function coverTitleFromText(text: string): string | null {
+  return text.match(/[《〈「“]\s*([^》〉」”]+?)\s*[》〉」”]/u)?.[1]?.trim() || null;
+}
+
+function coverAuthorFromUserQuery(value: unknown): string | null {
+  const query = requiredString(value);
+  if (!query) return null;
+
+  return query.match(/(?:^|[\s,，;；。])作者\s*(?:[:：]|为)\s*([^\s,，;；。！？!?()（）《》〈〉「」“”]+)/u)?.[1]?.trim() || null;
+}
+
+function coverDimension(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = Number(value.trim());
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function ratioForDimensions(width: number, height: number): PoetryCoverAspectRatio | null {
+  const ratio = width / height;
+  const supported = [
+    ["3:4", 3 / 4],
+    ["1:1", 1],
+    ["16:9", 16 / 9],
+  ] as const;
+  const nearest = supported.reduce((current, candidate) =>
+    Math.abs(ratio - candidate[1]) < Math.abs(ratio - current[1]) ? candidate : current,
+  );
+  return Math.abs(ratio - nearest[1]) <= 0.06 ? nearest[0] : null;
+}
+
+function coverAspectRatio(records: Record<string, unknown>[]): PoetryCoverAspectRatio {
+  for (const raw of records.flatMap((record) => [record.aspect_ratio, record.aspectRatio, record.image_aspect_ratio, record.imageAspectRatio])) {
+    const normalized = requiredString(raw)?.replace(/[\s×xX*/：]/gu, ":");
+    if (normalized === "3:4" || normalized === "1:1" || normalized === "16:9") return normalized;
+  }
+
+  for (const record of records) {
+    const width = coverDimension(record.width ?? record.image_width ?? record.imageWidth);
+    const height = coverDimension(record.height ?? record.image_height ?? record.imageHeight);
+    if (width && height) {
+      const ratio = ratioForDimensions(width, height);
+      if (ratio) return ratio;
+    }
+
+    const size = requiredString(record.size ?? record.image_size ?? record.imageSize);
+    const dimensions = size?.match(/(\d+(?:\.\d+)?)\s*[×xX*]\s*(\d+(?:\.\d+)?)/u);
+    if (dimensions) {
+      const ratio = ratioForDimensions(Number(dimensions[1]), Number(dimensions[2]));
+      if (ratio) return ratio;
+    }
+  }
+
+  return "3:4";
+}
+
+function coverPresentation(
+  value: Record<string, unknown>,
+  input: AgentResultParseInput,
+  fallbackText = "",
+  supplementalValues: Record<string, unknown>[] = [],
+): Pick<PoetryCoverResult, "title" | "author" | "aspect_ratio"> {
+  const records = [
+    ...coverMetadataRecords(value),
+    ...supplementalValues.flatMap(coverMetadataRecords),
+  ];
+  const title = firstCoverMetadataString(records, ["title", "cover_title", "coverTitle", "poem_title", "poemTitle"])
+    ?? coverTitleFromText([fallbackText, typeof input.text === "string" ? input.text : "", typeof input.query === "string" ? input.query : ""].join("\n"))
+    ?? "科学诗封面";
+  const author = firstCoverMetadataString(records, ["author", "poem_author", "poemAuthor", "creator"])
+    ?? coverAuthorFromUserQuery(input.query);
+
+  return {
+    title,
+    ...(author ? { author } : {}),
+    aspect_ratio: coverAspectRatio(records),
+  };
+}
+
 function parseBoolean(value: unknown): boolean | null {
   if (typeof value === "boolean") return value;
   if (typeof value !== "string") return null;
@@ -300,6 +404,14 @@ function safeResultUrl(value: unknown, { sameOrigin, difyApiUrl }: AgentResultPa
 
 function parsePoetryCover(value: Record<string, unknown>, input: AgentResultParseInput): PoetryCoverResult | null {
   const coverUrl = safeResultUrl(value.cover_url, input);
+  const matchingFile = coverUrl
+    ? matchingCoverFile(
+      input.files ?? metadataFilesCandidate(input.metadata) ?? value.files,
+      input,
+      coverUrl,
+    )
+    : null;
+  const presentation = coverPresentation(value, input, "", matchingFile ? [matchingFile] : []);
   const altText = requiredString(value.alt_text);
   const themeKeywords = stringArray(value.theme_keywords);
   const generationPrompt = requiredString(value.generation_prompt);
@@ -312,6 +424,7 @@ function parsePoetryCover(value: Record<string, unknown>, input: AgentResultPars
   return {
     kind: "poetry_cover",
     cover_url: coverUrl,
+    ...presentation,
     alt_text: altText,
     theme_keywords: themeKeywords,
     generation_prompt: generationPrompt,
@@ -519,11 +632,13 @@ function parseTongyiCoverMarkdown(text: string, input: AgentResultParseInput): A
   }
 
   const altText = image[1]?.trim() || "通义 AIGC 生成的科学诗封面";
-  const title = text.match(/[《〈「“"]\s*([^》〉」”"]+?)\s*[》〉」”"]/u)?.[1]?.trim();
+  const title = coverTitleFromText(text);
+  const presentation = coverPresentation({}, input, text);
 
   return {
     kind: "poetry_cover",
     cover_url: coverUrl,
+    ...presentation,
     alt_text: altText,
     theme_keywords: title ? ["科学诗", title, "幼儿绘本"] : ["科学诗", "幼儿绘本", "封面"],
     generation_prompt: "通义 AIGC 根据用户请求生成的幼儿绘本风格科学诗封面",
@@ -576,6 +691,20 @@ function fileName(value: Record<string, unknown>): string | null {
   return null;
 }
 
+function matchingCoverFile(
+  files: unknown,
+  input: AgentResultParseInput,
+  coverUrl: string,
+): Record<string, unknown> | null {
+  for (const candidate of fileCandidates(files)) {
+    if (!isRecord(candidate)) continue;
+    const rawUrl = fileUrl(candidate);
+    if (!rawUrl || !isImageFile(candidate, rawUrl)) continue;
+    if (safeResultUrl(rawUrl, input) === coverUrl) return candidate;
+  }
+  return null;
+}
+
 function isImageFile(value: Record<string, unknown>, rawUrl: string) {
   const type = requiredString(value.type)?.toLowerCase() ?? "";
   const mimeType = requiredString(value.mime_type)?.toLowerCase() ?? "";
@@ -599,10 +728,12 @@ function parseTongyiCoverFiles(files: unknown, input: AgentResultParseInput, tex
     }
 
     const altText = fileName(candidate) ?? "通义 AIGC 生成的科学诗封面";
-    const title = text.match(/[《〈「“"]\s*([^》〉」”"]+?)\s*[》〉」”"]/u)?.[1]?.trim();
+    const title = coverTitleFromText(text);
+    const presentation = coverPresentation(candidate, input, text);
     return {
       kind: "poetry_cover",
       cover_url: coverUrl,
+      ...presentation,
       alt_text: altText,
       theme_keywords: title ? ["科学诗", title, "幼儿绘本"] : ["科学诗", "幼儿绘本", "封面"],
       generation_prompt: "通义 AIGC 根据用户请求生成的幼儿绘本风格科学诗封面",

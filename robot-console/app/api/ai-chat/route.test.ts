@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/search", () => ({
   searchKnowledge: vi.fn(),
@@ -22,10 +22,19 @@ const chunk = (title: string, content: string) => ({
   document: { title },
   content,
 });
+const signedDownloadUrl = () => expect.stringMatching(/^\/api\/ai-chat\/download\?token=[A-Za-z0-9_.-]+$/u);
 
 describe("POST /api/ai-chat", () => {
+  const previousDifyApiKey = process.env.DIFY_API_KEY;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.DIFY_API_KEY = "route-test-dify-key";
+  });
+
+  afterEach(() => {
+    if (previousDifyApiKey === undefined) delete process.env.DIFY_API_KEY;
+    else process.env.DIFY_API_KEY = previousDifyApiKey;
   });
 
   it("给通义图片生成保留足够的服务端执行时间", () => {
@@ -1062,6 +1071,169 @@ describe("POST /api/ai-chat", () => {
     });
   });
 
+  it("阻塞响应将受信任的 Dify 文档文件作为可下载输出返回", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: "《玩转纸片》完整教案已生成。",
+      files: [
+        {
+          type: "document",
+          mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          name: "玩转纸片完整教案.docx",
+          remote_url: "https://upload.dify.ai/files/paper-plan.docx",
+        },
+        {
+          type: "document",
+          mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          name: "不应显示的文件.docx",
+          remote_url: "https://untrusted.example/files/unsafe.docx",
+        },
+      ],
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+
+    const payload = await response.json();
+    expect(payload.files).toEqual([
+      {
+        type: "document",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        name: "玩转纸片完整教案.docx",
+        url: signedDownloadUrl(),
+      },
+    ]);
+  });
+
+  it("阻塞响应在 Dify 直接 files 为空时保留 metadata.files 中的教案", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: "《玩转纸片》完整教案已生成。",
+      files: [],
+      metadata: {
+        files: [{
+          type: "document",
+          name: "玩转纸片完整教案.docx",
+          remote_url: "https://upload.dify.ai/files/download?file_id=paper-plan&sign=abc",
+        }],
+      },
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      files: [{
+        type: "document",
+        name: "玩转纸片完整教案.docx",
+        url: signedDownloadUrl(),
+      }],
+    });
+  });
+
+  it("阻塞响应跳过格式冲突的直接文件并读取 wrapped metadata 中的同 URL 教案", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    const signedUrl = "https://upload.dify.ai/files/download?file_id=paper-plan&sign=abc";
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: "《玩转纸片》完整教案已生成。",
+      files: [{
+        type: "document",
+        mime_type: "application/pdf",
+        name: "玩转纸片完整教案.docx",
+        remote_url: signedUrl,
+      }],
+      metadata: {
+        outputs: [{
+          files: [{
+            type: "document",
+            name: "玩转纸片完整教案.docx",
+            remote_url: signedUrl,
+          }],
+        }],
+      },
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+
+    const payload = await response.json();
+    expect(payload.files).toEqual([
+      {
+        type: "document",
+        name: "玩转纸片完整教案.docx",
+        url: signedDownloadUrl(),
+      },
+    ]);
+  });
+
+  it("阻塞响应将受信任 Markdown DOCX 链接作为文件输出", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: [
+        "![科学诗封面](https://upload.dify.ai/files/cover.png)",
+        "已生成：[下载完整教案.docx](https://upload.dify.ai/files/download?file_id=paper-plan&sign=abc)",
+        "[外部文件.docx](https://untrusted.example/files/unsafe.docx)",
+      ].join("\n"),
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+
+    const payload = await response.json();
+    expect(payload.files).toEqual([
+      {
+        type: "document",
+        name: "下载完整教案.docx",
+        url: signedDownloadUrl(),
+      },
+    ]);
+  });
+
+  it("阻塞响应不会在聊天正文暴露已交付 DOCX 的 Dify 直链", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: "已生成：[课件教案.docx](https://upload.dify.ai/files/tools/paper-plan.docx?sign=abc)",
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成完整教案并导出 DOCX" }),
+      }),
+    );
+
+    const payload = await response.json();
+    expect(payload.reply).toBe("已生成：课件教案.docx");
+    expect(payload.reply).not.toContain("upload.dify.ai");
+    expect(payload.files).toEqual([
+      {
+        type: "document",
+        name: "课件教案.docx",
+        url: signedDownloadUrl(),
+      },
+    ]);
+  });
+
   it("流式响应在 done 事件中暴露经过校验的 Dify 结构化结果", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
     vi.mocked(wantsPhotoResults).mockReturnValue(false);
@@ -1153,6 +1325,105 @@ describe("POST /api/ai-chat", () => {
         cover_url: "https://upload.dify.ai/files/wind-trip.png",
       },
     });
+  });
+
+  it("流式响应将受信任的 Dify 文档文件作为可下载输出返回", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(openDifyStream).mockResolvedValue(
+      new Response(
+        [
+          `data: ${JSON.stringify({ event: "message", answer: "《玩转纸片》完整教案已生成。" })}`,
+          "",
+          `data: ${JSON.stringify({
+            event: "message_end",
+            files: [
+              {
+                type: "document",
+                mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                name: "玩转纸片完整教案.docx",
+                remote_url: "https://upload.dify.ai/files/paper-plan.docx",
+              },
+              {
+                type: "document",
+                name: "不应显示的文件.docx",
+                remote_url: "https://untrusted.example/files/unsafe.docx",
+              },
+            ],
+          })}`,
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+
+    expect(events.at(-1)).toMatchObject({ type: "done" });
+    expect(events.at(-1)?.files).toEqual([
+      {
+        type: "document",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        name: "玩转纸片完整教案.docx",
+        url: signedDownloadUrl(),
+      },
+    ]);
+  });
+
+  it("流式响应在 Dify 直接 files 为空时保留 metadata.files 中的教案", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(openDifyStream).mockResolvedValue(
+      new Response(
+        [
+          `data: ${JSON.stringify({ event: "message", answer: "《玩转纸片》完整教案已生成。" })}`,
+          "",
+          `data: ${JSON.stringify({
+            event: "message_end",
+            files: [],
+            metadata: {
+              files: [{
+                type: "document",
+                name: "玩转纸片完整教案.docx",
+                remote_url: "https://upload.dify.ai/files/download?file_id=paper-plan&sign=abc",
+              }],
+            },
+          })}`,
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+
+    expect(events.at(-1)?.files).toEqual([
+      {
+        type: "document",
+        name: "玩转纸片完整教案.docx",
+        url: signedDownloadUrl(),
+      },
+    ]);
   });
 
   it("拒绝超过大小限制的 multipart 附件", async () => {

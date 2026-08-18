@@ -85,14 +85,19 @@ function TagList({ tags }: { tags: string[] }) {
 }
 
 function PoetryCoverCard({ result }: { result: PoetryCoverResult }) {
+  const aspectRatioClass = `agent-result-card__cover--${result.aspect_ratio.replace(":", "-")}`;
   return (
     <article className="agent-result-card agent-result-card--poetry" aria-label="科学诗封面">
       <CardHeader icon={<Sparkles size={15} />} title="科学诗封面" meta={result.model_name} />
-      <a className="agent-result-card__cover" href={result.cover_url} target="_blank" rel="noreferrer">
+      <a className={`agent-result-card__cover ${aspectRatioClass}`} href={result.cover_url} target="_blank" rel="noreferrer">
         {/* The URL has already been restricted to the app or Dify origin by the parser. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={result.cover_url} alt={result.alt_text} loading="lazy" />
       </a>
+      <div className="agent-result-card__cover-copy">
+        <strong>{result.title}</strong>
+        {result.author ? <span>作者：{result.author}</span> : null}
+      </div>
       <p className="agent-result-card__caption">{result.alt_text}</p>
       <TagList tags={result.theme_keywords} />
       {result.retry ? (

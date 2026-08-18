@@ -1,5 +1,6 @@
 import type { ScienceLabLink } from "@/lib/science-lab-links";
 import { parseAgentResult, type AgentResult } from "@/lib/agent-result";
+import { normalizeDifyOutputFiles, type AiChatOutputFile } from "@/lib/ai-chat-files";
 
 export type AiChatPhoto = {
   id: string;
@@ -38,6 +39,7 @@ export type AiChatStreamEvent =
       labLinks?: ScienceLabLink[];
       attachment?: AiChatAttachmentStatus;
       agentResult?: AgentResult;
+      files?: AiChatOutputFile[];
     }
   | { type: "delta"; delta: string }
   | {
@@ -51,6 +53,7 @@ export type AiChatStreamEvent =
       labLinks?: ScienceLabLink[];
       attachment?: AiChatAttachmentStatus;
       agentResult?: AgentResult;
+      files?: AiChatOutputFile[];
     }
   | { type: "error"; message?: string };
 
@@ -64,6 +67,7 @@ export type AiChatResponse = {
   labLinks?: ScienceLabLink[];
   attachment?: AiChatAttachmentStatus;
   agentResult?: AgentResult;
+  files?: AiChatOutputFile[];
 };
 
 function currentSameOrigin() {
@@ -93,13 +97,15 @@ function parseFrame(frame: string): AiChatStreamEvent | null {
     const type = (value as { type?: unknown }).type;
     if (type === "meta") {
       const payload = value as Record<string, unknown>;
-      const { attachment, agentResult, ...rest } = payload;
+      const { attachment, agentResult, files, ...rest } = payload;
       const result = parsedAgentResult(undefined, agentResult);
+      const outputFiles = normalizeDifyOutputFiles(files, { sameOrigin: currentSameOrigin() });
       return {
         ...rest,
         type: "meta",
         ...(isAttachmentStatus(attachment) ? { attachment } : {}),
         ...(result ? { agentResult: result } : {}),
+        ...(outputFiles.length ? { files: outputFiles } : {}),
       } as AiChatStreamEvent;
     }
     if (type === "delta" && typeof (value as { delta?: unknown }).delta === "string") {
@@ -107,14 +113,16 @@ function parseFrame(frame: string): AiChatStreamEvent | null {
     }
     if (type === "done" && typeof (value as { reply?: unknown }).reply === "string") {
       const payload = value as Record<string, unknown>;
-      const { attachment, agentResult, responseId, ...rest } = payload;
+      const { attachment, agentResult, responseId, files, ...rest } = payload;
       const result = parsedAgentResult(payload.reply, agentResult);
+      const outputFiles = normalizeDifyOutputFiles(files, { sameOrigin: currentSameOrigin() });
       return {
         ...rest,
         type: "done",
         ...(isResponseId(responseId) ? { responseId } : {}),
         ...(isAttachmentStatus(attachment) ? { attachment } : {}),
         ...(result ? { agentResult: result } : {}),
+        ...(outputFiles.length ? { files: outputFiles } : {}),
       } as AiChatStreamEvent;
     }
     if (type === "error") return value as AiChatStreamEvent;
@@ -170,8 +178,10 @@ export async function readAiChatResponse(
       labLinks?: unknown;
       attachment?: unknown;
       agentResult?: unknown;
+      files?: unknown;
     };
     const agentResult = parsedAgentResult(payload.reply, payload.agentResult);
+    const outputFiles = normalizeDifyOutputFiles(payload.files, { sameOrigin: currentSameOrigin() });
     return {
       reply: typeof payload.reply === "string" ? payload.reply : "",
       ...(payload.provider === "dify" || payload.provider === "fallback" ? { provider: payload.provider } : {}),
@@ -182,6 +192,7 @@ export async function readAiChatResponse(
       ...(Array.isArray(payload.labLinks) ? { labLinks: payload.labLinks as ScienceLabLink[] } : {}),
       ...(isAttachmentStatus(payload.attachment) ? { attachment: payload.attachment } : {}),
       ...(agentResult ? { agentResult } : {}),
+      ...(outputFiles.length ? { files: outputFiles } : {}),
     };
   }
 
@@ -196,6 +207,7 @@ export async function readAiChatResponse(
         ...(event.labLinks ? { labLinks: event.labLinks } : {}),
         ...(event.attachment ? { attachment: event.attachment } : {}),
         ...(event.agentResult ? { agentResult: event.agentResult } : {}),
+        ...(event.files ? { files: event.files } : {}),
       };
     } else if (event.type === "delta") {
       result = { ...result, reply: `${result.reply}${event.delta}` };
@@ -211,6 +223,7 @@ export async function readAiChatResponse(
         ...(event.labLinks ? { labLinks: event.labLinks } : {}),
         ...(event.attachment ? { attachment: event.attachment } : {}),
         ...(event.agentResult ? { agentResult: event.agentResult } : {}),
+        ...(event.files ? { files: event.files } : {}),
       };
     }
   }
