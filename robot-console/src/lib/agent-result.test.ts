@@ -222,6 +222,35 @@ describe("parseAgentResult", () => {
     });
   });
 
+  it("parses an experiment recap from a json-labelled code fence", () => {
+    const result = parseAgentResult({
+      text: [
+        "复盘结果：",
+        "```json",
+        JSON.stringify({
+          kind: "experiment_recap",
+          facts: ["幼儿完成了两种纸桥搭建"],
+          goal_analysis: ["待验证：折叠结构可能提升承重"],
+          issues: {
+            materials: ["尚未统一纸张尺寸"],
+            steps: ["缺少结果记录步骤"],
+            questions: ["需要补充比较提问"],
+            organization: ["小组材料分发顺序待优化"],
+          },
+          improvements: ["统一材料后增加承重记录"],
+          validation_points: ["比较两种结构可承受的积木数量"],
+          safety: ["承重物由教师控制"],
+        }),
+        "```",
+      ].join("\n"),
+    });
+
+    expect(result).toMatchObject({
+      kind: "experiment_recap",
+      facts: ["幼儿完成了两种纸桥搭建"],
+    });
+  });
+
   it("parses work feedback and an optional inquiry task card", () => {
     const result = parseAgentResult({
       text: [
@@ -801,5 +830,49 @@ describe("parseAgentResult", () => {
         text: "这是一段普通说明。\n\n```json\n{\"kind\":\"poetry_cover\"}\n```",
       }),
     ).toBeNull();
+  });
+
+  it("does not infer document diagnosis from a generic complete JSON fence", () => {
+    expect(
+      parseAgentResult({
+        text: [
+          "普通资料：",
+          "```json",
+          JSON.stringify({
+            title: "普通资料",
+            age_fit: ["适合中班"],
+            science_accuracy: ["待教师核对"],
+            material_safety: ["按教师说明操作"],
+            inquiry_opportunities: ["可补充观察问题"],
+            teacher_questions: ["你看到了什么？"],
+            evidence_gaps: ["缺少课堂记录"],
+            reflection_basis: ["没有反思原文"],
+            revision_text: "待整理",
+            revised_outline: "待整理",
+            delivery_markdown: "待整理",
+          }),
+          "```",
+        ].join("\n"),
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps untrusted cover URLs on the explicit security fallback", () => {
+    const result = parseAgentResult({
+      text: [
+        "```json",
+        JSON.stringify({
+          kind: "poetry_cover",
+          cover_url: "https://untrusted.example/wind-trip.png",
+        }),
+        "```",
+      ].join("\n"),
+    });
+
+    expect(result).toMatchObject({
+      kind: "degraded",
+      code: "untrusted_url",
+      retry: true,
+    });
   });
 });

@@ -850,8 +850,15 @@ export function parseAgentResult(input: AgentResultParseInput): AgentResult | nu
   if (plainJsonText) {
     try {
       const candidate = JSON.parse(plainJsonText) as unknown;
-      const parsed = parseCandidate(candidate, input);
-      if (parsed) return parsed;
+      // Plain/json fences are accepted only when the model explicitly marks
+      // the payload as an agent result; otherwise ordinary document JSON must
+      // remain unclassified. Keep the cover URL safety fallback intact.
+      if (isRecord(candidate) && typeof candidate.kind === "string") {
+        const parsed = parseCandidate(candidate, input);
+        if (parsed) return parsed;
+        const invalid = invalidCandidateResult(candidate, input);
+        if (invalid.code === "untrusted_url") deferredFailure ??= invalid;
+      }
     } catch {
       // Ordinary Markdown/JSON fences are not structured agent results.
     }
