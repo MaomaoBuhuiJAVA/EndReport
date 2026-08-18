@@ -157,6 +157,62 @@ describe("parseAgentResult", () => {
     });
   });
 
+  it("parses a document diagnosis result with revision and export-ready content", () => {
+    const expected = {
+      kind: "document_diagnosis" as const,
+      title: "会跳舞的纸片",
+      age_fit: ["目标适合中班，但需要降低记录表文字量"],
+      science_accuracy: ["应补充空气流动与纸片运动的关系"],
+      material_safety: ["电风扇由教师固定并保持安全距离"],
+      inquiry_opportunities: ["增加幼儿预测、比较和验证的机会"],
+      teacher_questions: ["哪一张纸片移动得更远？你怎么知道？"],
+      evidence_gaps: ["缺少幼儿预测记录和活动后的观察证据"],
+      reflection_basis: ["当前反思只有结论，没有对应的课堂记录"],
+      revision_text: "将活动目标改为：幼儿能预测并比较不同纸片的移动距离。",
+      revised_outline: "一、目标\n二、材料与安全\n三、预测与探究\n四、记录与分享",
+      delivery_markdown: "# 会跳舞的纸片\n\n## 修订后教案\n请按预测、实验、记录、分享的顺序实施。",
+    };
+
+    const result = parseAgentResult({
+      text: [
+        "已完成教研材料诊断。",
+        "```agent-result",
+        JSON.stringify(expected),
+        "```",
+      ].join("\n"),
+    });
+
+    expect(result).toEqual(expected);
+  });
+
+  it("parses a document diagnosis result delivered through Dify metadata", () => {
+    const result = parseAgentResult({
+      metadata: {
+        agent_result: JSON.stringify({
+          kind: "document_diagnosis",
+          title: "纸桥承重活动记录",
+          age_fit: ["大班可保留比较记录，但需提供图示支架"],
+          science_accuracy: ["将纸的折叠方式与承重差异表述为可观察现象"],
+          material_safety: ["承重物使用轻质积木并由教师控制数量"],
+          inquiry_opportunities: ["先让幼儿预测，再比较不同折法"],
+          teacher_questions: ["哪一种纸桥承受的积木更多？"],
+          evidence_gaps: ["未记录每种折法的承重数量"],
+          reflection_basis: ["反思需对应预测和记录表中的证据"],
+          revision_text: "将提问改为先预测、后验证的开放式问题。",
+          revised_outline: "目标\n材料\n预测\n搭建\n比较\n分享",
+          delivery_markdown: "# 纸桥承重活动记录\n\n## 导出稿\n保留幼儿的比较记录。",
+        }),
+      },
+    });
+
+    expect(result).toMatchObject({
+      kind: "document_diagnosis",
+      title: "纸桥承重活动记录",
+      revision_text: "将提问改为先预测、后验证的开放式问题。",
+      delivery_markdown: "# 纸桥承重活动记录\n\n## 导出稿\n保留幼儿的比较记录。",
+    });
+  });
+
   it("parses an explicit degraded result from Dify metadata", () => {
     const result = parseAgentResult({
       metadata: {

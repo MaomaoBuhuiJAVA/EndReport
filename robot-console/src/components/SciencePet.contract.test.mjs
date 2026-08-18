@@ -63,6 +63,15 @@ test("keeps generated lesson plans readable inside the chat bubble", () => {
   assert.match(styles, /\.pet-message__markdown\s+ul,[\s\S]*?padding-left:\s*18px/);
 });
 
+test("rejects oversized attachments before creating a local preview", () => {
+  assert.match(component, /const MAX_ATTACHMENT_BYTES = 4 \* 1024 \* 1024;/);
+  assert.match(
+    component,
+    /if \(attachment\.size > MAX_ATTACHMENT_BYTES\) \{[\s\S]*?event\.currentTarget\.value = "";[\s\S]*?setAttachmentNotice\("附件不能超过 4MB，请压缩后重试。"\);[\s\S]*?return;/,
+  );
+  assert.match(component, /className="pet-chat__attachment-notice" role="alert"/);
+});
+
 test("adds assistant-only copy and Xunfei speech actions without changing user bubbles", () => {
   assert.match(component, /import \{[^}]*\bCopy\b[^}]*\bVolume2\b[^}]*\} from "lucide-react"/);
   assert.match(component, /function handleCopyMessage\(/);
@@ -151,6 +160,26 @@ test("uses the real floating pet sprite inside the merged call card", () => {
   assert.match(component, /className="science-pet__sprite pet-call__pet"/);
   assert.match(component, /style=\{spriteStyle\}/);
   assert.match(styles, /\.pet-call__pet\s*\{[\s\S]*?image-rendering:\s*auto/);
+});
+
+test("uses the supplied six-by-eight 科小贝 science sprite without a checkerboard backdrop", () => {
+  assert.match(component, /const spriteColumns = 6;/);
+  assert.match(component, /const spriteRows = 8;/);
+  assert.match(component, /idle:\s*\{ row: 0,/);
+  assert.match(component, /"running-right":\s*\{ row: 1,/);
+  assert.match(component, /"running-left":\s*\{ row: 2,/);
+  assert.match(component, /waiting:\s*\{ row: 4,/);
+  assert.match(component, /moving:\s*\{ row: 5,/);
+  assert.match(component, /working:\s*\{ row: 6,/);
+  assert.match(component, /visibleFrame \/ \(spriteColumns - 1\)/);
+  assert.match(component, /animation\.row \/ \(spriteRows - 1\)/);
+  assert.match(component, /aria-label="科小贝科学实验员"/);
+  assert.match(component, /title="拖动科小贝，点击开始对话"/);
+  assert.match(styles, /background-image:\s*url\("\/assets\/kexiaobei-lab-spritesheet-v2\.png"\)/);
+  assert.match(styles, /background-size:\s*600%\s+800%/);
+  assert.match(styles, /image-rendering:\s*auto/);
+  assert.doesNotMatch(styles, /seedy-spritesheet-v10\.webp/);
+  assert.ok(fs.existsSync(path.resolve("public/assets/kexiaobei-lab-spritesheet-v2.png")));
 });
 
 test("uses the scoped Uiverse ghost loader instead of the square typing dots", () => {
