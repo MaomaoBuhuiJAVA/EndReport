@@ -481,6 +481,9 @@ function parseFailureResult(value: Record<string, unknown>): AgentFailureResult 
 
 function parseCandidate(value: unknown, input: AgentResultParseInput): AgentResult | null {
   if (!isRecord(value)) return null;
+  // Dify structured-output responses can contain the complete document schema
+  // without echoing its discriminator. Accept only the full strict shape.
+  if (!("kind" in value)) return parseDocumentDiagnosis(value);
   if (value.kind === "vision_observation") return parseVisionObservation(value);
   if (value.kind === "poetry_cover") return parsePoetryCover(value, input);
   if (value.kind === "experiment_recap") return parseExperimentRecap(value);

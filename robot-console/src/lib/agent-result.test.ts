@@ -271,6 +271,35 @@ describe("parseAgentResult", () => {
     });
   });
 
+  it("infers document diagnosis when Dify omits the kind field", () => {
+    const result = parseAgentResult({
+      text: [
+        "已完成对上传文件的解析与整理：",
+        "```agent-result",
+        JSON.stringify({
+          title: "会跳舞的纸片——中班科学活动家长回顾",
+          age_fit: ["本次整理未展开年龄诊断，原记录标注为中班。"],
+          science_accuracy: ["空气流动会让纸片动起来的表述基本准确。"],
+          material_safety: ["扇子不对准同伴的脸和眼睛。"],
+          inquiry_opportunities: ["活动包含观察、操作、记录和分享。"],
+          teacher_questions: ["文件中未提供教师的具体提问语言。"],
+          evidence_gaps: ["文件中未提供幼儿的具体观察记录。"],
+          reflection_basis: ["文件中未提供教师课后反思。"],
+          revision_text: "亲爱的家长朋友：本周我们一起探索会跳舞的纸片。",
+          revised_outline: "一、活动信息\n二、活动过程\n三、安全提醒",
+          delivery_markdown: "# 会跳舞的纸片\n\n## 家长回顾\n空气流动让纸片动起来。",
+        }),
+        "```",
+      ].join("\n"),
+    });
+
+    expect(result).toMatchObject({
+      kind: "document_diagnosis",
+      title: "会跳舞的纸片——中班科学活动家长回顾",
+      delivery_markdown: "# 会跳舞的纸片\n\n## 家长回顾\n空气流动让纸片动起来。",
+    });
+  });
+
   it("parses an explicit degraded result from Dify metadata", () => {
     const result = parseAgentResult({
       metadata: {
