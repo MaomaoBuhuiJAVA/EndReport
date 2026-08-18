@@ -594,6 +594,7 @@ export function parseAgentResult(input: AgentResultParseInput): AgentResult | nu
     ? metadataResult
     : null;
   if (metadataResult && !metadataFailure) return metadataResult;
+  let deferredFailure: AgentFailureResult | null = metadataFailure;
 
   const text = typeof input.text === "string" ? input.text : "";
   const query = typeof input.query === "string" ? input.query : "";
@@ -613,7 +614,10 @@ export function parseAgentResult(input: AgentResultParseInput): AgentResult | nu
     input,
     coverContext,
   );
-  if (fileResult) return fileResult;
+  if (fileResult) {
+    if (fileResult.kind !== "degraded" && fileResult.kind !== "error") return fileResult;
+    deferredFailure ??= fileResult;
+  }
 
   const markdownResult = parseTongyiCoverMarkdown(text, input);
   if (markdownResult) return markdownResult;
@@ -621,5 +625,5 @@ export function parseAgentResult(input: AgentResultParseInput): AgentResult | nu
   // The Tongyi branch can finish successfully while returning an empty
   // `files` array. Keep that state visible and retryable instead of making it
   // look like a normal text-only answer.
-  return metadataFailure ?? parseTongyiCoverDegraded(coverContext);
+  return deferredFailure ?? parseTongyiCoverDegraded(coverContext);
 }
