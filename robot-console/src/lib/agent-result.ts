@@ -586,7 +586,14 @@ function parseMetadataCandidate(metadata: unknown, input: AgentResultParseInput)
 
 export function parseAgentResult(input: AgentResultParseInput): AgentResult | null {
   const metadataResult = parseMetadataCandidate(input.metadata, input);
-  if (metadataResult) return metadataResult;
+  // Dify can retain a stale structured cover result while the current
+  // response carries a fresh, trusted image file or Markdown URL. Keep
+  // metadata failures as a fallback so those concrete outputs can win.
+  const metadataFailure = metadataResult &&
+    (metadataResult.kind === "degraded" || metadataResult.kind === "error")
+    ? metadataResult
+    : null;
+  if (metadataResult && !metadataFailure) return metadataResult;
 
   const text = typeof input.text === "string" ? input.text : "";
   const query = typeof input.query === "string" ? input.query : "";
@@ -614,5 +621,5 @@ export function parseAgentResult(input: AgentResultParseInput): AgentResult | nu
   // The Tongyi branch can finish successfully while returning an empty
   // `files` array. Keep that state visible and retryable instead of making it
   // look like a normal text-only answer.
-  return parseTongyiCoverDegraded(coverContext);
+  return metadataFailure ?? parseTongyiCoverDegraded(coverContext);
 }
