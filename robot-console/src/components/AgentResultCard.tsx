@@ -17,6 +17,7 @@ import type {
   VisionObservationResult,
   WorkFeedbackResult,
 } from "@/lib/agent-result";
+import { scienceLabHrefForId } from "@/lib/science-lab-links";
 
 type AgentResultCardProps = {
   result?: AgentResult | null;
@@ -202,11 +203,18 @@ function WorkFeedbackCard({ result }: { result: WorkFeedbackResult }) {
         <section className="agent-result-card__section">
           <h4>配套资源</h4>
           <div className="agent-result-card__resources">
-            {result.recommended_resources.slice(0, 4).map((resource) => (
-              <Link key={resource.resource_id} href={`/lab?item=${encodeURIComponent(resource.resource_id)}`}>
-                {resource.title}
-              </Link>
-            ))}
+            {result.recommended_resources.slice(0, 4).map((resource) => {
+              const href = scienceLabHrefForId(resource.resource_id);
+              return href ? (
+                <Link key={resource.resource_id} href={href}>
+                  {resource.title}
+                </Link>
+              ) : (
+                <span key={resource.resource_id} className="agent-result-card__resource-unlinked" title="资源详情暂未匹配到实验室条目">
+                  {resource.title}
+                </span>
+              );
+            })}
           </div>
         </section>
       ) : null}

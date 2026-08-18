@@ -2049,7 +2049,7 @@ img {
   width: 104px;
   height: 112px;
   margin: 4px auto 0;
-  background-image: url("/assets/kexiaobei-lab-spritesheet-v2.png");
+  background-image: url("/assets/kexiaobei-lab-spritesheet-v3.png");
   background-repeat: no-repeat;
   background-position: var(--pet-x) var(--pet-y);
   background-size: 600% 800%;

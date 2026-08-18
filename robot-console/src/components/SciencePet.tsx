@@ -198,6 +198,28 @@ const creationDurations = ["15 分钟", "20 分钟", "30 分钟", "40 分钟"];
 const creationFormats = ["Word 文档", "PDF 文档", "课件提纲"];
 
 const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+const DIRECT_VIDEO_ATTACHMENT_NOTICE = "暂不支持直接上传视频，请先提取关键帧或整理文字记录后再上传。";
+const ATTACHMENT_TYPE_MISMATCH_NOTICE = "附件类型与文件扩展名不一致，请重新选择原始文件。";
+const UNSUPPORTED_ATTACHMENT_NOTICE = "暂不支持该附件格式，请上传图片、PDF、Word、PPT、Excel 或 TXT 文件。";
+const ATTACHMENT_MIME_BY_EXTENSION = new Map([
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".png", "image/png"],
+  [".gif", "image/gif"],
+  [".webp", "image/webp"],
+  [".bmp", "image/bmp"],
+  [".heic", "image/heic"],
+  [".heif", "image/heif"],
+  [".txt", "text/plain"],
+  [".pdf", "application/pdf"],
+  [".doc", "application/msword"],
+  [".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  [".ppt", "application/vnd.ms-powerpoint"],
+  [".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+  [".xls", "application/vnd.ms-excel"],
+  [".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+]);
+const VIDEO_ATTACHMENT_EXTENSIONS = new Set([".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"]);
 const petWidth = 116;
 const petHeight = 122;
 const viewportMargin = 6;
@@ -303,6 +325,25 @@ function toSpeechText(value: string) {
     .replace(/[`#>*_]/gu, " ")
     .replace(/\s+/gu, " ")
     .trim();
+}
+
+function attachmentExtension(name: string) {
+  const normalized = name.trim().toLowerCase();
+  const index = normalized.lastIndexOf(".");
+  return index >= 0 ? normalized.slice(index) : "";
+}
+
+function attachmentValidationMessage(attachment: File) {
+  const mimeType = attachment.type.trim().toLowerCase();
+  const extension = attachmentExtension(attachment.name);
+  if (mimeType.startsWith("video/") || VIDEO_ATTACHMENT_EXTENSIONS.has(extension)) {
+    return DIRECT_VIDEO_ATTACHMENT_NOTICE;
+  }
+
+  const expectedMimeType = ATTACHMENT_MIME_BY_EXTENSION.get(extension);
+  if (!expectedMimeType) return UNSUPPORTED_ATTACHMENT_NOTICE;
+  if (mimeType && mimeType !== expectedMimeType) return ATTACHMENT_TYPE_MISMATCH_NOTICE;
+  return null;
 }
 
 export function SciencePet() {
@@ -1234,6 +1275,13 @@ export function SciencePet() {
   function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>, mode: "file" | "photo" = "file") {
     const attachment = event.target.files?.[0];
     if (!attachment) return;
+
+    const attachmentError = attachmentValidationMessage(attachment);
+    if (attachmentError) {
+      event.currentTarget.value = "";
+      setAttachmentNotice(attachmentError);
+      return;
+    }
 
     if (attachment.size > MAX_ATTACHMENT_BYTES) {
       event.currentTarget.value = "";

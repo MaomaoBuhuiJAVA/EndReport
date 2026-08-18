@@ -72,6 +72,16 @@ test("rejects oversized attachments before creating a local preview", () => {
   assert.match(component, /className="pet-chat__attachment-notice" role="alert"/);
 });
 
+test("rejects direct video and MIME-extension conflicts before creating a local preview", () => {
+  assert.match(component, /const DIRECT_VIDEO_ATTACHMENT_NOTICE = "暂不支持直接上传视频，请先提取关键帧或整理文字记录后再上传。";/);
+  assert.match(component, /const ATTACHMENT_TYPE_MISMATCH_NOTICE = "附件类型与文件扩展名不一致，请重新选择原始文件。";/);
+  assert.match(component, /function attachmentValidationMessage\(attachment: File\)/);
+  assert.match(
+    component,
+    /const attachmentError = attachmentValidationMessage\(attachment\);[\s\S]*?if \(attachmentError\) \{[\s\S]*?event\.currentTarget\.value = "";[\s\S]*?setAttachmentNotice\(attachmentError\);[\s\S]*?return;/,
+  );
+});
+
 test("adds assistant-only copy and Xunfei speech actions without changing user bubbles", () => {
   assert.match(component, /import \{[^}]*\bCopy\b[^}]*\bVolume2\b[^}]*\} from "lucide-react"/);
   assert.match(component, /function handleCopyMessage\(/);
@@ -175,11 +185,11 @@ test("uses the supplied six-by-eight 科小贝 science sprite without a checkerb
   assert.match(component, /animation\.row \/ \(spriteRows - 1\)/);
   assert.match(component, /aria-label="科小贝科学实验员"/);
   assert.match(component, /title="拖动科小贝，点击开始对话"/);
-  assert.match(styles, /background-image:\s*url\("\/assets\/kexiaobei-lab-spritesheet-v2\.png"\)/);
+  assert.match(styles, /background-image:\s*url\("\/assets\/kexiaobei-lab-spritesheet-v3\.png"\)/);
   assert.match(styles, /background-size:\s*600%\s+800%/);
   assert.match(styles, /image-rendering:\s*auto/);
   assert.doesNotMatch(styles, /seedy-spritesheet-v10\.webp/);
-  assert.ok(fs.existsSync(path.resolve("public/assets/kexiaobei-lab-spritesheet-v2.png")));
+  assert.ok(fs.existsSync(path.resolve("public/assets/kexiaobei-lab-spritesheet-v3.png")));
 });
 
 test("uses the scoped Uiverse ghost loader instead of the square typing dots", () => {

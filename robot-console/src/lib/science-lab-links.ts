@@ -6,6 +6,25 @@ export type ScienceLabLink = {
   href: string;
 };
 
+// Structured agent results can contain Dify's internal document UUID instead
+// of a catalog item ID. Only the IDs emitted by the exported LAB records are
+// safe to turn into a `/lab?item=` route here.
+const PACKAGED_LAB_ID_PATTERN = /^(?:LAB:)?(?:EXP|STORY|POEM)-[a-f0-9]{12}$/i;
+
+export function scienceLabId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const candidate = value.trim();
+  if (!PACKAGED_LAB_ID_PATTERN.test(candidate)) return null;
+  const normalized = candidate.replace(/^LAB:/i, "");
+  const separator = normalized.indexOf("-");
+  return `${normalized.slice(0, separator).toUpperCase()}-${normalized.slice(separator + 1).toLowerCase()}`;
+}
+
+export function scienceLabHrefForId(value: unknown): string | null {
+  const id = scienceLabId(value);
+  return id ? `/lab?item=${encodeURIComponent(id)}` : null;
+}
+
 type SearchChunk = {
   id: string;
   documentId?: string | null;

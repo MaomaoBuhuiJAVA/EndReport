@@ -164,6 +164,38 @@ describe("POST /api/ai-chat", () => {
     await expect(response.json()).resolves.toMatchObject({ reply: "降级回复", provider: "dify" });
   });
 
+  it("Dify SSE 错误事件不会再被包装成正常 done 回复", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(openDifyStream).mockResolvedValue(
+      new Response(
+        [
+          'data: {"event":"error","message":"上游模型暂时不可用"}',
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: JSON.stringify({ message: "推荐一个小班科学实验" }),
+      }),
+    );
+
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+
+    expect(events).toEqual([
+      { type: "meta", photos: [], sources: [], labLinks: [] },
+      { type: "error", message: "上游模型暂时不可用" },
+    ]);
+  });
+
   it("多条资料命中仍调用 Dify 并返回资料来源", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({
       chunks: [chunk("园所简介", "省二级"), chunk("课程", "体验学习")],
@@ -1134,6 +1166,38 @@ describe("POST /api/ai-chat", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "附件不能超过 4MB" });
+    expect(uploadDifyFile).not.toHaveBeenCalled();
+  });
+
+  it("拒绝直接上传视频，并提示先提取关键帧或文字记录", async () => {
+    const formData = new FormData();
+    formData.set("message", "请分析这段实验视频");
+    formData.set("attachment", new File(["video"], "experiment.mp4", { type: "video/mp4" }));
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", { method: "POST", body: formData }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "暂不支持直接上传视频，请先提取关键帧或整理文字记录后再上传。",
+    });
+    expect(uploadDifyFile).not.toHaveBeenCalled();
+  });
+
+  it("拒绝 MIME 与图片扩展名不一致的附件", async () => {
+    const formData = new FormData();
+    formData.set("message", "请分析附件");
+    formData.set("attachment", new File(["not-an-image"], "experiment.png", { type: "application/pdf" }));
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", { method: "POST", body: formData }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "附件类型与文件扩展名不一致，请重新选择原始文件。",
+    });
     expect(uploadDifyFile).not.toHaveBeenCalled();
   });
 });

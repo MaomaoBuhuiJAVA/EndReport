@@ -15,41 +15,27 @@ type SearchChunk = Awaited<ReturnType<typeof searchKnowledge>>["chunks"][number]
 // Keep the file ceiling below Vercel's request-body limit so multipart overhead
 // cannot turn an otherwise valid upload into a platform-level 413 response.
 const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
-const SUPPORTED_ATTACHMENT_MIME_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-  "image/bmp",
-  "image/heic",
-  "image/heif",
-  "text/plain",
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+const ATTACHMENT_MIME_BY_EXTENSION = new Map([
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".png", "image/png"],
+  [".gif", "image/gif"],
+  [".webp", "image/webp"],
+  [".bmp", "image/bmp"],
+  [".heic", "image/heic"],
+  [".heif", "image/heif"],
+  [".txt", "text/plain"],
+  [".pdf", "application/pdf"],
+  [".doc", "application/msword"],
+  [".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  [".ppt", "application/vnd.ms-powerpoint"],
+  [".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+  [".xls", "application/vnd.ms-excel"],
+  [".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
 ]);
-const SUPPORTED_ATTACHMENT_EXTENSIONS = new Set([
-  ".jpg",
-  ".jpeg",
-  ".png",
-  ".gif",
-  ".webp",
-  ".bmp",
-  ".heic",
-  ".heif",
-  ".txt",
-  ".pdf",
-  ".doc",
-  ".docx",
-  ".ppt",
-  ".pptx",
-  ".xls",
-  ".xlsx",
-]);
+const VIDEO_ATTACHMENT_EXTENSIONS = new Set([".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"]);
+const DIRECT_VIDEO_ATTACHMENT_MESSAGE = "暂不支持直接上传视频，请先提取关键帧或整理文字记录后再上传。";
+const ATTACHMENT_TYPE_MISMATCH_MESSAGE = "附件类型与文件扩展名不一致，请重新选择原始文件。";
 
 type AttachmentStatus = {
   name: string;
@@ -91,13 +77,19 @@ function attachmentExtension(name: string) {
 
 function validateAttachment(file: File) {
   if (!file.name.trim()) return "附件文件名无效";
-  if (file.size <= 0) return "附件内容为空";
-  if (file.size > MAX_ATTACHMENT_BYTES) return "附件不能超过 4MB";
   const mimeType = file.type.trim().toLowerCase();
   const extension = attachmentExtension(file.name);
-  if (!SUPPORTED_ATTACHMENT_MIME_TYPES.has(mimeType) && !SUPPORTED_ATTACHMENT_EXTENSIONS.has(extension)) {
+  if (mimeType.startsWith("video/") || VIDEO_ATTACHMENT_EXTENSIONS.has(extension)) {
+    return DIRECT_VIDEO_ATTACHMENT_MESSAGE;
+  }
+  if (file.size <= 0) return "附件内容为空";
+  if (file.size > MAX_ATTACHMENT_BYTES) return "附件不能超过 4MB";
+
+  const expectedMimeType = ATTACHMENT_MIME_BY_EXTENSION.get(extension);
+  if (!expectedMimeType) {
     return "暂不支持该附件格式，请上传图片、PDF、Word、PPT、Excel 或 TXT 文件";
   }
+  if (mimeType && mimeType !== expectedMimeType) return ATTACHMENT_TYPE_MISMATCH_MESSAGE;
   return null;
 }
 
@@ -531,6 +523,7 @@ function streamChatResponse(
         let conversationId: string | undefined;
         let metadata: unknown;
         let files: unknown;
+        let streamError: string | undefined;
         for await (const event of parseDifyStream(difyStream.body)) {
           if (request.signal.aborted) return;
           if (event.answer) {
@@ -541,8 +534,15 @@ function streamChatResponse(
           if (event.metadata !== undefined) metadata = event.metadata;
           if (event.files !== undefined) files = event.files;
           if (event.error) {
+            streamError = event.error;
             controller.enqueue(eventFrame({ type: "error", message: event.error }, encoder));
+            break;
           }
+        }
+
+        if (streamError) {
+          controller.close();
+          return;
         }
 
         const agentResult = parseDifyAgentResult(answer || null, message, metadata, files, request, difyApiUrl);

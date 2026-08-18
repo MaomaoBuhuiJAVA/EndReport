@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildScienceLabLinks,
   findScienceSummaryFromSearch,
+  scienceLabHrefForId,
 } from "./science-lab-links";
 
 const summary = {
@@ -71,5 +72,17 @@ describe("science lab links", () => {
         },
       ]),
     ).toEqual([{ id: "story-17", title: "小水滴的旅行", href: "/lab?item=story-17" }]);
+  });
+
+  it("rejects Dify knowledge-document UUIDs instead of creating a dead lab route", () => {
+    expect(scienceLabHrefForId("cmj8f4q9x0001qz08k3d2v7na")).toBeNull();
+    expect(scienceLabHrefForId("8f367498-36ed-4115-808e-231f1d907e2f")).toBeNull();
+  });
+
+  it("accepts only the catalog LAB/EXP/STORY/POEM ID shape and normalizes LAB markers", () => {
+    expect(scienceLabHrefForId("EXP-05b2527c3c7a")).toBe("/lab?item=EXP-05b2527c3c7a");
+    expect(scienceLabHrefForId("LAB:STORY-d854d6a8e89f")).toBe("/lab?item=STORY-d854d6a8e89f");
+    expect(scienceLabHrefForId("lab:exp-05B2527C3C7A")).toBe("/lab?item=EXP-05b2527c3c7a");
+    expect(scienceLabHrefForId("RESOURCE-05b2527c3c7a")).toBeNull();
   });
 });

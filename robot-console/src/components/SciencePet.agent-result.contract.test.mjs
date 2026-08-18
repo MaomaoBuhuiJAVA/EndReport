@@ -6,6 +6,7 @@ import test from "node:test";
 const component = fs.readFileSync(path.resolve("src/components/SciencePet.tsx"), "utf8");
 const cardPath = path.resolve("src/components/AgentResultCard.tsx");
 const card = fs.existsSync(cardPath) ? fs.readFileSync(cardPath, "utf8") : "";
+const displayText = fs.readFileSync(path.resolve("src/lib/assistant-display-text.ts"), "utf8");
 const styles = fs.readFileSync(path.resolve("app/globals.css"), "utf8");
 
 test("renders a compact Chinese card for every structured result kind", () => {
@@ -32,8 +33,10 @@ test("keeps structured results attached to assistant messages and stream updates
 });
 
 test("does not render the same Tongyi cover image twice", () => {
-  assert.match(component, /agentResult\?\.kind\s*===\s*["']poetry_cover["']/);
-  assert.match(component, /!\\\[[^\\]]\*\\]\\([^)]\*\\)/);
+  assert.match(component, /import\s+\{\s*assistantDisplayText\s*\}\s+from\s+["']@\/lib\/assistant-display-text["']/);
+  assert.match(component, /assistantDisplayText\(message\.text, message\.agentResult\?\.kind\)/);
+  assert.match(displayText, /kind\s*===\s*["']poetry_cover["']/);
+  assert.match(displayText, /displayText\.replace\(markdownImage,\s*["']{2}\)/);
 });
 
 test("keeps result cards visually subordinate to the existing chat bubble", () => {
@@ -41,4 +44,9 @@ test("keeps result cards visually subordinate to the existing chat bubble", () =
   assert.match(styles, /\.agent-result-card__list\s*\{/);
   assert.match(styles, /\.agent-result-card__cover\s*\{/);
   assert.match(styles, /\.agent-result-card__warning\s*\{/);
+});
+
+test("does not build lab links directly from an untrusted Dify resource id", () => {
+  assert.match(card, /scienceLabHrefForId/);
+  assert.doesNotMatch(card, /href=\{`\/lab\?item=\$\{encodeURIComponent\(resource\.resource_id\)\}`\}/);
 });
