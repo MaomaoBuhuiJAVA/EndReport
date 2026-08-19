@@ -137,6 +137,7 @@ function ExperimentRecapCard({ result }: { result: ExperimentRecapResult }) {
     <article className="agent-result-card agent-result-card--recap" aria-label="实验复盘">
       <CardHeader icon={<ClipboardCheck size={15} />} title="实验复盘" meta="事实与建议分开呈现" />
       <CompactList label="记录到的事实" items={result.facts} />
+      <CompactList label="推测与待验证" items={result.speculations} />
       <CompactList label="目标分析" items={result.goal_analysis} />
       <CompactList label="材料问题" items={result.issues.materials} />
       <CompactList label="步骤问题" items={result.issues.steps} />
@@ -161,6 +162,8 @@ function DocumentDiagnosisCard({ result }: { result: DocumentDiagnosisResult }) 
         <CompactList label="幼儿探究机会" items={result.inquiry_opportunities} />
         <CompactList label="教师提问" items={result.teacher_questions} />
         <CompactList label="证据缺口与研究问题" items={result.evidence_gaps} />
+        <CompactList label="数据缺口" items={result.data_gaps} />
+        <CompactList label="下一步研究问题" items={result.research_questions} />
         <CompactList label="反思依据" items={result.reflection_basis} />
       </section>
       <section className="agent-result-card__section">

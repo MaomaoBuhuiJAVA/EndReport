@@ -57,6 +57,8 @@ export type ExperimentRecapIssues = {
 export type ExperimentRecapResult = {
   kind: "experiment_recap";
   facts: string[];
+  /** Optional explicit boundary for conclusions that are not directly observed. */
+  speculations?: string[];
   goal_analysis: string[];
   issues: ExperimentRecapIssues;
   improvements: string[];
@@ -73,6 +75,9 @@ export type DocumentDiagnosisResult = {
   inquiry_opportunities: string[];
   teacher_questions: string[];
   evidence_gaps: string[];
+  /** Optional split fields for newer diagnosis outputs; evidence_gaps remains for compatibility. */
+  data_gaps?: string[];
+  research_questions?: string[];
   reflection_basis: string[];
   revision_text: string;
   revised_outline: string;
@@ -437,6 +442,7 @@ function parsePoetryCover(value: Record<string, unknown>, input: AgentResultPars
 function parseExperimentRecap(value: Record<string, unknown>): ExperimentRecapResult | null {
   if (!isRecord(value.issues)) return null;
   const facts = stringArray(value.facts);
+  const speculations = optionalStringArray(value, "speculations");
   const goalAnalysis = stringArray(value.goal_analysis);
   const materials = stringArray(value.issues.materials);
   const steps = stringArray(value.issues.steps);
@@ -445,13 +451,25 @@ function parseExperimentRecap(value: Record<string, unknown>): ExperimentRecapRe
   const improvements = stringArray(value.improvements);
   const validationPoints = stringArray(value.validation_points);
   const safety = stringArray(value.safety);
-  if (!facts || !goalAnalysis || !materials || !steps || !questions || !organization || !improvements || !validationPoints || !safety) {
+  if (
+    !facts ||
+    (value.speculations !== undefined && !speculations) ||
+    !goalAnalysis ||
+    !materials ||
+    !steps ||
+    !questions ||
+    !organization ||
+    !improvements ||
+    !validationPoints ||
+    !safety
+  ) {
     return null;
   }
 
   return {
     kind: "experiment_recap",
     facts,
+    ...(speculations ? { speculations } : {}),
     goal_analysis: goalAnalysis,
     issues: { materials, steps, questions, organization },
     improvements,
@@ -468,6 +486,8 @@ function parseDocumentDiagnosis(value: Record<string, unknown>): DocumentDiagnos
   const inquiryOpportunities = stringArray(value.inquiry_opportunities);
   const teacherQuestions = stringArray(value.teacher_questions);
   const evidenceGaps = stringArray(value.evidence_gaps);
+  const dataGaps = optionalStringArray(value, "data_gaps");
+  const researchQuestions = optionalStringArray(value, "research_questions");
   const reflectionBasis = stringArray(value.reflection_basis);
   const revisionText = requiredString(value.revision_text);
   const revisedOutline = requiredString(value.revised_outline);
@@ -475,7 +495,10 @@ function parseDocumentDiagnosis(value: Record<string, unknown>): DocumentDiagnos
 
   if (
     !title || !ageFit || !scienceAccuracy || !materialSafety || !inquiryOpportunities ||
-    !teacherQuestions || !evidenceGaps || !reflectionBasis || !revisionText ||
+    !teacherQuestions || !evidenceGaps ||
+    (value.data_gaps !== undefined && !dataGaps) ||
+    (value.research_questions !== undefined && !researchQuestions) ||
+    !reflectionBasis || !revisionText ||
     !revisedOutline || !deliveryMarkdown
   ) {
     return null;
@@ -490,6 +513,8 @@ function parseDocumentDiagnosis(value: Record<string, unknown>): DocumentDiagnos
     inquiry_opportunities: inquiryOpportunities,
     teacher_questions: teacherQuestions,
     evidence_gaps: evidenceGaps,
+    ...(dataGaps ? { data_gaps: dataGaps } : {}),
+    ...(researchQuestions ? { research_questions: researchQuestions } : {}),
     reflection_basis: reflectionBasis,
     revision_text: revisionText,
     revised_outline: revisedOutline,

@@ -14,6 +14,8 @@ test("renders a compact Chinese card for document diagnosis results", () => {
     "inquiry_opportunities",
     "teacher_questions",
     "evidence_gaps",
+    "data_gaps",
+    "research_questions",
     "reflection_basis",
     "revision_text",
     "revised_outline",
@@ -21,7 +23,7 @@ test("renders a compact Chinese card for document diagnosis results", () => {
   ]) {
     assert.match(card, new RegExp(`result\\.${field}`));
   }
-  for (const label of ["教研材料诊断", "问题清单", "可替换修订文本", "修订后框架", "导出稿"]) {
+  for (const label of ["教研材料诊断", "问题清单", "数据缺口", "下一步研究问题", "可替换修订文本", "修订后框架", "导出稿"]) {
     assert.match(card, new RegExp(label));
   }
 });

@@ -192,6 +192,34 @@ describe("parseAgentResult", () => {
     });
   });
 
+  it("keeps experiment recap facts separate from explicit speculations", () => {
+    const result = parseAgentResult({
+      metadata: {
+        agent_result: {
+          kind: "experiment_recap",
+          facts: ["幼儿完成了纸桥搭建"],
+          speculations: ["推测/待验证：折叠结构可能提升承重"],
+          goal_analysis: ["目标达成情况仍需结合幼儿预测记录判断"],
+          issues: {
+            materials: ["纸张规格尚未统一"],
+            steps: ["缺少预测与记录步骤"],
+            questions: ["需要增加比较性提问"],
+            organization: ["小组材料分发顺序待优化"],
+          },
+          improvements: ["统一纸张规格并补充预测记录"],
+          validation_points: ["比较不同结构可承受的积木数量"],
+          safety: ["重物由教师控制投放"],
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      kind: "experiment_recap",
+      facts: ["幼儿完成了纸桥搭建"],
+      speculations: ["推测/待验证：折叠结构可能提升承重"],
+    });
+  });
+
   it("parses an experiment recap from Dify's plain JSON code fence", () => {
     const result = parseAgentResult({
       text: [
@@ -383,6 +411,35 @@ describe("parseAgentResult", () => {
       title: "纸桥承重活动记录",
       revision_text: "将提问改为先预测、后验证的开放式问题。",
       delivery_markdown: "# 纸桥承重活动记录\n\n## 导出稿\n保留幼儿的比较记录。",
+    });
+  });
+
+  it("keeps document data gaps separate from next research questions", () => {
+    const result = parseAgentResult({
+      metadata: {
+        agent_result: {
+          kind: "document_diagnosis",
+          title: "纸桥承重活动记录",
+          age_fit: ["大班可保留比较记录，但需提供图示支架"],
+          science_accuracy: ["将纸的折叠方式与承重差异表述为可观察现象"],
+          material_safety: ["承重物使用轻质积木并由教师控制数量"],
+          inquiry_opportunities: ["先让幼儿预测，再比较不同折法"],
+          teacher_questions: ["哪一种纸桥承受的积木更多？"],
+          evidence_gaps: ["原记录未说明承重测试的环境条件"],
+          data_gaps: ["未记录每种折法的承重数量和重复次数"],
+          research_questions: ["在相同纸张和重量条件下，哪种折法更稳定？"],
+          reflection_basis: ["反思需对应预测和记录表中的证据"],
+          revision_text: "将提问改为先预测、后验证的开放式问题。",
+          revised_outline: "目标\n材料\n预测\n搭建\n比较\n分享",
+          delivery_markdown: "# 纸桥承重活动记录\n\n## 导出稿\n保留幼儿的比较记录。",
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      kind: "document_diagnosis",
+      data_gaps: ["未记录每种折法的承重数量和重复次数"],
+      research_questions: ["在相同纸张和重量条件下，哪种折法更稳定？"],
     });
   });
 
