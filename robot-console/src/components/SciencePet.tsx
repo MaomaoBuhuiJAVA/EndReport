@@ -35,6 +35,7 @@ import {
 } from "@/lib/ai-chat-stream";
 import { buildAiChatDocumentDownloadUrl } from "@/lib/ai-chat-download";
 import type { AiChatOutputFile } from "@/lib/ai-chat-files";
+import { buildLessonPlanDocx } from "@/lib/lesson-plan-docx";
 import type { AgentResult } from "@/lib/agent-result";
 import { assistantDisplayText } from "@/lib/assistant-display-text";
 import { createDifyWebUserId } from "@/lib/dify-session";
@@ -73,6 +74,7 @@ type PetMessage = {
   id: number;
   role: "user" | "assistant";
   text: string;
+  pending?: boolean;
   responseId?: string;
   photos?: PetPhoto[];
   labLinks?: ScienceLabLink[];
@@ -109,12 +111,25 @@ type FeedbackRating = "adopted" | "needs_revision" | "not_helpful";
 
 type AssistantReply = {
   text: string;
+  provider?: "dify" | "fallback";
   responseId?: string;
   photos?: PetPhoto[];
   labLinks?: ScienceLabLink[];
   attachment?: AiChatAttachmentStatus;
   agentResult?: AgentResult;
   files?: AiChatOutputFile[];
+};
+
+type LessonPlanRequest = {
+  title: string;
+  ageGroup: string;
+  duration: string;
+  wantsDocx: boolean;
+};
+
+type SendMessageOptions = {
+  hideUserMessage?: boolean;
+  lessonPlan?: LessonPlanRequest;
 };
 
 type SpeechRecognitionResultLike = {
@@ -201,6 +216,7 @@ const creationDialogTitles: Record<CreationDialogKind, string> = {
 const creationAgeGroups = ["托班", "小班", "中班", "大班"];
 const creationDurations = ["15 分钟", "20 分钟", "30 分钟", "40 分钟"];
 const creationFormats = ["Word 文档", "PDF 文档", "课件提纲"];
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
 const DIRECT_VIDEO_ATTACHMENT_NOTICE = "暂不支持直接上传视频，请先提取关键帧或整理文字记录后再上传。";
@@ -417,6 +433,7 @@ export function SciencePet() {
   const callFinalTimerRef = useRef<number | null>(null);
   const callFinalTranscriptRef = useRef("");
   const callRestartTimerRef = useRef<number | null>(null);
+  const localObjectUrlsRef = useRef<Set<string>>(new Set());
 
   useLayoutEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -440,6 +457,8 @@ export function SciencePet() {
 
   useEffect(() => () => {
     if (attachmentPreviewUrlRef.current) URL.revokeObjectURL(attachmentPreviewUrlRef.current);
+    for (const url of localObjectUrlsRef.current) URL.revokeObjectURL(url);
+    localObjectUrlsRef.current.clear();
   }, []);
 
   const animationState: PetAnimationState = busy
@@ -814,6 +833,7 @@ export function SciencePet() {
     if (data.conversationId) difyConversationIdRef.current = data.conversationId;
     return {
       text: data.reply?.trim() || "资料库暂时没有返回内容，请换个问法试试。",
+      provider: data.provider,
       responseId: data.responseId,
       photos: data.photos,
       labLinks: data.labLinks,
@@ -842,11 +862,16 @@ export function SciencePet() {
         files: event.files ?? message.files,
       }));
     } else if (event.type === "delta") {
-      updatePetMessage(messageId, (message) => ({ ...message, text: `${message.text}${event.delta}` }));
+      updatePetMessage(messageId, (message) => ({
+        ...message,
+        pending: false,
+        text: `${message.text}${event.delta}`,
+      }));
       onText?.(event.delta, "delta");
     } else if (event.type === "done") {
       updatePetMessage(messageId, (message) => ({
         ...message,
+        pending: false,
         text: event.reply,
         responseId: event.responseId ?? message.responseId,
         photos: event.photos,
@@ -1012,7 +1037,7 @@ export function SciencePet() {
     setMessages((current) => [
       ...current,
       { id: userMessageId, role: "user", text: transcript },
-      { id: assistantMessageId, role: "assistant", text: "" },
+      { id: assistantMessageId, role: "assistant", text: "", pending: true },
     ]);
     setBusy(true);
 
@@ -1031,6 +1056,7 @@ export function SciencePet() {
       setCallReply(reply.text);
       updatePetMessage(assistantMessageId, (message) => ({
         ...message,
+        pending: false,
         text: reply.text,
         responseId: reply.responseId,
         photos: reply.photos,
@@ -1056,6 +1082,7 @@ export function SciencePet() {
       if (!isCurrentVoiceCall(sessionId)) return;
       updatePetMessage(assistantMessageId, (message) => ({
         ...message,
+        pending: false,
         text: "我现在没有连上知识服务，请稍后再问一次。",
       }));
       setVoiceCallError(sessionId, "对话服务暂时不可用，可以返回文字对话。");
@@ -1270,15 +1297,25 @@ export function SciencePet() {
 
     const attachmentName = selectedAttachment?.name ?? "已上传材料";
     const prompt = creationDialog === "plan"
-      ? `请生成一份完整教案。年龄段：${ageGroup}；主题：${topic.trim()}；活动时长：${duration}；输出格式：${format}。`
+      ? `请按示例“温州市龙湾区国科温州第二幼儿园教育教学活动设计表”生成一份完整教案。主题：《${topic.trim()}》；班级（适用年龄段）：${ageGroup}；活动时长：${duration}；输出格式：${format}。按示例“温州市龙湾区国科温州第二幼儿园教育教学活动设计表”字段交付：主题、领域、班级、来源、教学活动、时间、教师、活动目标、重点难点、活动准备、活动内容、备注、活动反思。${format === "Word 文档" ? "请同时导出为 DOCX 文件。" : ""}`
       : creationDialog === "document"
         ? `请策划课件或教学文档。年龄段：${ageGroup}；主题：${topic.trim()}；使用用途：${purpose.trim()}；输出格式：${format}。`
         : `请分析我上传的《${attachmentName}》教案或研修材料，给出结构、目标、过程和可执行的改进建议。${purpose.trim() ? `重点关注：${purpose.trim()}。` : ""}`;
 
-    setInput(prompt);
     setCreationDialog(null);
     setCreationDialogError("");
-    focusComposerInput();
+    const lessonPlan = creationDialog === "plan"
+      ? {
+        title: topic.trim(),
+        ageGroup,
+        duration,
+        wantsDocx: format === "Word 文档",
+      }
+      : undefined;
+    void sendMessage(prompt, {
+      hideUserMessage: true,
+      ...(lessonPlan ? { lessonPlan } : {}),
+    });
   }
 
   function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>, mode: "file" | "photo" = "file") {
@@ -1322,7 +1359,7 @@ export function SciencePet() {
     if (photoInputRef.current) photoInputRef.current.value = "";
   }
 
-  async function sendMessage(prompt: string) {
+  async function sendMessage(prompt: string, options?: SendMessageOptions) {
     const content = prompt.trim();
     if (!content || busy || callActiveRef.current) return;
 
@@ -1334,11 +1371,15 @@ export function SciencePet() {
       content: message.text,
     }));
 
-    setMessages((current) => [
-      ...current,
-      { id: userMessageId, role: "user", text: content },
-      { id: assistantMessageId, role: "assistant", text: "" },
-    ]);
+    setMessages((current) => (
+      options?.hideUserMessage
+        ? [...current, { id: assistantMessageId, role: "assistant", text: "", pending: true }]
+        : [
+          ...current,
+          { id: userMessageId, role: "user", text: content },
+          { id: assistantMessageId, role: "assistant", text: "", pending: true },
+        ]
+    ));
     setInput("");
     window.requestAnimationFrame(() => resizeComposerInput());
     setBusy(true);
@@ -1352,15 +1393,52 @@ export function SciencePet() {
         (event) => applyAssistantStreamEvent(assistantMessageId, event),
         attachment,
       );
+      let outputFiles = reply.files;
+      const canPackageLessonPlan =
+        (reply.provider === "dify" || reply.provider === "fallback") &&
+        reply.text.length >= 80 &&
+        /活动目标/u.test(reply.text) &&
+        /活动准备/u.test(reply.text) &&
+        /(?:活动内容|活动过程)/u.test(reply.text);
+      if (options?.lessonPlan?.wantsDocx && canPackageLessonPlan && !outputFiles?.some((file) => file.type === "document")) {
+        try {
+          const bytes = await buildLessonPlanDocx(
+            options.lessonPlan.title,
+            options.lessonPlan.ageGroup,
+            options.lessonPlan.duration,
+            reply.text,
+          );
+          const blobBytes = new ArrayBuffer(bytes.byteLength);
+          new Uint8Array(blobBytes).set(bytes);
+          const objectUrl = URL.createObjectURL(new Blob([blobBytes], { type: DOCX_MIME }));
+          localObjectUrlsRef.current.add(objectUrl);
+          const safeTitle = options.lessonPlan.title
+            .replace(/[\\/:*?"<>|]/gu, "-")
+            .trim() || "幼儿科学活动";
+          outputFiles = [
+            ...(outputFiles ?? []),
+            {
+              type: "document",
+              name: `${safeTitle}完整教案.docx`,
+              mimeType: DOCX_MIME,
+              url: objectUrl,
+            },
+          ];
+        } catch {
+          setVoiceNotice("教案正文已生成，但 Word 文件暂时未能打包，请稍后重试。");
+        }
+      }
+
       updatePetMessage(assistantMessageId, (message) => ({
         ...message,
+        pending: false,
         text: reply.text,
         responseId: reply.responseId,
         photos: reply.photos,
         labLinks: reply.labLinks,
         attachment: reply.attachment,
         agentResult: reply.agentResult,
-        files: reply.files,
+        files: outputFiles,
       }));
       requestSucceeded = true;
     } catch (error) {
@@ -1369,6 +1447,7 @@ export function SciencePet() {
         : "我现在没有连上知识服务，请稍后再问一次。";
       updatePetMessage(assistantMessageId, (message) => ({
         ...message,
+        pending: false,
         text: errorMessage,
       }));
     } finally {
@@ -1740,7 +1819,12 @@ export function SciencePet() {
                       key={message.id}
                       className={`pet-message pet-message--${message.role}`}
                     >
-                      {message.role === "assistant" ? (
+                      {message.role === "assistant" && message.pending && !message.text ? (
+                        <span className="thinking-copy">
+                          <ThinkingGhost />
+                          <span>正在思考</span>
+                        </span>
+                      ) : message.role === "assistant" ? (
                         <div className="pet-message__markdown">
                           <Markdown>{assistantDisplayText(message.text, message.agentResult?.kind)}</Markdown>
                         </div>
@@ -1802,87 +1886,81 @@ export function SciencePet() {
                           {message.attachment.message}
                         </p>
                       ) : null}
-                      {message.role === "assistant" && message.text ? (
-                        <div className="pet-message__actions">
-                          <button
-                            type="button"
-                            onClick={() => handleCopyMessage(message)}
-                            aria-label={copiedMessageId === message.id ? "已复制回复" : "复制回复"}
-                            title={copiedMessageId === message.id ? "已复制" : "复制回复"}
-                          >
-                            {copiedMessageId === message.id ? <Check size={13} /> : <Copy size={13} />}
-                            <span>{copiedMessageId === message.id ? "已复制" : "复制"}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => toggleMessageSpeech(message)}
-                            aria-label={speakingMessageId === message.id ? "停止播放" : "播放回复"}
-                            title={speakingMessageId === message.id ? "停止播放" : "播放回复"}
-                          >
-                            {speakingMessageId === message.id ? <VolumeX size={13} /> : <Volume2 size={13} />}
-                            <span>{speakingMessageId === message.id ? "停止" : "播放"}</span>
-                          </button>
-                          {message.role === "assistant" && message.responseId ? (
-                            <>
-                              <button
-                                type="button"
-                                className={message.feedbackRating === "adopted" ? "is-active" : undefined}
-                                disabled={message.feedbackStatus === "saving" || message.feedbackStatus === "recorded"}
-                                onClick={() => void submitAssistantFeedback(message, "adopted")}
-                                aria-label="标记为已采用"
-                                aria-pressed={message.feedbackRating === "adopted"}
-                                title="已采用"
-                              >
-                                <ThumbsUp size={13} />
-                                <span>已采用</span>
-                              </button>
-                              <button
-                                type="button"
-                                className={message.feedbackRating === "needs_revision" ? "is-active" : undefined}
-                                disabled={message.feedbackStatus === "saving" || message.feedbackStatus === "recorded"}
-                                onClick={() => void submitAssistantFeedback(message, "needs_revision")}
-                                aria-label="标记为需修改"
-                                aria-pressed={message.feedbackRating === "needs_revision"}
-                                title="需修改"
-                              >
-                                <PencilLine size={13} />
-                                <span>需修改</span>
-                              </button>
-                              <button
-                                type="button"
-                                className={message.feedbackRating === "not_helpful" ? "is-active" : undefined}
-                                disabled={message.feedbackStatus === "saving" || message.feedbackStatus === "recorded"}
-                                onClick={() => void submitAssistantFeedback(message, "not_helpful")}
-                                aria-label="标记为无帮助"
-                                aria-pressed={message.feedbackRating === "not_helpful"}
-                                title="无帮助"
-                              >
-                                <ThumbsDown size={13} />
-                                <span>无帮助</span>
-                              </button>
-                              {message.feedbackStatus ? (
-                                <span className="pet-message__feedback-status" role="status">
-                                  {message.feedbackStatus === "saving"
-                                    ? "正在记录"
-                                    : message.feedbackStatus === "recorded"
-                                      ? "已记录"
-                                      : "未记录"}
-                                </span>
-                              ) : null}
-                            </>
-                          ) : null}
-                        </div>
+                      {message.role === "assistant" ? (
+                        message.text ? (
+                          <div className="pet-message__actions">
+                            <button
+                              type="button"
+                              onClick={() => handleCopyMessage(message)}
+                              aria-label={copiedMessageId === message.id ? "已复制回复" : "复制回复"}
+                              title={copiedMessageId === message.id ? "已复制" : "复制回复"}
+                            >
+                              {copiedMessageId === message.id ? <Check size={13} /> : <Copy size={13} />}
+                              <span>{copiedMessageId === message.id ? "已复制" : "复制"}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => toggleMessageSpeech(message)}
+                              aria-label={speakingMessageId === message.id ? "停止播放" : "播放回复"}
+                              title={speakingMessageId === message.id ? "停止播放" : "播放回复"}
+                            >
+                              {speakingMessageId === message.id ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                              <span>{speakingMessageId === message.id ? "停止" : "播放"}</span>
+                            </button>
+                            {message.responseId ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className={message.feedbackRating === "adopted" ? "is-active" : undefined}
+                                  disabled={message.feedbackStatus === "saving" || message.feedbackStatus === "recorded"}
+                                  onClick={() => void submitAssistantFeedback(message, "adopted")}
+                                  aria-label="标记为已采用"
+                                  aria-pressed={message.feedbackRating === "adopted"}
+                                  title="已采用"
+                                >
+                                  <ThumbsUp size={13} />
+                                  <span>已采用</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className={message.feedbackRating === "needs_revision" ? "is-active" : undefined}
+                                  disabled={message.feedbackStatus === "saving" || message.feedbackStatus === "recorded"}
+                                  onClick={() => void submitAssistantFeedback(message, "needs_revision")}
+                                  aria-label="标记为需修改"
+                                  aria-pressed={message.feedbackRating === "needs_revision"}
+                                  title="需修改"
+                                >
+                                  <PencilLine size={13} />
+                                  <span>需修改</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className={message.feedbackRating === "not_helpful" ? "is-active" : undefined}
+                                  disabled={message.feedbackStatus === "saving" || message.feedbackStatus === "recorded"}
+                                  onClick={() => void submitAssistantFeedback(message, "not_helpful")}
+                                  aria-label="标记为无帮助"
+                                  aria-pressed={message.feedbackRating === "not_helpful"}
+                                  title="无帮助"
+                                >
+                                  <ThumbsDown size={13} />
+                                  <span>无帮助</span>
+                                </button>
+                                {message.feedbackStatus ? (
+                                  <span className="pet-message__feedback-status" role="status">
+                                    {message.feedbackStatus === "saving"
+                                      ? "正在记录"
+                                      : message.feedbackStatus === "recorded"
+                                        ? "已记录"
+                                        : "未记录"}
+                                  </span>
+                                ) : null}
+                              </>
+                            ) : null}
+                          </div>
+                        ) : null
                       ) : null}
                     </div>
                   ))}
-                  {busy ? (
-                    <div className="pet-message pet-message--assistant">
-                      <span className="thinking-copy">
-                        <ThinkingGhost />
-                        <span>正在思考</span>
-                      </span>
-                    </div>
-                  ) : null}
                 </div>
 
                 <div className="pet-chat__starters">
@@ -2150,8 +2228,8 @@ export function SciencePet() {
                         <button type="button" className="pet-chat__dialog-cancel" onClick={() => setCreationDialog(null)}>
                           取消
                         </button>
-                        <button type="submit" className="pet-chat__dialog-submit">
-                          填入对话框
+                        <button type="submit" className="pet-chat__dialog-submit" disabled={busy}>
+                          {busy ? "生成中…" : "开始生成"}
                         </button>
                       </div>
                     </form>

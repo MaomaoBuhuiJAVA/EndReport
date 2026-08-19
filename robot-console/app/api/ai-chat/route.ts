@@ -63,6 +63,37 @@ type ParsedChatRequest = {
   attachment?: File;
 };
 
+const REFERENCE_LESSON_FIELD_ALIASES: ReadonlyArray<readonly string[]> = [
+  ["主题"],
+  ["领域"],
+  ["班级", "适用年龄段"],
+  ["来源"],
+  ["教学活动", "活动名称"],
+  ["时间", "活动时长"],
+  ["教师"],
+  ["活动目标"],
+  ["重点难点", "重难点"],
+  ["活动准备"],
+  ["活动内容", "活动过程"],
+  ["备注"],
+  ["活动反思", "课后反思"],
+];
+
+const REFERENCE_REQUIRED_FIELDS = [
+  "主题",
+  "领域",
+  "班级",
+  "来源",
+  "教学活动",
+  "时间",
+  "活动目标",
+  "重点难点",
+  "活动准备",
+  "活动内容",
+] as const;
+
+const LESSON_ANALYSIS_PATTERN = /(?:教案|活动方案|教学设计)[^。！？!?\n]{0,18}(?:分析|评估|审阅|诊断|复盘|修改|优化)|(?:分析|评估|审阅|诊断|复盘|修改|优化)[^。！？!?\n]{0,18}(?:教案|活动方案|教学设计)/u;
+
 function isFileValue(value: FormDataEntryValue | null): value is File {
   return typeof File !== "undefined" && value instanceof File;
 }
@@ -134,16 +165,63 @@ function namedTitle(message: string) {
     .find(Boolean);
 }
 
-function lessonPlanChunk(message: string, chunks: SearchChunk[]) {
-  const title = namedTitle(message);
-  if (!title || !/教案|活动方案|教学设计/.test(message)) return null;
+function explicitLessonTopic(message: string) {
+  const match = message.match(
+    /主题\s*(?:是|为)?\s*[:：]?\s*(?:《\s*([^》]+?)\s*》|〈\s*([^〉]+?)\s*〉|「\s*([^」]+?)\s*」|[“"]\s*([^”"]+?)\s*[”"]|([^；;。！？!?\n]+))/u,
+  );
+  return [match?.[1], match?.[2], match?.[3], match?.[4], match?.[5]]
+    .map((value) => value?.trim())
+    .find(Boolean) ?? null;
+}
+
+function lessonPlanTitle(message: string) {
+  const hasGenerationVerb = /(?:生成|编写|撰写|设计|制定|制作|输出|导出)[^。！？!?\n]{0,24}(?:教案|活动方案|教学设计)/u.test(message);
+  const isAnalysisRequest = LESSON_ANALYSIS_PATTERN.test(message);
+  const isLessonPlanGeneration = hasGenerationVerb || /完整(?:教案|活动方案|教学设计)/u.test(message);
+  if (!isLessonPlanGeneration || isAnalysisRequest) return null;
+
+  const explicitTopic = explicitLessonTopic(message);
+  if (explicitTopic) return explicitTopic;
+
+  const quotedTitle = namedTitle(message);
+  if (quotedTitle) return quotedTitle;
+
+  const naturalTitle = message.match(
+    /(?:生成|编写|撰写|设计|制定|制作|输出|导出)\s*(?:一份|一个|一套)?\s*([^；;。！？!?\n]+?)\s*完整(?:教案|活动方案|教学设计)/u,
+  )?.[1]
+    ?.replace(/[《》〈〉「」“”"'`]/gu, "")
+    .replace(/的\s*$/u, "")
+    .trim();
+  return naturalTitle && naturalTitle !== "完整" ? naturalTitle : null;
+}
+
+function normalizeLessonTitle(value: string) {
+  return value.replace(/[\s《》〈〉「」“”"'`]/gu, "").trim();
+}
+
+function lessonTitlesMatch(left: string, right: string) {
+  const normalizedLeft = normalizeLessonTitle(left);
+  const normalizedRight = normalizeLessonTitle(right);
+  return Boolean(
+    normalizedLeft &&
+      normalizedRight &&
+      (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)),
+  );
+}
+
+function isScienceLabChunk(chunk: SearchChunk) {
+  return chunk.id.startsWith("science-") || chunk.document.title.startsWith("科小贝实验室：");
+}
+
+function lessonPlanChunk(title: string, chunks: SearchChunk[]) {
+  const normalizedTitle = normalizeLessonTitle(title);
+  if (!normalizedTitle) return null;
 
   return (
     chunks.find(
       (chunk) =>
-        chunk.id.startsWith("science-") &&
-        chunk.title.includes(title) &&
-        /科小贝实验室：/.test(chunk.document.title),
+        isScienceLabChunk(chunk) &&
+        lessonTitlesMatch(chunk.title, normalizedTitle),
     ) ?? null
   );
 }
@@ -168,11 +246,22 @@ function numberedItems(value: string) {
   return items.length ? items : value.trim() ? [value.trim()] : [];
 }
 
-function buildLessonPlanReply(chunk: SearchChunk) {
-  const goals = sectionText(chunk.content, /(?:^|\n)\s*一[、.．]\s*活动目标\s*/u, /(?:^|\n)\s*二[、.．]\s*活动准备/u);
-  const preparation = sectionText(chunk.content, /(?:^|\n)\s*二[、.．]\s*活动准备\s*/u, /(?:^|\n)\s*三[、.．]\s*(?:活动玩法|活动过程|实验步骤)/u);
+function requestLessonField(message: string, pattern: RegExp) {
+  return message.match(pattern)?.[1]?.trim() || "待填写";
+}
+
+function lessonTableCell(value: string) {
+  return value.replace(/\|/gu, "／").replace(/\s*\n\s*/gu, "；").trim() || "待填写";
+}
+
+function buildLessonPlanReply(chunk: SearchChunk | null, message = "") {
+  const title = chunk?.title ?? explicitLessonTopic(message) ?? namedTitle(message) ?? "幼儿科学活动";
+  const content = chunk?.content ?? "";
+  const sourceTitle = chunk?.document.title ?? "表单填写信息";
+  const goals = sectionText(content, /(?:^|\n)\s*一[、.．]\s*活动目标\s*/u, /(?:^|\n)\s*二[、.．]\s*活动准备/u);
+  const preparation = sectionText(content, /(?:^|\n)\s*二[、.．]\s*活动准备\s*/u, /(?:^|\n)\s*三[、.．]\s*(?:活动玩法|活动过程|实验步骤)/u);
   const activity = sectionText(
-    chunk.content,
+    content,
     /(?:^|\n)\s*三[、.．]\s*(?:活动玩法|活动过程|实验步骤)\s*/u,
     /(?:^|\n)\s*(?:(?:四|五)[、.．]\s*|实验步骤\s*[:：]?)/u,
   );
@@ -182,9 +271,26 @@ function buildLessonPlanReply(chunk: SearchChunk) {
   const operationSteps = steps.length
     ? steps.map((step, index) => `${index + 1}. ${step}`).join("\n")
     : "1. 教师出示材料，邀请幼儿说一说自己的猜想。\n2. 幼儿分组操作、观察并记录。\n3. 交流发现，教师帮助梳理科学现象。";
+  const classValue = requestLessonField(message, /班级(?:（[^）]*）)?\s*[:：]\s*([^；;。！？!?\n]+)/u);
+  const durationValue = requestLessonField(message, /活动时长\s*[:：]\s*([^；;。！？!?\n]+)/u);
+  const tableRows = [
+    ["主题", title],
+    ["领域", "科学"],
+    ["班级", classValue],
+    ["来源", sourceTitle],
+    ["教学活动", title],
+    ["时间", durationValue],
+    ["教师", "待填写"],
+    ["活动目标", goalText],
+    ["重点难点", "重点：观察并表达现象；难点：把猜想与操作结果联系起来。"],
+    ["活动准备", preparationText],
+    ["活动内容", operationSteps],
+    ["备注", "根据幼儿实际情况调整分组和指导方式。"],
+    ["活动反思", "活动后填写幼儿表现、材料适切性和后续调整。"],
+  ];
 
   return [
-    `## 《${chunk.title}》完整教案`,
+    `## 《${title}》完整教案`,
     "",
     "### 一、活动目标",
     goalText,
@@ -200,6 +306,11 @@ function buildLessonPlanReply(chunk: SearchChunk) {
     "",
     "### 四、活动提示",
     "教师应根据幼儿年龄与材料特性进行分组指导，涉及剪切、小部件或液体操作时做好安全提醒。",
+    "",
+    "### 备课表字段",
+    "| 字段 | 内容 |",
+    "| --- | --- |",
+    ...tableRows.map(([field, value]) => `| ${field} | ${lessonTableCell(value)} |`),
   ].join("\n");
 }
 
@@ -231,29 +342,69 @@ function hasMeaningfulActivity(reply: string) {
   return content.replace(/[\s#*_`>\-—:：、，。！？!?()[\]{}]/gu, "").length >= 12;
 }
 
-function buildLessonPlanSupplement(chunk: SearchChunk, modelReply: string) {
-  const hasActivity = hasMeaningfulActivity(modelReply);
-  const sourceReply = buildLessonPlanReply(chunk);
-  const sourceActivity = sourceReply.match(/### 三、活动过程[\s\S]*?(?=\n### 四、活动提示)/u)?.[0] ?? "";
+function lessonPlanSectionLabel(rawLine: string) {
+  if (/^\s*\d+\s*[.、．]\s+\*\*/u.test(rawLine)) return null;
+  const line = rawLine
+    .trim()
+    .replace(/^#{1,6}\s*/u, "")
+    .replace(/\*+/g, "")
+    .replace(/^[一二三四五六七八九十\d]+\s*[、.．:：]\s*/u, "")
+    .trim();
+  return line.match(/^(活动目标|活动准备|活动过程|活动玩法|活动步骤|实验步骤|观察与表达|观察表达|观察与小结|小结与延伸|活动小结|小结|活动提示|延伸与安全提示|安全提示)(?:\s*[:：]|$)/u)?.[1] ?? null;
+}
+
+function sourceActivitySection(chunk: SearchChunk) {
+  return buildLessonPlanReply(chunk).match(/### 三、活动过程[\s\S]*?(?=\n### 四、活动提示)/u)?.[0] ?? "";
+}
+
+function replaceIncompleteLessonPlanActivity(chunk: SearchChunk, modelReply: string) {
+  if (hasMeaningfulActivity(modelReply)) return modelReply;
+
+  const sourceActivity = sourceActivitySection(chunk);
+  if (!sourceActivity) return modelReply;
+
+  const lines = modelReply.replace(/\r/g, "").split("\n");
+  let activityStart = -1;
+  let activityEnd = lines.length;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const label = lessonPlanSectionLabel(lines[index] ?? "");
+    const isActivity = label === "活动过程" || label === "活动玩法" || label === "活动步骤" || label === "实验步骤";
+    if (activityStart < 0) {
+      if (isActivity) activityStart = index;
+      continue;
+    }
+    if (label) {
+      activityEnd = index;
+      break;
+    }
+  }
+
+  if (activityStart < 0) return `${modelReply.trim()}\n\n${sourceActivity}`.trim();
+
+  lines.splice(activityStart, activityEnd - activityStart, ...sourceActivity.split("\n"));
+  return lines.join("\n").trim();
+}
+
+function buildLessonPlanSupplement(modelReply: string) {
+  const sections = lessonPlanSections(modelReply);
+  const meaningfulLength = (value: string | undefined) =>
+    (value ?? "").replace(/[\s#*_`>\-—:：、，。！？!?()[\]{}]/gu, "").length;
 
   return [
-    !hasActivity && sourceActivity
-      ? `${sourceActivity}\n\n> 以上为依据现有资料整理的建议组织过程。`
+    meaningfulLength(sections.get("observation")) < 4
+      ? "### 观察与小结\n观察要点：关注幼儿是否愿意先猜想、按步骤操作，并能用自己的话描述看到的变化；教师根据幼儿的记录追问“你发现了什么”。"
       : "",
-    "### 观察与小结",
-    "观察要点：关注幼儿是否愿意先猜想、按步骤操作，并能用自己的话描述看到的变化；教师根据幼儿的记录追问“你发现了什么”。",
-    "",
-    "### 活动小结",
-    "引导幼儿把猜想、操作结果和生活经验联系起来，说明本次活动中观察到的核心现象。",
-    "",
-    "### 延伸与安全提示",
-    "将材料投放到科学区继续探索；教师活动前检查材料，幼儿操作时保持适当距离，不接触尖锐、细小或需要加热的物品。",
+    meaningfulLength(sections.get("summary")) < 4
+      ? "### 活动小结\n引导幼儿把猜想、操作结果和生活经验联系起来，说明本次活动中观察到的核心现象。"
+      : "",
+    meaningfulLength(sections.get("tips")) < 4
+      ? "### 延伸与安全提示\n将材料投放到科学区继续探索；教师活动前检查材料，幼儿操作时保持适当距离，不接触尖锐、细小或需要加热的物品。"
+      : "",
   ].filter(Boolean).join("\n");
 }
 
-function hasCompleteLessonPlan(reply: string | null) {
-  if (!reply) return false;
-
+function lessonPlanSections(reply: string) {
   const sections = new Map<string, string>();
   let currentSection = "";
   const normalizedReply = reply.replace(/\r/g, "");
@@ -266,11 +417,11 @@ function hasCompleteLessonPlan(reply: string | null) {
       .replace(/\*+/g, "")
       .replace(/^[一二三四五六七八九十\d]+\s*[、.．:：]\s*/u, "")
       .trim();
-    const match = line.match(sectionPattern);
+    const match = /^\s*\d+\s*[.、．]\s+\*\*/u.test(rawLine) ? null : line.match(sectionPattern);
 
     if (match) {
       const label = match[1];
-      currentSection = label === "活动玩法" || label === "活动步骤" || label === "实验步骤"
+      currentSection = label === "活动过程" || label === "活动玩法" || label === "活动步骤" || label === "实验步骤"
         ? "activity"
         : label === "活动目标"
           ? "goals"
@@ -293,6 +444,84 @@ function hasCompleteLessonPlan(reply: string | null) {
     }
   }
 
+  return sections;
+}
+
+function referenceLessonField(value: string) {
+  const normalized = value
+    .replace(/[`*_~]/gu, "")
+    .replace(/[：:]\s*$/u, "")
+    .replace(/\s+/gu, "")
+    .trim();
+  return REFERENCE_LESSON_FIELD_ALIASES.find((aliases) => aliases.includes(normalized))?.[0] ?? null;
+}
+
+function referenceTableCells(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return null;
+  const cells = trimmed.slice(1, -1).split("|").map((cell) => cell.trim());
+  return cells.every((cell) => /^:?-{3,}:?$/u.test(cell)) ? [] : cells;
+}
+
+function referenceLessonFields(reply: string) {
+  const fields = new Map<string, string>();
+  let pendingHeaders: Array<string | null> | null = null;
+
+  for (const rawLine of reply.replace(/\r/g, "").split("\n")) {
+    const cells = referenceTableCells(rawLine);
+    if (cells !== null) {
+      if (!cells.length) continue;
+      const labels = cells.map((cell) => referenceLessonField(cell));
+      if (cells.length === 2 && labels[0] && !labels[1]) {
+        fields.set(labels[0], cells[1]?.trim() ?? "");
+        pendingHeaders = null;
+      } else if (labels.some(Boolean)) {
+        pendingHeaders = labels;
+      } else if (pendingHeaders) {
+        pendingHeaders.forEach((label, index) => {
+          if (label) fields.set(label, cells[index]?.trim() ?? "");
+        });
+        pendingHeaders = null;
+      }
+      continue;
+    }
+
+    pendingHeaders = null;
+    const fieldMatch = rawLine.match(/^\s*(?:#{1,6}\s*)?(?:[-*]\s*)?([^：:|]{1,12})\s*[：:]\s*(.*)$/u);
+    const label = fieldMatch ? referenceLessonField(fieldMatch[1] ?? "") : null;
+    if (label) fields.set(label, fieldMatch?.[2]?.trim() ?? "");
+  }
+
+  return fields;
+}
+
+function meaningfulReferenceValue(value: string | undefined) {
+  const normalized = (value ?? "")
+    .replace(/[\s#*_`>\-—:：、，。！？!?()[\]{}|]/gu, "")
+    .trim();
+  return Boolean(normalized) && !/^(?:待填写|待补充|暂无|无)$/u.test(normalized);
+}
+
+function hasReferenceLessonFields(reply: string) {
+  const fields = referenceLessonFields(reply);
+  const hasAllLabels = REFERENCE_LESSON_FIELD_ALIASES.every((aliases) => fields.has(aliases[0]));
+  if (!hasAllLabels) return false;
+  return REFERENCE_REQUIRED_FIELDS.every((field) => meaningfulReferenceValue(fields.get(field)));
+}
+
+function isEmptyReferenceLessonSkeleton(reply: string) {
+  const fields = referenceLessonFields(reply);
+  const presentCount = REFERENCE_LESSON_FIELD_ALIASES.filter((aliases) => fields.has(aliases[0])).length;
+  const meaningfulCount = REFERENCE_REQUIRED_FIELDS.filter((field) => meaningfulReferenceValue(fields.get(field))).length;
+  return presentCount >= 8 && meaningfulCount === 0;
+}
+
+function hasCompleteLessonPlan(reply: string | null) {
+  if (!reply) return false;
+
+  if (hasReferenceLessonFields(reply)) return true;
+
+  const sections = lessonPlanSections(reply);
   const meaningfulLength = (value: string | undefined) =>
     (value ?? "").replace(/[\s#*_`>\-—:：、，。！？!?()[\]{}]/gu, "").length;
 
@@ -388,7 +617,9 @@ function difyConversationId(value: unknown) {
 }
 
 type ChatEnrichment = {
+  requestedLessonTitle: string | null;
   requestedLessonPlan: SearchChunk | null;
+  unrelatedResourceTitles: string[];
   context: string;
   sources: string[];
   photos: Awaited<ReturnType<typeof searchKnowledge>>["photos"];
@@ -433,22 +664,73 @@ function buildChatEnrichment(
   casualMessage: boolean,
 ): ChatEnrichment {
   const chunks = search?.chunks ?? [];
-  const requestedLessonPlan = lessonPlanChunk(message, chunks);
-  const selectedChunks = requestedLessonPlan ? [requestedLessonPlan] : chunks;
+  const requestedLessonTitle = lessonPlanTitle(message);
+  const requestedLessonPlan = requestedLessonTitle ? lessonPlanChunk(requestedLessonTitle, chunks) : null;
+  const unrelatedResourceTitles = requestedLessonTitle
+    ? Array.from(new Set(
+      chunks
+        .filter((chunk) => isScienceLabChunk(chunk))
+        .filter((chunk) => !lessonTitlesMatch(chunk.title, requestedLessonTitle))
+        .flatMap((chunk) => [chunk.title, chunk.document.title]),
+    ))
+    : [];
+  // Form-generated requests use a `主题：...` field instead of book-title
+  // marks. If that named resource is not available, do not attach unrelated
+  // search results to the newly generated lesson plan.
+  const selectedChunks = requestedLessonTitle ? (requestedLessonPlan ? [requestedLessonPlan] : []) : chunks;
   const context = selectedChunks.map((chunk) => `《${chunk.document.title}》${chunk.content}`).join("\n");
   const sources = selectedChunks.map((chunk) => chunk.document.title);
-  const photos = !casualMessage && wantsPhotoResults(message) ? search?.photos ?? [] : [];
+  const photos = !casualMessage && wantsPhotoResults(message)
+    ? (requestedLessonTitle
+      ? (search?.photos ?? []).filter((photo) => lessonTitlesMatch(photo.title, requestedLessonTitle))
+      : search?.photos ?? [])
+    : [];
   const uniqueSources = Array.from(new Set(sources)).slice(0, 5);
   const labLinks = buildScienceLabLinks(selectedChunks, message);
 
   return {
+    requestedLessonTitle,
     requestedLessonPlan,
+    unrelatedResourceTitles,
     context,
     sources,
     photos,
     uniqueSources,
     labLinks,
   };
+}
+
+function stripLessonPlanCatalogLinks(
+  reply: string,
+  requestedLessonTitle: string | null,
+  unrelatedResourceTitles: string[] = [],
+) {
+  if (!requestedLessonTitle) return reply;
+
+  const labReferencePattern = /(?:https?:\/\/[^\s)\]]+)?\/lab\?[^\s)\]]+/iu;
+  // A model often puts an unrelated resource title and its bare `/lab` URL
+  // on one line. Remove that whole catalog line so the title cannot remain
+  // after the URL is sanitized.
+  let cleaned = reply
+    .replace(/\r/g, "")
+    .split("\n")
+    .filter((line) => !labReferencePattern.test(line))
+    .filter((line) => !/^\s*(?:配套|相关|推荐)资源(?:链接)?\s*[:：]/u.test(line))
+    .join("\n")
+    .replace(/\[[^\]\n]+\]\((?:https?:\/\/[^)\s]+)?\/lab\?[^)\s]*\)/giu, "")
+    .replace(/(?:https?:\/\/[^\s)\]]+)?\/lab\?[^\s)\]]+/giu, "");
+
+  for (const title of unrelatedResourceTitles) {
+    const normalizedTitle = normalizeLessonTitle(title);
+    if (normalizedTitle.length < 3 || normalizedTitle === normalizeLessonTitle(requestedLessonTitle)) continue;
+    const escapedTitle = title.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    cleaned = cleaned.replace(new RegExp(escapedTitle, "giu"), "");
+  }
+
+  return cleaned
+    .replace(/[ \t]+$/gmu, "")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim();
 }
 
 function buildChatResult(
@@ -462,13 +744,20 @@ function buildChatResult(
   files: AiChatOutputFile[] = [],
 ): ChatResult {
   const { requestedLessonPlan } = enrichment;
-  const incompleteLessonPlan = requestedLessonPlan && modelReply && !hasCompleteLessonPlan(modelReply);
-  const usedLessonPlanFallback = Boolean(requestedLessonPlan && !modelReply);
-  const reply = incompleteLessonPlan
-    ? `${modelReply.trim()}\n\n${buildLessonPlanSupplement(requestedLessonPlan, modelReply)}`
-    : usedLessonPlanFallback
-      ? buildLessonPlanReply(requestedLessonPlan!)
-      : modelReply;
+  let reply = modelReply;
+  let usedLessonPlanFallback = false;
+
+  if (requestedLessonPlan && modelReply && isEmptyReferenceLessonSkeleton(modelReply)) {
+    reply = buildLessonPlanReply(requestedLessonPlan, message);
+    usedLessonPlanFallback = true;
+  } else if (requestedLessonPlan && modelReply && !hasCompleteLessonPlan(modelReply)) {
+    const replyWithActivity = replaceIncompleteLessonPlanActivity(requestedLessonPlan, modelReply);
+    const supplement = buildLessonPlanSupplement(replyWithActivity);
+    reply = [replyWithActivity, supplement].filter(Boolean).join("\n\n");
+  } else if (enrichment.requestedLessonTitle && !modelReply) {
+    reply = buildLessonPlanReply(requestedLessonPlan, message);
+    usedLessonPlanFallback = true;
+  }
 
   return {
     responseId: randomUUID(),
@@ -541,7 +830,9 @@ function streamChatResponse(
           if (request.signal.aborted) return;
           if (event.answer) {
             answer += event.answer;
-            controller.enqueue(eventFrame({ type: "delta", delta: event.answer }, encoder));
+            if (!enrichment.requestedLessonTitle) {
+              controller.enqueue(eventFrame({ type: "delta", delta: event.answer }, encoder));
+            }
           }
           if (event.conversationId) conversationId = event.conversationId;
           if (event.metadata !== undefined) {
@@ -567,7 +858,9 @@ function streamChatResponse(
           { answer, files, metadata: metadataSources },
           { sameOrigin: request.url, difyApiUrl },
         );
-        const agentResult = parseDifyAgentResult(answer || null, message, metadata, outputFileSources, request, difyApiUrl);
+        const agentResult = enrichment.requestedLessonTitle
+          ? undefined
+          : parseDifyAgentResult(answer || null, message, metadata, outputFileSources, request, difyApiUrl);
         const normalizedOutputFiles = normalizeDifyOutputFiles(outputFileSources, { sameOrigin: request.url, difyApiUrl });
         const outputFiles = signAiChatOutputFiles(normalizedOutputFiles, {
           apiKey: difyApiKey,
@@ -582,7 +875,11 @@ function streamChatResponse(
           enrichment,
           message,
           casualMessage,
-          safeAnswer || null,
+          stripLessonPlanCatalogLinks(
+            safeAnswer,
+            enrichment.requestedLessonTitle,
+            enrichment.unrelatedResourceTitles,
+          ) || null,
           conversationId,
           attachment,
           agentResult,
@@ -698,7 +995,8 @@ export async function POST(request: Request) {
     { answer: difyReply?.answer, files: difyReply?.files, metadata: difyReply?.metadata },
     { sameOrigin: request.url, difyApiUrl: apiUrl },
   );
-  const agentResult = difyReply
+  const enrichment = buildChatEnrichment(search, message, casualMessage);
+  const agentResult = difyReply && !enrichment.requestedLessonTitle
     ? parseDifyAgentResult(difyReply.answer, message, difyReply.metadata, outputFileSources, request, apiUrl)
     : undefined;
   const normalizedOutputFiles = normalizeDifyOutputFiles(outputFileSources, { sameOrigin: request.url, difyApiUrl: apiUrl });
@@ -712,10 +1010,14 @@ export async function POST(request: Request) {
     difyApiUrl: apiUrl,
   });
   const result = buildChatResult(
-    buildChatEnrichment(search, message, casualMessage),
+    enrichment,
     message,
     casualMessage,
-    safeReply || null,
+    stripLessonPlanCatalogLinks(
+      safeReply,
+      enrichment.requestedLessonTitle,
+      enrichment.unrelatedResourceTitles,
+    ) || null,
     difyReply?.conversationId,
     attachmentStatus,
     agentResult,

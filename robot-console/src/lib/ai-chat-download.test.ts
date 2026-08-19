@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildAiChatDocumentDownloadUrl,
   documentDownloadContentType,
@@ -31,6 +31,19 @@ describe("buildAiChatDocumentDownloadUrl", () => {
         url: "https://upload.dify.ai/files/unsafe.docx",
       }),
     ).toBeNull();
+  });
+
+  it("accepts a same-origin browser blob URL for a locally generated DOCX", () => {
+    vi.stubGlobal("location", { origin: "https://app.local" });
+    expect(
+      buildAiChatDocumentDownloadUrl({
+        type: "document",
+        name: "玩转纸片完整教案.docx",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        url: "blob:https://app.local/lesson-plan-1",
+      }),
+    ).toBe("blob:https://app.local/lesson-plan-1");
+    vi.unstubAllGlobals();
   });
 
   it("uses a trusted Dify document filename when its signed URL has no extension", () => {

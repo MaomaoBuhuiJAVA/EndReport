@@ -64,6 +64,14 @@ export function buildAiChatDocumentDownloadUrl(file: AiChatOutputFile) {
   if (file.type !== "document") return null;
 
   const currentOrigin = globalThis.location?.origin;
+  if (currentOrigin && file.url.startsWith("blob:")) {
+    try {
+      const blobUrl = new URL(file.url);
+      if (blobUrl.protocol === "blob:" && blobUrl.origin === currentOrigin) return file.url;
+    } catch {
+      return null;
+    }
+  }
   let parsed: URL;
   try {
     parsed = new URL(file.url, currentOrigin || "https://invalid.local");

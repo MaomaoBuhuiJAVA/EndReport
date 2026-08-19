@@ -32,13 +32,89 @@ test("uses a WeChat-like composer with five actions behind the up-arrow menu", (
   assert.match(styles, /\.pet-chat__more-menu/);
 });
 
-test("collects required creation details in a dialog before pre-filling the assistant", () => {
+test("collects required creation details in a dialog before sending to the assistant", () => {
   assert.match(component, /role="dialog"/);
   assert.match(component, /年龄段/);
   assert.match(component, /主题/);
   assert.match(component, /时长/);
   assert.match(component, /输出格式/);
   assert.match(component, /creationDialog/);
+});
+
+test("submits a completed creation form through the chat pipeline without refilling the composer", () => {
+  const submitCreationDialog = component.match(
+    /function submitCreationDialog\(event: FormEvent<HTMLFormElement>\) \{[\s\S]*?\n  \}\n\n  function handleAttachmentChange/,
+  )?.[0] ?? "";
+
+  assert.match(submitCreationDialog, /setCreationDialog\(null\);\s*setCreationDialogError\(""\);[\s\S]*?void sendMessage\(prompt, \{[\s\S]*?hideUserMessage: true/);
+  assert.doesNotMatch(submitCreationDialog, /setInput\(prompt\)/);
+  assert.doesNotMatch(submitCreationDialog, /focusComposerInput\(\)/);
+});
+
+test("requests a DOCX deliverable by default when generating a complete lesson plan", () => {
+  const submitCreationDialog = component.match(
+    /function submitCreationDialog\(event: FormEvent<HTMLFormElement>\) \{[\s\S]*?\n  \}\n\n  function handleAttachmentChange/,
+  )?.[0] ?? "";
+
+  assert.match(submitCreationDialog, /format === "Word 文档" \? "请同时导出为 DOCX 文件。" : ""/);
+});
+
+test("formats complete lesson plan requests with the supplied kindergarten lesson-plan fields", () => {
+  const submitCreationDialog = component.match(
+    /function submitCreationDialog\(event: FormEvent<HTMLFormElement>\) \{[\s\S]*?\n  \}\n\n  function handleAttachmentChange/,
+  )?.[0] ?? "";
+
+  assert.match(submitCreationDialog, /主题：《\$\{topic\.trim\(\)\}》/);
+  assert.match(
+    submitCreationDialog,
+    /按示例“温州市龙湾区国科温州第二幼儿园教育教学活动设计表”字段交付：主题、领域、班级、来源、教学活动、时间、教师、活动目标、重点难点、活动准备、活动内容、备注、活动反思。/,
+  );
+});
+
+test("submits the lesson-plan dialog with local DOCX fallback metadata", () => {
+  const submitCreationDialog = component.match(
+    /function submitCreationDialog\(event: FormEvent<HTMLFormElement>\) \{[\s\S]*?\n  \}\n\n  function handleAttachmentChange/,
+  )?.[0] ?? "";
+
+  assert.match(submitCreationDialog, /const lessonPlan = creationDialog === "plan"[\s\S]*?title:\s*topic\.trim\(\)/);
+  assert.match(submitCreationDialog, /wantsDocx:\s*format === "Word 文档"/);
+  assert.match(component, /buildLessonPlanDocx/);
+  assert.match(component, /URL\.createObjectURL/);
+});
+
+test("does not package an error placeholder as a lesson-plan DOCX", () => {
+  assert.match(component, /reply\.provider === "dify" \|\| reply\.provider === "fallback"/);
+  assert.match(component, /活动目标/);
+  assert.match(component, /活动准备/);
+  assert.match(component, /活动内容/);
+});
+
+test("keeps the generation thinking state inside the single assistant bubble", () => {
+  assert.match(component, /pending\?:\s*boolean/);
+  assert.match(component, /pending:\s*true/);
+  assert.match(component, /message\.pending/);
+  assert.match(component, /message\.role === "assistant" && message\.pending && !message\.text/);
+  assert.match(component, /pending:\s*false/);
+  assert.doesNotMatch(component, /\{busy \? \(\s*<div className="pet-message pet-message--assistant">[\s\S]*正在思考[\s\S]*<\/div>\s*\) : null\}/);
+});
+
+test("uses a direct generation action label instead of refilling the composer", () => {
+  assert.match(component, /<button type="submit" className="pet-chat__dialog-submit" disabled=\{busy\}>[\s\S]*开始生成/);
+  assert.doesNotMatch(component, /填入对话框/);
+});
+
+test("keeps form-submitted lesson-plan instructions out of the visible user chat stream", () => {
+  const submitCreationDialog = component.match(
+    /function submitCreationDialog\(event: FormEvent<HTMLFormElement>\) \{[\s\S]*?\n  \}\n\n  function handleAttachmentChange/,
+  )?.[0] ?? "";
+  const sendMessage = component.match(
+    /async function sendMessage\(prompt: string[\s\S]*?\r?\n  \}\r?\n\r?\n  function handleSubmit/,
+  )?.[0] ?? "";
+
+  assert.match(submitCreationDialog, /void sendMessage\(prompt, \{[\s\S]*?hideUserMessage: true/);
+  assert.match(component, /type SendMessageOptions = \{/);
+  assert.match(sendMessage, /options\?: SendMessageOptions/);
+  assert.match(sendMessage, /options\?\.hideUserMessage\s*\?\s*\[/);
 });
 
 test("requires a teaching or research file for material analysis", () => {

@@ -427,6 +427,621 @@ describe("POST /api/ai-chat", () => {
     expect(vi.mocked(generateDifyReply).mock.calls[0]?.[0]).not.toHaveProperty("maxTokens");
   });
 
+  it("弹窗主题生成教案时只保留当前主题的资料入口", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-EXP-paper",
+          documentId: "EXP-paper",
+          title: "玩转纸片",
+          document: { title: "科小贝实验室：玩转纸片" },
+          content: "一、活动目标\n探索纸片与静电。\n二、活动准备\n纸片、吸管。\n三、活动过程\n幼儿观察纸片。",
+        },
+        {
+          id: "science-STORY-water-drop",
+          documentId: "STORY-water-drop",
+          title: "会变色的小水滴",
+          document: { title: "科小贝实验室：会变色的小水滴" },
+          content: "无关的科学故事资料。",
+        },
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: [
+        "### 活动目标",
+        "观察纸片的变化。",
+        "### 活动准备",
+        "纸片和吸管。",
+        "### 活动过程",
+        "幼儿动手操作。",
+        "",
+        "配套资源：[会变色的小水滴](/lab?item=STORY-water-drop)",
+      ].join("\n"),
+      metadata: {
+        agent_result: {
+          kind: "work_feedback",
+          encouragement: ["继续观察"],
+          i_saw: ["完成活动"],
+          i_wonder: ["纸片为什么会动"],
+          next_try: ["再试一次"],
+          tags: ["科学"],
+          recommended_resources: [{
+            resource_id: "STORY-water-drop",
+            title: "会变色的小水滴",
+            source: "园本资料库",
+          }],
+          privacy_visibility: "teacher_only",
+        },
+      },
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({
+          message: "请生成一份完整教案。年龄段：大班；主题：玩转纸片；活动时长：30 分钟；输出格式：Word 文档。请同时导出为 DOCX 文件。",
+        }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.sources).toEqual(["科小贝实验室：玩转纸片"]);
+    expect(payload.labLinks).toEqual([
+      { id: "EXP-paper", title: "玩转纸片", href: "/lab?item=EXP-paper" },
+    ]);
+    expect(payload.reply).not.toContain("会变色的小水滴");
+    expect(payload.agentResult).toBeUndefined();
+  });
+
+  it("表单提示词包含示例表名时仍按主题字段锁定当前实验", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-EXP-paper",
+          documentId: "EXP-paper",
+          title: "玩转纸片",
+          document: { title: "科小贝实验室：玩转纸片" },
+          content: "一、活动目标\n探索纸片。\n二、活动准备\n纸片。\n三、活动过程\n幼儿操作。",
+        },
+        {
+          id: "science-EXP-water-drop",
+          documentId: "EXP-water-drop",
+          title: "会变色的小水滴",
+          document: { title: "科小贝实验室：会变色的小水滴" },
+          content: "无关实验。",
+        },
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: "已按模板生成玩转纸片教案。",
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({
+          message: "请按示例“温州市龙湾区国科温州第二幼儿园教育教学活动设计表”生成一份完整教案。主题：《玩转纸片》；班级（适用年龄段）：大班；活动时长：30 分钟；输出格式：Word 文档。",
+        }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.sources).toEqual(["科小贝实验室：玩转纸片"]);
+    expect(payload.labLinks).toEqual([
+      { id: "EXP-paper", title: "玩转纸片", href: "/lab?item=EXP-paper" },
+    ]);
+  });
+
+  it("已经符合备课表格字段的教案不再追加另一套板块", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [{
+        id: "science-paper",
+        documentId: "paper",
+        title: "玩转纸片",
+        document: { title: "科小贝实验室：玩转纸片" },
+        content: "一、活动目标\n目标\n二、活动准备\n材料\n三、活动过程\n操作。",
+      }],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: [
+        "主题：玩转纸片",
+        "领域：科学",
+        "班级：大班",
+        "来源：科小贝智能体",
+        "教学活动：玩转纸片",
+        "时间：30 分钟",
+        "教师：",
+        "活动目标：观察纸片变化。",
+        "重点难点：比较不同折法。",
+        "活动准备：纸片、吸管。",
+        "活动内容：先猜想，再操作并交流。",
+        "备注：",
+        "活动反思：幼儿能够表达发现。",
+      ].join("\n"),
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.reply).toContain("活动反思：幼儿能够表达发现。");
+    expect(payload.reply).not.toContain("观察与小结");
+    expect(payload.reply).not.toContain("延伸与安全提示");
+  });
+
+  it("教案分析语义不会被当成完整教案生成", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [{
+        id: "science-paper",
+        documentId: "paper",
+        title: "玩转纸片",
+        document: { title: "科小贝实验室：玩转纸片" },
+        content: "实验资料。",
+      }],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({ answer: "这是教案分析结果。" });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "请生成《玩转纸片》教案分析" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.reply).toBe("这是教案分析结果。");
+  });
+
+  it("完整教案正文会移除无关资源标题和裸实验室链接", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [{
+        id: "science-paper",
+        documentId: "paper",
+        title: "玩转纸片",
+        document: { title: "科小贝实验室：玩转纸片" },
+        content: "一、活动目标\n目标\n二、活动准备\n材料\n三、活动过程\n操作。",
+      }],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: "完整教案已生成。\n相关资源：会变色的小水滴 https://www.qyfck.icu/lab?item=water-drop",
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.reply).not.toContain("会变色的小水滴");
+    expect(payload.reply).not.toContain("/lab?item=water-drop");
+  });
+
+  it("不带书名号的教案请求也只保留当前主题资源", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-EXP-paper",
+          documentId: "EXP-paper",
+          title: "玩转纸片",
+          document: { title: "科小贝实验室：玩转纸片" },
+          content: "纸片实验资料。",
+        },
+        {
+          id: "science-EXP-water-drop",
+          documentId: "EXP-water-drop",
+          title: "会变色的小水滴",
+          document: { title: "科小贝实验室：会变色的小水滴" },
+          content: "无关实验资料。",
+        },
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: "教案已生成。相关资源：会变色的小水滴 https://www.qyfck.icu/lab?item=EXP-water-drop",
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成玩转纸片完整教案" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.sources).toEqual(["科小贝实验室：玩转纸片"]);
+    expect(payload.labLinks).toEqual([
+      { id: "EXP-paper", title: "玩转纸片", href: "/lab?item=EXP-paper" },
+    ]);
+    expect(payload.reply).not.toContain("会变色的小水滴");
+  });
+
+  it("Dify 不可用时仍返回包含参考字段的教案正文", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [{
+        id: "science-paper",
+        documentId: "paper",
+        title: "玩转纸片",
+        document: { title: "科小贝实验室：玩转纸片" },
+        content: "一、活动目标\n目标\n二、活动准备\n材料\n三、活动过程\n操作。",
+      }],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue(null);
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.reply).toContain("领域");
+    expect(payload.reply).toContain("重点难点");
+    expect(payload.reply).toContain("活动反思");
+  });
+
+  it("从表单生成请求中优先提取主题字段而不是示例模板标题", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-EXP-paper",
+          documentId: "EXP-paper",
+          title: "玩转纸片",
+          document: { title: "科小贝实验室：玩转纸片" },
+          content: "一、活动目标\n探索纸片。\n二、活动准备\n纸片。\n三、活动过程\n幼儿操作纸片。",
+        },
+        {
+          id: "science-STORY-water-drop",
+          documentId: "STORY-water-drop",
+          title: "会变色的小水滴",
+          document: { title: "科小贝实验室：会变色的小水滴" },
+          content: "无关资料。",
+        },
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: "### 活动目标\n观察纸片。\n### 活动准备\n纸片。\n### 活动过程\n幼儿操作纸片。",
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({
+          message: "请按示例“温州市龙湾区国科温州第二幼儿园教育教学活动设计表”生成一份完整教案。主题：《玩转纸片》；班级（适用年龄段）：大班；活动时长：30 分钟；输出格式：Word 文档。",
+        }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.sources).toEqual(["科小贝实验室：玩转纸片"]);
+    expect(payload.labLinks).toEqual([
+      { id: "EXP-paper", title: "玩转纸片", href: "/lab?item=EXP-paper" },
+    ]);
+  });
+
+  it("把备课表的十三个字段表格视为完整教案，不追加旧版板块", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [{
+        id: "science-EXP-paper",
+        documentId: "EXP-paper",
+        title: "玩转纸片",
+        document: { title: "科小贝实验室：玩转纸片" },
+        content: "资料库内容",
+      }],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: [
+        "| 主题 | 领域 | 班级 | 来源 |",
+        "| --- | --- | --- | --- |",
+        "| 玩转纸片 | 科学 | 大班 | 园本资料库 |",
+        "| 教学活动 | 时间 | 教师 | 活动目标 |",
+        "| 玩转纸片 | 30分钟 | 待填写 | 观察纸片变化 |",
+        "| 重点难点 | 活动准备 | 活动内容 | 备注 |",
+        "| 纸片变化 | 纸片、吸管 | 幼儿操作并记录 | 待补充 |",
+        "| 活动反思 |  |  |  |",
+        "| 活动后填写 |  |  |  |",
+      ].join("\n"),
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.reply).toContain("| 主题 | 领域 | 班级 | 来源 |");
+    expect(payload.reply).not.toContain("### 观察与小结");
+    expect(payload.reply).not.toContain("### 活动小结");
+    expect(payload.reply).not.toContain("### 延伸与安全提示");
+  });
+
+  it("十三个字段都为空时不会把教案骨架当成完整结果", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [{
+        id: "science-EXP-paper",
+        documentId: "EXP-paper",
+        title: "玩转纸片",
+        document: { title: "科小贝实验室：玩转纸片" },
+        content: "一、活动目标\n观察纸片变化。\n二、活动准备\n纸片、吸管。\n三、活动过程\n1. 幼儿先猜想。\n2. 分组操作并交流。",
+      }],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: [
+        "主题：",
+        "领域：",
+        "班级：",
+        "来源：",
+        "教学活动：",
+        "时间：",
+        "教师：",
+        "活动目标：",
+        "重点难点：",
+        "活动准备：",
+        "活动内容：",
+        "备注：",
+        "活动反思：",
+      ].join("\n"),
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.reply).toContain("重点：观察并表达现象");
+    expect(payload.reply).toContain("活动内容");
+    expect(payload.provider).toBe("fallback");
+  });
+
+  it("教案分析、评估或审阅请求不进入完整教案补全分支", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [{
+        id: "science-EXP-paper",
+        documentId: "EXP-paper",
+        title: "玩转纸片",
+        document: { title: "科小贝实验室：玩转纸片" },
+        content: "资料库内容",
+      }],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: "这是教案分析结果。",
+      metadata: {
+        agent_result: {
+          kind: "degraded",
+          code: "invalid_result",
+          message: "分析结果需要补充后重试。",
+          retry: true,
+        },
+      },
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({
+          message: "请生成一份《玩转纸片》教案分析，评估活动目标、过程并提出修改建议。",
+        }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.agentResult).toMatchObject({ kind: "degraded", code: "invalid_result" });
+    expect(payload.reply).toBe("这是教案分析结果。");
+  });
+
+  it("教案回复会移除无关资料名称和裸实验详情 URL", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-EXP-paper",
+          documentId: "EXP-paper",
+          title: "玩转纸片",
+          document: { title: "科小贝实验室：玩转纸片" },
+          content: "资料库内容",
+        },
+        {
+          id: "science-STORY-water-drop",
+          documentId: "STORY-water-drop",
+          title: "会变色的小水滴",
+          document: { title: "科小贝实验室：会变色的小水滴" },
+          content: "无关资料。",
+        },
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: "教案正文。\n配套资源：会变色的小水滴 https://www.qyfck.icu/lab?item=STORY-water-drop",
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.reply).not.toContain("会变色的小水滴");
+    expect(payload.reply).not.toContain("STORY-water-drop");
+  });
+
+  it("Dify 不可用时的教案兜底仍包含备课表全部字段", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [{
+        id: "science-EXP-paper",
+        documentId: "EXP-paper",
+        title: "玩转纸片",
+        document: { title: "科小贝实验室：玩转纸片" },
+        content: "一、活动目标\n观察纸片。\n二、活动准备\n纸片。\n三、活动过程\n幼儿操作纸片。",
+      }],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue(null);
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+    const payload = await response.json();
+
+    for (const field of [
+      "主题", "领域", "班级", "来源", "教学活动", "时间", "教师", "活动目标",
+      "重点难点", "活动准备", "活动内容", "备注", "活动反思",
+    ]) {
+      expect(payload.reply).toContain(field);
+    }
+  });
+
+  it("资料库未命中时表单教案请求仍生成完整备课表兜底", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue(null);
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({
+          message: "请按示例生成一份完整教案。主题：玩转纸片；班级（适用年龄段）：大班；活动时长：30 分钟；输出格式：Word 文档。",
+        }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.provider).toBe("fallback");
+    expect(payload.reply).toContain("《玩转纸片》完整教案");
+    expect(payload.reply).not.toContain("暂时没有检索到直接对应的资料");
+    for (const field of [
+      "主题", "领域", "班级", "来源", "教学活动", "时间", "教师", "活动目标",
+      "重点难点", "活动准备", "活动内容", "备注", "活动反思",
+    ]) {
+      expect(payload.reply).toContain(field);
+    }
+  });
+
+  it("教案分析请求不被误判为指定教案生成", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: "我会按活动目标、过程与安全性分析这份材料。",
+      metadata: {
+        agent_result: {
+          kind: "degraded",
+          code: "invalid_result",
+          message: "结构化结果需要补充后重试。",
+          retry: true,
+        },
+      },
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({
+          message: "请分析我上传的《完整教案.docx》教案或研修材料，给出结构、目标、过程和可执行的改进建议。",
+        }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      agentResult: {
+        kind: "degraded",
+        code: "invalid_result",
+      },
+    });
+  });
+
+  it("流式指定教案只交付整理后的单一结果和当前主题入口", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-EXP-paper",
+          documentId: "EXP-paper",
+          title: "玩转纸片",
+          document: { title: "科小贝实验室：玩转纸片" },
+          content: "一、活动目标\n探索纸片。\n二、活动准备\n纸片和吸管。\n三、活动过程\n幼儿动手操作。",
+        },
+        {
+          id: "science-STORY-water-drop",
+          documentId: "STORY-water-drop",
+          title: "会变色的小水滴",
+          document: { title: "科小贝实验室：会变色的小水滴" },
+          content: "无关的科学故事资料。",
+        },
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(openDifyStream).mockResolvedValue(
+      new Response(
+        [
+          'data: {"event":"message","answer":"### 活动目标\\n观察纸片。\\n### 活动准备\\n纸片和吸管。\\n### 活动过程\\n幼儿动手操作。"}',
+          "",
+          'data: {"event":"message","answer":"\\n配套资源：[会变色的小水滴](/lab?item=STORY-water-drop)"}',
+          "",
+          'data: {"event":"message_end","conversation_id":"lesson-stream-1"}',
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: JSON.stringify({
+          message: "请生成一份完整教案。年龄段：大班；主题：玩转纸片；活动时长：30 分钟；输出格式：Word 文档。",
+        }),
+      }),
+    );
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+
+    expect(events.map((event) => event.type)).toEqual(["meta", "done"]);
+    expect(events[0].labLinks).toEqual([
+      { id: "EXP-paper", title: "玩转纸片", href: "/lab?item=EXP-paper" },
+    ]);
+    expect(events[1].reply).not.toContain("会变色的小水滴");
+  });
+
   it("模型缺少观察、小结和提示时保留正文并补齐板块", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({
       chunks: [
@@ -463,6 +1078,49 @@ describe("POST /api/ai-chat", () => {
     expect(payload.provider).toBe("dify");
     expect(payload.reply).toContain("观察与小结");
     expect(payload.reply).toContain("活动小结");
+    expect(payload.reply).toContain("延伸与安全提示");
+    expect(payload.reply.match(/### 三、活动过程/g)).toHaveLength(1);
+  });
+
+  it("教案只缺少提示时不重复追加模型已经生成的观察和小结", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-paper",
+          documentId: "paper",
+          title: "玩转纸片",
+          document: { title: "科小贝实验室：玩转纸片" },
+          content: "一、活动目标\n目标\n二、活动准备\n材料\n三、活动过程\n1. 操作纸片。",
+        },
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: [
+        "### 活动目标",
+        "探索静电现象。",
+        "### 活动准备",
+        "纸片、吸管和记录卡。",
+        "### 活动过程",
+        "1. 幼儿动手操作纸片。",
+        "### 观察与小结",
+        "记录纸片移动的现象。",
+        "### 活动小结",
+        "分享静电带来的变化。",
+      ].join("\n"),
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.reply.match(/### 观察与小结/g)).toHaveLength(1);
+    expect(payload.reply.match(/### 活动小结/g)).toHaveLength(1);
     expect(payload.reply).toContain("延伸与安全提示");
   });
 
