@@ -3937,6 +3937,12 @@ img {
 }
 
 @media (max-width: 720px) {
+  /* Keep text inputs at the mobile browser zoom threshold on focus. */
+  .pet-chat__form input,
+  .pet-chat__form textarea {
+    font-size: 16px;
+  }
+
   .home-app-header__bar {
     min-height: 58px;
   }
