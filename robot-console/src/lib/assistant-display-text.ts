@@ -4,11 +4,12 @@ type StructuredResultKind = AgentResult["kind"];
 
 const agentResultFence = /```agent-result\s*\n[\s\S]*?\n```/giu;
 const markdownImage = /!\[[^\]]*\]\([^)]*\)/gu;
+const lessonPlanFieldTable = /(?:^|\n)#{1,6}\s*备课表字段\s*\n[\s\S]*$/u;
 
 export function assistantDisplayText(text: string, kind?: StructuredResultKind) {
-  if (!kind) return text;
-
-  let displayText = text.replace(agentResultFence, "");
+  let displayText = text
+    .replace(agentResultFence, "")
+    .replace(lessonPlanFieldTable, "");
   if (kind === "poetry_cover") {
     displayText = displayText.replace(markdownImage, "");
   }

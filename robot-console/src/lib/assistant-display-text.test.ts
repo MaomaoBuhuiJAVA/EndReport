@@ -29,4 +29,25 @@ describe("assistantDisplayText", () => {
       "```",
     ].join("\n"));
   });
+
+  it("hides the internal lesson-plan field table from the chat bubble", () => {
+    const text = [
+      "## 《玩转纸片》完整教案",
+      "",
+      "### 一、活动目标",
+      "引导幼儿观察纸片变化。",
+      "",
+      "### 备课表字段",
+      "| 字段 | 内容 |",
+      "| --- | --- |",
+      "| 主题 | 玩转纸片 |",
+    ].join("\n");
+
+    expect(assistantDisplayText(text)).toBe([
+      "## 《玩转纸片》完整教案",
+      "",
+      "### 一、活动目标",
+      "引导幼儿观察纸片变化。",
+    ].join("\n"));
+  });
 });
