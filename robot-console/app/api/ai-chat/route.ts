@@ -700,6 +700,19 @@ function buildChatEnrichment(
   };
 }
 
+function buildDifyMessage(message: string, context: string) {
+  if (!context.trim()) return message;
+
+  return [
+    message,
+    "",
+    "【网页数据库检索上下文】",
+    context,
+    "【网页数据库检索上下文结束】",
+    "请优先依据以上网页数据库上下文回答；只引用其中出现的资源名称、LAB 标识和媒体链接，不要补充未检索到的资源。",
+  ].join("\n");
+}
+
 function stripLessonPlanCatalogLinks(
   reply: string,
   requestedLessonTitle: string | null,
@@ -961,9 +974,12 @@ export async function POST(request: Request) {
     }
   }
 
-  const difyMessage = attachment && !files?.length
+  const baseDifyMessage = attachment && !files?.length
     ? `${message}\n\n[系统提示：用户附件未能上传，请不要假设可以看到附件内容；明确说明证据不足，并请求用户补充文字描述。]`
     : message;
+  const search = await searchPromise;
+  const enrichment = buildChatEnrichment(search, message, casualMessage);
+  const difyMessage = buildDifyMessage(baseDifyMessage, enrichment.context);
   const difyArgs = {
     apiKey,
     apiUrl,
@@ -977,7 +993,7 @@ export async function POST(request: Request) {
     const difyStream = await openDifyStream({ ...difyArgs, signal: request.signal });
     if (difyStream) {
       return streamChatResponse(
-        searchPromise,
+        Promise.resolve(search),
         difyStream,
         message,
         casualMessage,
@@ -989,13 +1005,11 @@ export async function POST(request: Request) {
     }
   }
 
-  const difyReplyPromise = generateDifyReply(difyArgs);
-  const [search, difyReply] = await Promise.all([searchPromise, difyReplyPromise]);
+  const difyReply = await generateDifyReply(difyArgs);
   const outputFileSources = mergeDifyOutputFileSources(
     { answer: difyReply?.answer, files: difyReply?.files, metadata: difyReply?.metadata },
     { sameOrigin: request.url, difyApiUrl: apiUrl },
   );
-  const enrichment = buildChatEnrichment(search, message, casualMessage);
   const agentResult = difyReply && !enrichment.requestedLessonTitle
     ? parseDifyAgentResult(difyReply.answer, message, difyReply.metadata, outputFileSources, request, apiUrl)
     : undefined;
