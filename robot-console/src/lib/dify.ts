@@ -304,28 +304,43 @@ function parseDifyEvent(frame: string): DifyStreamEvent | null {
 
 export async function* parseDifyStream(
   body: ReadableStream<Uint8Array>,
+  signal?: AbortSignal,
 ): AsyncGenerator<DifyStreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  const cancelReader = () => {
+    void reader.cancel();
+  };
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done }).replace(/\r\n?/g, "\n");
+  if (signal?.aborted) cancelReader();
+  else signal?.addEventListener("abort", cancelReader, { once: true });
 
-    let separatorIndex = buffer.indexOf("\n\n");
-    while (separatorIndex >= 0) {
-      const frame = buffer.slice(0, separatorIndex);
-      buffer = buffer.slice(separatorIndex + 2);
-      const event = parseDifyEvent(frame);
-      if (event) yield event;
-      separatorIndex = buffer.indexOf("\n\n");
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done }).replace(/\r\n?/g, "\n");
+
+      let separatorIndex = buffer.indexOf("\n\n");
+      while (separatorIndex >= 0) {
+        const frame = buffer.slice(0, separatorIndex);
+        buffer = buffer.slice(separatorIndex + 2);
+        const event = parseDifyEvent(frame);
+        if (event) yield event;
+        separatorIndex = buffer.indexOf("\n\n");
+      }
+
+      if (done) {
+        const event = parseDifyEvent(buffer.trim());
+        if (event) yield event;
+        return;
+      }
     }
-
-    if (done) {
-      const event = parseDifyEvent(buffer.trim());
-      if (event) yield event;
-      return;
-    }
+  } catch (error) {
+    if (signal?.aborted) return;
+    throw error;
+  } finally {
+    signal?.removeEventListener("abort", cancelReader);
+    reader.releaseLock();
   }
 }

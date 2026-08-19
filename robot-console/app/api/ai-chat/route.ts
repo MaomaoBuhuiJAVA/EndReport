@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import type { ConversationMessage } from "@/lib/types";
 import { generateDifyReply, openDifyStream, parseDifyStream, uploadDifyFile, type DifyFileReference } from "@/lib/dify";
-import { parseAgentResult, type AgentResult } from "@/lib/agent-result";
+import { parseAgentResult, type AgentFailureResult, type AgentResult } from "@/lib/agent-result";
 import {
   mergeDifyOutputFileSources,
   normalizeDifyOutputFiles,
@@ -62,6 +62,8 @@ type ParsedChatRequest = {
   body: ChatRequestBody;
   attachment?: File;
 };
+
+const VISION_STREAM_TIMEOUT_MS = 75_000;
 
 const REFERENCE_LESSON_FIELD_ALIASES: ReadonlyArray<readonly string[]> = [
   ["主题"],
@@ -836,6 +838,16 @@ function eventFrame(payload: unknown, encoder: TextEncoder) {
   return encoder.encode(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
+function visionTimeoutResult(): AgentFailureResult {
+  return {
+    kind: "degraded",
+    code: "model_unavailable",
+    message: "图片识别等待时间过长，本次未能完成分析。",
+    retry: true,
+    retry_reason: "请重新发送清晰的静态图片后重试；小图、动画帧和透明图片会自动优化后再提交。",
+  };
+}
+
 function streamChatResponse(
   searchPromise: Promise<Awaited<ReturnType<typeof searchKnowledge>> | null>,
   difyStream: Response,
@@ -879,7 +891,28 @@ function streamChatResponse(
         const metadataSources: unknown[] = [];
         const files: unknown[] = [];
         let streamError: string | undefined;
-        for await (const event of parseDifyStream(difyStream.body)) {
+        let visionTimedOut = false;
+        const streamAbortController = new AbortController();
+        const iterator = parseDifyStream(difyStream.body, streamAbortController.signal)[Symbol.asyncIterator]();
+        while (true) {
+          let timeoutId: ReturnType<typeof setTimeout> | undefined;
+          const nextEvent = await Promise.race([
+            iterator.next(),
+            ...(isVisionRequest
+              ? [new Promise<{ timedOut: true }>((resolve) => {
+                timeoutId = setTimeout(() => resolve({ timedOut: true }), VISION_STREAM_TIMEOUT_MS);
+              })]
+              : []),
+          ]);
+          if (timeoutId) clearTimeout(timeoutId);
+          if ("timedOut" in nextEvent) {
+            visionTimedOut = true;
+            streamAbortController.abort();
+            await iterator.return?.(undefined);
+            break;
+          }
+          if (nextEvent.done) break;
+          const event = nextEvent.value;
           if (request.signal.aborted) return;
           if (event.answer) {
             answer += event.answer;
@@ -905,6 +938,22 @@ function streamChatResponse(
         }
 
         if (streamError) {
+          controller.close();
+          return;
+        }
+
+        if (visionTimedOut) {
+          const agentResult = visionTimeoutResult();
+          const result = buildChatResult(
+            enrichment,
+            message,
+            casualMessage,
+            ["本次图片分析暂未完成。", agentResult.message, agentResult.retry_reason].join("\n\n"),
+            conversationId,
+            attachment,
+            agentResult,
+          );
+          controller.enqueue(eventFrame({ type: "done", ...result }, encoder));
           controller.close();
           return;
         }
