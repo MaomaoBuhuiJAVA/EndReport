@@ -114,6 +114,7 @@ type DragState = {
 
 type VoiceStatus = "idle" | "starting" | "listening" | "processing" | "error" | "unsupported";
 type ComposerMode = "text" | "voice";
+type VoiceGesture = "send" | "cancel" | "transcribe";
 type CallPhase = "idle" | "preparing" | "listening" | "thinking" | "speaking" | "muted" | "error";
 type FeedbackRating = "adopted" | "needs_revision" | "not_helpful";
 
@@ -389,6 +390,8 @@ export function SciencePet() {
   const [busy, setBusy] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("idle");
   const [voiceNotice, setVoiceNotice] = useState("");
+  const [voiceDraft, setVoiceDraft] = useState("");
+  const [voiceGesture, setVoiceGesture] = useState<VoiceGesture>("send");
   const [copiedMessageId, setCopiedMessageId] = useState<number | null>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<number | null>(null);
   const [callPhase, setCallPhase] = useState<CallPhase>("idle");
@@ -426,6 +429,8 @@ export function SciencePet() {
   const suppressClickRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const voicePressedRef = useRef(false);
+  const voiceGestureRef = useRef<VoiceGesture>("send");
+  const voicePointerRef = useRef<{ pointerId: number; startX: number; startY: number } | null>(null);
   const voiceBaseInputRef = useRef("");
   const voiceTranscriptRef = useRef("");
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -661,7 +666,7 @@ export function SciencePet() {
       const bounds = petRootRef.current?.getBoundingClientRect();
       if (!bounds) return;
 
-      const isMobile = window.innerWidth <= 720;
+      const isMobile = window.innerWidth <= 1023;
       const preferredWidth = Math.max(160, Math.min(360, window.innerWidth - (isMobile ? 24 : 20)));
       const preferredHeight = Math.max(160, Math.min(isMobile ? 680 : 640, window.innerHeight - (isMobile ? 84 : 154)));
       if (isMobile) {
@@ -690,6 +695,7 @@ export function SciencePet() {
 
   const stopPressAndHoldVoice = useCallback(() => {
     voicePressedRef.current = false;
+    voicePointerRef.current = null;
     const recognition = recognitionRef.current;
     recognitionRef.current = null;
     if (!recognition) return;
@@ -1504,6 +1510,8 @@ export function SciencePet() {
 
     if (composerMode === "voice") {
       voicePressedRef.current = false;
+      voiceGestureRef.current = "cancel";
+      voicePointerRef.current = null;
       const recognition = recognitionRef.current;
       if (recognition) {
         try {
@@ -1515,12 +1523,16 @@ export function SciencePet() {
       setComposerMode("text");
       setVoiceStatus("idle");
       setVoiceNotice("");
+      setVoiceDraft("");
+      setVoiceGesture("send");
       window.requestAnimationFrame(() => focusComposerInput());
       return;
     }
 
     setComposerMode("voice");
     setVoiceNotice("");
+    setVoiceDraft("");
+    setVoiceGesture("send");
   }
 
   function startVoiceInput(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -1538,8 +1550,16 @@ export function SciencePet() {
     const recognition = new Recognition();
     let failed = false;
     voicePressedRef.current = true;
+    voiceGestureRef.current = "send";
+    setVoiceGesture("send");
+    voicePointerRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
     voiceBaseInputRef.current = input.trim();
     voiceTranscriptRef.current = "";
+    setVoiceDraft("");
     recognitionRef.current = recognition;
     recognition.continuous = true;
     recognition.interimResults = true;
@@ -1561,10 +1581,7 @@ export function SciencePet() {
       }
       const spokenText = transcript.trim();
       voiceTranscriptRef.current = spokenText;
-      if (spokenText) {
-        const base = voiceBaseInputRef.current;
-        setInput(`${base}${base ? " " : ""}${spokenText}`);
-      }
+      setVoiceDraft(spokenText);
     };
     recognition.onerror = (errorEvent) => {
       if (errorEvent.error === "aborted" && !voicePressedRef.current) return;
@@ -1582,11 +1599,36 @@ export function SciencePet() {
     recognition.onend = () => {
       recognitionRef.current = null;
       voicePressedRef.current = false;
+      voicePointerRef.current = null;
       if (failed) return;
+      const action = voiceGestureRef.current;
+      const spokenText = voiceTranscriptRef.current.trim();
+      const base = voiceBaseInputRef.current.trim();
+      const completedText = [base, spokenText].filter(Boolean).join(" ");
+
       setVoiceStatus("idle");
-      setVoiceNotice(
-        voiceTranscriptRef.current ? "语音已转成文字，可以继续编辑或发送。" : "没有听清，请按住麦克风再试一次。",
-      );
+      setVoiceGesture("send");
+      setVoiceDraft("");
+      if (action === "cancel") {
+        setInput(base);
+        setVoiceNotice("");
+        return;
+      }
+      if (action === "transcribe") {
+        setInput(completedText);
+        setComposerMode("text");
+        setVoiceNotice(
+          spokenText ? "已转成文字，可以继续编辑或发送。" : "没有听清，请按住麦克风再试一次。",
+        );
+        window.requestAnimationFrame(() => focusComposerInput());
+        return;
+      }
+      if (spokenText) {
+        setVoiceNotice("");
+        void sendMessage(completedText);
+      } else {
+        setVoiceNotice("没有听清，请按住麦克风再试一次。");
+      }
     };
 
     setVoiceStatus("starting");
@@ -1608,13 +1650,36 @@ export function SciencePet() {
     voicePressedRef.current = false;
     const recognition = recognitionRef.current;
     if (!recognition) return;
+    voicePointerRef.current = null;
     setVoiceStatus("processing");
-    setVoiceNotice("正在整理语音...");
+    setVoiceNotice(voiceGestureRef.current === "cancel" ? "正在取消..." : "正在整理语音...");
     try {
       recognition.stop();
     } catch {
       recognition.abort();
     }
+  }
+
+  function cancelVoiceInput(event: ReactPointerEvent<HTMLButtonElement>) {
+    voiceGestureRef.current = "cancel";
+    setVoiceGesture("cancel");
+    stopVoiceInput(event);
+  }
+
+  function handleVoicePointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
+    const pointer = voicePointerRef.current;
+    if (!voicePressedRef.current || !pointer || pointer.pointerId !== event.pointerId) return;
+
+    const deltaX = event.clientX - pointer.startX;
+    const deltaY = event.clientY - pointer.startY;
+    const nextGesture: VoiceGesture = deltaY < -56 || deltaX < -76
+      ? "cancel"
+      : deltaX > 76
+        ? "transcribe"
+        : "send";
+    if (voiceGestureRef.current === nextGesture) return;
+    voiceGestureRef.current = nextGesture;
+    setVoiceGesture(nextGesture);
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -2031,6 +2096,19 @@ export function SciencePet() {
 
             {callPhase === "idle" ? (
               <div className="pet-chat__composer">
+                {composerMode === "voice" && (voiceStatus === "starting" || voiceStatus === "listening" || voiceStatus === "processing") ? (
+                  <div className="pet-chat__voice-hold" role="status" aria-live="polite">
+                    <div className="pet-chat__voice-hold-copy">
+                      <Mic aria-hidden="true" size={16} />
+                      <span>{voiceDraft || (voiceStatus === "processing" ? "正在整理语音..." : "请说话...")}</span>
+                    </div>
+                    <div className="pet-chat__voice-hold-actions" aria-hidden="true">
+                      <span className={voiceGesture === "cancel" ? "is-active" : undefined}>左滑取消</span>
+                      <span>{voiceGesture === "transcribe" ? "松开转文字" : "松开发送"}</span>
+                      <span className={voiceGesture === "transcribe" ? "is-active" : undefined}>右滑转文字</span>
+                    </div>
+                  </div>
+                ) : null}
                 {voiceNotice ? (
                   <p className="pet-chat__voice-feedback" role="status">
                     {voiceNotice}
@@ -2142,15 +2220,24 @@ export function SciencePet() {
                       className={`pet-chat__voice-button${voiceStatus === "listening" || voiceStatus === "starting" ? " is-listening" : ""}`}
                       disabled={busy || callPhase !== "idle" || voiceStatus === "processing"}
                       onContextMenu={(event) => event.preventDefault()}
-                      onPointerCancel={stopVoiceInput}
+                      onPointerCancel={cancelVoiceInput}
                       onPointerDown={startVoiceInput}
+                      onPointerMove={handleVoicePointerMove}
                       onPointerUp={stopVoiceInput}
                       aria-label="按住说话"
                       aria-pressed={voiceStatus === "listening"}
-                      title="按住说话，松开完成"
+                      title="按住说话，松开发送；向左取消，向右转文字"
                     >
                       <Mic size={17} />
-                      <span>{voiceStatus === "listening" ? "松开完成" : "按住说话"}</span>
+                      <span>
+                        {voiceStatus === "listening"
+                          ? voiceGesture === "cancel"
+                            ? "松开取消"
+                            : voiceGesture === "transcribe"
+                              ? "松开转文字"
+                              : "松开发送"
+                          : "按住说话"}
+                      </span>
                     </button>
                   ) : (
                     <textarea
