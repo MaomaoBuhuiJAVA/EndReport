@@ -1551,7 +1551,7 @@ describe("POST /api/ai-chat", () => {
     );
     expect(generateDifyReply).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: "请观察这张实验图片",
+        message: expect.stringContaining("请观察这张实验图片"),
         files: [
           {
             type: "image",
@@ -1561,6 +1561,8 @@ describe("POST /api/ai-chat", () => {
         ],
       }),
     );
+    expect(vi.mocked(generateDifyReply).mock.calls[0]?.[0]?.message).toContain("视觉实验分析");
+    expect(searchKnowledge).not.toHaveBeenCalled();
   });
 
   it("multipart 附件也保留流式聊天协议", async () => {

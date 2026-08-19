@@ -970,7 +970,10 @@ export async function POST(request: Request) {
   }
 
   const casualMessage = isCasualMessage(message);
-  const searchPromise = casualMessage ? Promise.resolve(null) : searchKnowledge(message);
+  // A broad text search can overwhelm Dify's classifier and route an image
+  // request into a regular chat branch. Vision has its own retrieval step.
+  const hasImageAttachment = attachment?.type.startsWith("image/") ?? false;
+  const searchPromise = casualMessage || hasImageAttachment ? Promise.resolve(null) : searchKnowledge(message);
   const apiKey = process.env.DIFY_API_KEY;
   const apiUrl = process.env.DIFY_API_URL;
   const user = difyUserId(body.userId);
@@ -1004,7 +1007,15 @@ export async function POST(request: Request) {
     : message;
   const search = await searchPromise;
   const enrichment = buildChatEnrichment(search, message, casualMessage);
-  const difyMessage = buildDifyMessage(baseDifyMessage, enrichment.context);
+  const difyMessage = buildDifyMessage(
+    hasImageAttachment && files?.length
+      ? [
+        "[系统路由指令：本次请求携带图片附件。必须选择“视觉实验分析”分类，将用户输入/files 交给 qvq-max 读取图片；不要转入普通 DeepSeek 文本对话分支。]",
+        baseDifyMessage,
+      ].join("\n\n")
+      : baseDifyMessage,
+    enrichment.context,
+  );
   const difyArgs = {
     apiKey,
     apiUrl,
