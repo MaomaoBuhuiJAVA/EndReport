@@ -57,7 +57,7 @@ describe("POST /api/ai-chat", () => {
     expect(payload.responseId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   });
 
-  it("并行启动资料检索与 Dify 请求，避免两段等待时间相加", async () => {
+  it("先完成资料检索，再将结果传给 Dify", async () => {
     let searchStarted = false;
     let difyStarted = false;
     let releaseSearch!: (value: never) => void;
@@ -88,9 +88,11 @@ describe("POST /api/ai-chat", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(searchStarted).toBe(true);
-    expect(difyStarted).toBe(true);
+    expect(difyStarted).toBe(false);
 
     releaseSearch({ chunks: [], photos: [] } as never);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(difyStarted).toBe(true);
     releaseDify({ answer: "可以试试一个小班科学实验。" } as never);
     await expect(responsePromise).resolves.toBeInstanceOf(Response);
   });
@@ -228,11 +230,40 @@ describe("POST /api/ai-chat", () => {
     });
     expect(generateDifyReply).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: "介绍园所",
+        message: expect.stringContaining("介绍园所"),
       }),
     );
+    expect(vi.mocked(generateDifyReply).mock.calls[0]?.[0]?.message).toContain("《园所简介》省二级");
     expect(vi.mocked(generateDifyReply).mock.calls[0]?.[0]).not.toHaveProperty("context");
     expect(vi.mocked(generateDifyReply).mock.calls[0]?.[0]).not.toHaveProperty("history");
+  });
+
+  it("将 Vercel 科学资源检索上下文传给 Dify", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [{
+        id: "science-EXP-bubbles",
+        documentId: "EXP-bubbles",
+        title: "自制泡泡液",
+        document: { title: "科小贝实验室：自制泡泡液" },
+        content: "[LAB:EXP-bubbles]\n适用年龄：小班\n正文：幼儿吹泡泡、观察并交流。\n[RESOURCE:video-bubbles] 视频资源：https://example.com/bubbles",
+      }],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({ answer: "可以试试自制泡泡液。" });
+
+    await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "推荐一个小班科学实验" }),
+      }),
+    );
+
+    expect(vi.mocked(generateDifyReply).mock.calls[0]?.[0]).toMatchObject({
+      message: expect.stringContaining("[LAB:EXP-bubbles]"),
+    });
+    expect(vi.mocked(generateDifyReply).mock.calls[0]?.[0]?.message).toContain("幼儿吹泡泡、观察并交流");
+    expect(vi.mocked(generateDifyReply).mock.calls[0]?.[0]?.message).toContain("video-bubbles");
   });
 
   it("照片检索保留全部照片和来源，同时调用 Dify", async () => {
@@ -421,8 +452,9 @@ describe("POST /api/ai-chat", () => {
     expect(payload.reply).toContain("幼儿观察纸片并说出猜想");
     expect(payload.reply).not.toContain("实验步骤：");
     expect(generateDifyReply).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "生成《玩转纸片》完整教案" }),
+      expect.objectContaining({ message: expect.stringContaining("生成《玩转纸片》完整教案") }),
     );
+    expect(vi.mocked(generateDifyReply).mock.calls[0]?.[0]?.message).toContain("感受纸片在不同操作中的变化");
     expect(vi.mocked(generateDifyReply).mock.calls[0]?.[0]).not.toHaveProperty("context");
     expect(vi.mocked(generateDifyReply).mock.calls[0]?.[0]).not.toHaveProperty("maxTokens");
   });
@@ -1421,8 +1453,9 @@ describe("POST /api/ai-chat", () => {
     });
     expect(searchKnowledge).toHaveBeenCalledWith("水为什么会蒸发？");
     expect(generateDifyReply).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "水为什么会蒸发？" }),
+      expect.objectContaining({ message: expect.stringContaining("水为什么会蒸发？") }),
     );
+    expect(vi.mocked(generateDifyReply).mock.calls[0]?.[0]?.message).toContain("水受热会蒸发");
     expect(vi.mocked(generateDifyReply).mock.calls[0]?.[0]).not.toHaveProperty("context");
   });
 

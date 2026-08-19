@@ -1,6 +1,11 @@
 import sciencePayload from "@/data/science-knowledge.json";
 import { prisma } from "@/lib/prisma";
-import type { ScienceKnowledgeItem } from "@/lib/science-types";
+import {
+  getScienceKnowledgeItem,
+  getScienceKnowledgeSummaries,
+  searchScienceSummaries,
+} from "@/lib/science-data";
+import type { ScienceKnowledgeItem, ScienceKnowledgeSummary } from "@/lib/science-types";
 
 const scienceItems = sciencePayload as unknown as ScienceKnowledgeItem[];
 
@@ -197,6 +202,79 @@ ${item.body.slice(0, 1800)}`,
   return { chunks, photos };
 }
 
+export function isStructuredScienceResourceQuery(query: string) {
+  const normalized = query.replace(/[\s，。！？、；：,.!?;]/g, "");
+  const hasCategory = /科学诗|科学故事|科学实验/.test(normalized);
+  const hasAge = /托班|小班|中班|大班/.test(normalized);
+  const hasResourceIntent = /推荐|查找|搜索|检索|资源|内容|正文|介绍|查看|看看|适合/.test(normalized);
+
+  return (hasCategory && (hasAge || hasResourceIntent)) ||
+    (hasAge && /实验|诗|故事/.test(normalized));
+}
+
+function scienceResourceLines(resources: ScienceKnowledgeItem["resources"]) {
+  return resources
+    .filter((resource) => resource.isPublic)
+    .map((resource) => {
+      const links = [resource.publicPath, resource.externalUrl].filter(Boolean).join(" | ");
+      return `[RESOURCE:${resource.id}] ${resource.type}：${resource.title}${links ? `（${links}）` : ""}`;
+    });
+}
+
+function scienceItemToSearchChunk(item: ScienceKnowledgeItem | ScienceKnowledgeSummary) {
+  const resourceLines = scienceResourceLines(item.resources);
+  const body = "body" in item ? item.body.trim() : "";
+  const context = [
+    `[LAB:${item.id}]`,
+    `类别：${item.category}`,
+    `适用年龄：${item.ageLabel}`,
+    `主题：${item.topic}`,
+    item.author ? `作者：${item.author}` : "",
+    item.excerpt ? `摘要：${item.excerpt}` : "",
+    body ? `正文：\n${body.slice(0, 6000)}` : "",
+    resourceLines.length ? `媒体资源：\n${resourceLines.join("\n")}` : "",
+  ].filter(Boolean).join("\n");
+
+  return {
+    id: `science-${item.id}`,
+    documentId: item.id,
+    title: item.title,
+    content: context,
+    keywords: item.tags.join(" "),
+    createdAt: new Date(0),
+    document: {
+      title: `科小贝实验室：${item.title}`,
+      category: "COURSE" as const,
+      summary: item.excerpt,
+    },
+    score: 1000,
+  };
+}
+
+async function searchStructuredScienceResources(query: string) {
+  const summaries = await getScienceKnowledgeSummaries();
+  const matches = searchScienceSummaries(summaries, query, 8);
+  const items = await Promise.all(matches.map((match) => getScienceKnowledgeItem(match.id)));
+  const chunks = items
+    .map((item, index) => scienceItemToSearchChunk(item ?? matches[index]))
+    .filter(Boolean);
+  const photos = items
+    .filter((item): item is ScienceKnowledgeItem => Boolean(item))
+    .flatMap((item) => item.resources
+      .filter((resource) => resource.type === "图片资源" && resource.isPublic && Boolean(resource.publicPath))
+      .map((resource) => ({
+        id: resource.id,
+        title: resource.title,
+        description: `${item.ageLabel} · ${item.title}`,
+        url: resource.publicPath,
+        kind: "DOCUMENT" as const,
+        score: 1000,
+      })))
+    .slice(0, 10);
+
+  return { chunks, photos };
+}
+
 export function wantsPhotoResults(query: string) {
   return /照片|图片|影像|图|看看|看一看|参观|环境|空间|功能室|有没有/.test(query);
 }
@@ -207,6 +285,10 @@ export async function searchKnowledge(query: string) {
 
   if (!keywords.length) {
     return { chunks: [], photos: [] };
+  }
+
+  if (isStructuredScienceResourceQuery(query)) {
+    return searchStructuredScienceResources(query);
   }
 
   const science = searchPackagedScience(query, keywords);
