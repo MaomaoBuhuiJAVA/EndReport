@@ -606,7 +606,7 @@ describe("POST /api/ai-chat", () => {
     );
     const payload = await response.json();
 
-    expect(payload.reply).toContain("活动反思：幼儿能够表达发现。");
+    expect(payload.reply).toContain("| 活动反思 | 幼儿能够表达发现。 |");
     expect(payload.reply).not.toContain("观察与小结");
     expect(payload.reply).not.toContain("延伸与安全提示");
   });
@@ -806,7 +806,8 @@ describe("POST /api/ai-chat", () => {
     );
     const payload = await response.json();
 
-    expect(payload.reply).toContain("| 主题 | 领域 | 班级 | 来源 |");
+    expect(payload.reply).toContain("| 字段 | 内容 |");
+    expect(payload.reply).toContain("| 来源 | 园本资料库 |");
     expect(payload.reply).not.toContain("### 观察与小结");
     expect(payload.reply).not.toContain("### 活动小结");
     expect(payload.reply).not.toContain("### 延伸与安全提示");
@@ -1074,7 +1075,7 @@ describe("POST /api/ai-chat", () => {
     expect(events[1].reply).not.toContain("会变色的小水滴");
   });
 
-  it("模型缺少观察、小结和提示时保留正文并补齐板块", async () => {
+  it("模型缺少完整过程时保留正文并补齐模板活动阶段", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({
       chunks: [
         {
@@ -1108,13 +1109,14 @@ describe("POST /api/ai-chat", () => {
     const payload = await response.json();
 
     expect(payload.provider).toBe("dify");
-    expect(payload.reply).toContain("观察与小结");
-    expect(payload.reply).toContain("活动小结");
-    expect(payload.reply).toContain("延伸与安全提示");
+    expect(payload.reply).toContain("（一）情境导入与猜想");
+    expect(payload.reply).toContain("（二）分组操作与记录");
+    expect(payload.reply).toContain("（三）分享表达与归纳");
+    expect(payload.reply).toContain("（四）总结延伸");
     expect(payload.reply.match(/### 三、活动过程/g)).toHaveLength(1);
   });
 
-  it("教案只缺少提示时不重复追加模型已经生成的观察和小结", async () => {
+  it("教案过程不足时保留模型目标并补齐一套活动阶段", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({
       chunks: [
         {
@@ -1151,12 +1153,13 @@ describe("POST /api/ai-chat", () => {
     );
     const payload = await response.json();
 
-    expect(payload.reply.match(/### 观察与小结/g)).toHaveLength(1);
-    expect(payload.reply.match(/### 活动小结/g)).toHaveLength(1);
-    expect(payload.reply).toContain("延伸与安全提示");
+    expect(payload.reply).toContain("探索静电现象。");
+    expect(payload.reply.match(/### 三、活动过程/g)).toHaveLength(1);
+    expect(payload.reply.match(/(?:^|\n)（三）分享表达与归纳/g)).toHaveLength(1);
+    expect(payload.reply.match(/(?:^|\n)（四）总结延伸/g)).toHaveLength(1);
   });
 
-  it("保留 Dify 已生成的教案正文，并补齐缺失板块", async () => {
+  it("保留 Dify 已生成的教案正文，并补齐模板过程", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({
       chunks: [
         {
@@ -1191,8 +1194,9 @@ describe("POST /api/ai-chat", () => {
 
     expect(payload.provider).toBe("dify");
     expect(payload.reply).toContain("这是 Dify 生成的目标");
-    expect(payload.reply).toContain("观察与小结");
-    expect(payload.reply).toContain("延伸与安全提示");
+    expect(payload.reply).toContain("（三）分享表达与归纳");
+    expect(payload.reply).toContain("（四）总结延伸");
+    expect(payload.reply).toContain("活动后记录幼儿表现");
   });
 
   it("教案标题齐全但活动过程为空时保留模型并补充可执行步骤", async () => {

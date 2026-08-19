@@ -60,6 +60,7 @@ import {
   type ChangeEvent,
   type CSSProperties,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
@@ -70,6 +71,12 @@ type PetPhoto = {
   description?: string | null;
 };
 
+type PetMessageAttachment = {
+  name: string;
+  kind: "image" | "file";
+  previewUrl?: string;
+};
+
 type PetMessage = {
   id: number;
   role: "user" | "assistant";
@@ -78,6 +85,7 @@ type PetMessage = {
   responseId?: string;
   photos?: PetPhoto[];
   labLinks?: ScienceLabLink[];
+  userAttachment?: PetMessageAttachment;
   attachment?: AiChatAttachmentStatus;
   agentResult?: AgentResult;
   files?: AiChatOutputFile[];
@@ -1297,7 +1305,7 @@ export function SciencePet() {
 
     const attachmentName = selectedAttachment?.name ?? "已上传材料";
     const prompt = creationDialog === "plan"
-      ? `请按示例“温州市龙湾区国科温州第二幼儿园教育教学活动设计表”生成一份完整教案。主题：《${topic.trim()}》；班级（适用年龄段）：${ageGroup}；活动时长：${duration}；输出格式：${format}。按示例“温州市龙湾区国科温州第二幼儿园教育教学活动设计表”字段交付：主题、领域、班级、来源、教学活动、时间、教师、活动目标、重点难点、活动准备、活动内容、备注、活动反思。${format === "Word 文档" ? "请同时导出为 DOCX 文件。" : ""}`
+      ? `请按示例“温州市龙湾区国科温州第二幼儿园教育教学活动设计表”生成一份完整教案。主题：《${topic.trim()}》；班级（适用年龄段）：${ageGroup}；活动时长：${duration}；输出格式：${format}。只输出当前主题教案，不附加其他实验链接或推荐资源。按示例字段交付：主题、领域、班级、来源、教学活动、时间、教师、活动目标、重点难点、活动准备、活动内容、备注、活动反思。其中“活动内容”必须包含设计意图，以及导入猜想、分组操作、分享表达、总结延伸四个顺序阶段；每阶段写清教师行为、幼儿可能回应或表现、教师回应和建议时长。${format === "Word 文档" ? "请同时导出为 DOCX 文件。" : ""}`
       : creationDialog === "document"
         ? `请策划课件或教学文档。年龄段：${ageGroup}；主题：${topic.trim()}；使用用途：${purpose.trim()}；输出格式：${format}。`
         : `请分析我上传的《${attachmentName}》教案或研修材料，给出结构、目标、过程和可执行的改进建议。${purpose.trim() ? `重点关注：${purpose.trim()}。` : ""}`;
@@ -1349,8 +1357,12 @@ export function SciencePet() {
     }
   }
 
-  function removeAttachment() {
-    if (attachmentPreviewUrlRef.current) URL.revokeObjectURL(attachmentPreviewUrlRef.current);
+  function removeAttachment(retainPreview = false) {
+    const previewUrl = attachmentPreviewUrlRef.current;
+    if (previewUrl && !retainPreview) {
+      URL.revokeObjectURL(previewUrl);
+      localObjectUrlsRef.current.delete(previewUrl);
+    }
     attachmentPreviewUrlRef.current = null;
     setAttachmentPreviewUrl(null);
     setSelectedAttachment(null);
@@ -1366,6 +1378,14 @@ export function SciencePet() {
     const userMessageId = messageIdRef.current++;
     const assistantMessageId = messageIdRef.current++;
     const attachment = selectedAttachment;
+    const messageAttachment = attachment
+      ? {
+        name: attachment.name,
+        kind: attachment.type.startsWith("image/") ? "image" as const : "file" as const,
+        ...(attachmentPreviewUrl ? { previewUrl: attachmentPreviewUrl } : {}),
+      }
+      : undefined;
+    if (messageAttachment?.previewUrl) localObjectUrlsRef.current.add(messageAttachment.previewUrl);
     const history = messages.slice(-12).map((message) => ({
       role: message.role,
       content: message.text,
@@ -1376,7 +1396,7 @@ export function SciencePet() {
         ? [...current, { id: assistantMessageId, role: "assistant", text: "", pending: true }]
         : [
           ...current,
-          { id: userMessageId, role: "user", text: content },
+          { id: userMessageId, role: "user", text: content, userAttachment: messageAttachment },
           { id: assistantMessageId, role: "assistant", text: "", pending: true },
         ]
     ));
@@ -1452,13 +1472,29 @@ export function SciencePet() {
       }));
     } finally {
       setBusy(false);
-      if (attachment && requestSucceeded) removeAttachment();
+      if (attachment && requestSucceeded) removeAttachment(Boolean(messageAttachment?.previewUrl));
+    }
+  }
+
+  function composerMessage() {
+    if (input.trim()) return input;
+    if (!selectedAttachment) return "";
+    return selectedAttachment.type.startsWith("image/")
+      ? "请识别这张图片中的科学内容，并给出适合幼儿的观察建议。"
+      : `请阅读我上传的《${selectedAttachment.name}》，提炼关键内容并给出可执行建议。`;
+  }
+
+  function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void sendMessage(composerMessage());
     }
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    void sendMessage(input);
+    void sendMessage(composerMessage());
   }
 
   function toggleComposerMode() {
@@ -1819,6 +1855,26 @@ export function SciencePet() {
                       key={message.id}
                       className={`pet-message pet-message--${message.role}`}
                     >
+                      {message.role === "user" && message.userAttachment ? (
+                        <div className="pet-message__input-attachment">
+                          {message.userAttachment.previewUrl ? (
+                            // Local object URLs are retained for the current chat session only.
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              className="pet-message__input-attachment-thumbnail"
+                              src={message.userAttachment.previewUrl}
+                              alt={`已发送附件：${message.userAttachment.name}`}
+                            />
+                          ) : (
+                            <span className="pet-message__input-attachment-icon" aria-hidden="true">
+                              <FileText size={16} />
+                            </span>
+                          )}
+                          <span className="pet-message__input-attachment-name" title={message.userAttachment.name}>
+                            {message.userAttachment.name}
+                          </span>
+                        </div>
+                      ) : null}
                       {message.role === "assistant" && message.pending && !message.text ? (
                         <span className="thinking-copy">
                           <ThinkingGhost />
@@ -2010,7 +2066,7 @@ export function SciencePet() {
                       className="pet-chat__attachment-remove"
                       aria-label={`移除附件 ${selectedAttachment.name}`}
                       title="移除附件"
-                      onClick={removeAttachment}
+                      onClick={() => removeAttachment()}
                     >
                       <X size={14} />
                     </button>
@@ -2106,6 +2162,7 @@ export function SciencePet() {
                         setInput(event.target.value);
                         resizeComposerInput(event.currentTarget);
                       }}
+                      onKeyDown={handleComposerKeyDown}
                       placeholder="问问科小贝..."
                       aria-label="向科小贝提问"
                       disabled={busy || callInputLocked}
@@ -2114,7 +2171,7 @@ export function SciencePet() {
                   <button
                     type="submit"
                     className="pet-chat__send"
-                    disabled={!input.trim() || busy || callInputLocked || voiceStatus === "listening" || voiceStatus === "starting" || voiceStatus === "processing"}
+                    disabled={(!input.trim() && !selectedAttachment) || busy || callInputLocked || voiceStatus === "listening" || voiceStatus === "starting" || voiceStatus === "processing"}
                     aria-label="发送"
                     title="发送"
                   >

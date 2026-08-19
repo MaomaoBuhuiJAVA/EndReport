@@ -67,8 +67,9 @@ test("formats complete lesson plan requests with the supplied kindergarten lesso
   assert.match(submitCreationDialog, /主题：《\$\{topic\.trim\(\)\}》/);
   assert.match(
     submitCreationDialog,
-    /按示例“温州市龙湾区国科温州第二幼儿园教育教学活动设计表”字段交付：主题、领域、班级、来源、教学活动、时间、教师、活动目标、重点难点、活动准备、活动内容、备注、活动反思。/,
+    /按示例字段交付：主题、领域、班级、来源、教学活动、时间、教师、活动目标、重点难点、活动准备、活动内容、备注、活动反思。/,
   );
+  assert.match(submitCreationDialog, /导入猜想、分组操作、分享表达、总结延伸四个顺序阶段/);
 });
 
 test("submits the lesson-plan dialog with local DOCX fallback metadata", () => {
@@ -131,6 +132,23 @@ test("shows a selected local attachment and posts it to the chat route as multip
   assert.match(component, /formData\.append\("attachment", attachment\)/);
   assert.match(component, /body: formData \?\? JSON\.stringify/);
   assert.doesNotMatch(component, /\/api\/agent/);
+});
+
+test("keeps an uploaded file thumbnail above the sent user message", () => {
+  assert.match(component, /type PetMessageAttachment = \{/);
+  assert.match(component, /userAttachment\?: PetMessageAttachment/);
+  assert.match(component, /className="pet-message__input-attachment"/);
+  assert.match(component, /className="pet-message__input-attachment-thumbnail"/);
+  assert.match(component, /userAttachment: messageAttachment/);
+  assert.match(styles, /\.pet-message__input-attachment\s*\{/);
+});
+
+test("sends on Enter while retaining Shift+Enter for a newline and respecting composition", () => {
+  assert.match(component, /function handleComposerKeyDown\(event: ReactKeyboardEvent<HTMLTextAreaElement>\)/);
+  assert.match(component, /event\.nativeEvent\.isComposing/);
+  assert.match(component, /event\.key === "Enter" && !event\.shiftKey/);
+  assert.match(component, /event\.preventDefault\(\);[\s\S]*?void sendMessage\(composerMessage\(\)\)/);
+  assert.match(composer, /onKeyDown=\{handleComposerKeyDown\}/);
 });
 
 test("shows server validation errors instead of replacing them with a generic connection error", () => {
