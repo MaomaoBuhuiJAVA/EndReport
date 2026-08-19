@@ -4084,6 +4084,57 @@ img {
   }
 }
 
+/* Some mobile browsers expose a tablet-sized CSS viewport. Keep the hero
+   readable instead of falling back to the desktop two-column composition. */
+@media (min-width: 721px) and (max-width: 1023px) {
+  .home-page .home-hero__inner {
+    display: flex;
+    min-height: auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 24px;
+    padding: 32px 24px 42px;
+  }
+
+  .home-page .home-hero__media {
+    order: -1;
+    width: min(100%, 640px);
+    max-width: 640px;
+    min-height: 0;
+    margin-inline: auto;
+    padding-bottom: 12px;
+  }
+
+  .home-page .home-hero__media-stage {
+    width: 100%;
+    height: clamp(300px, 46vw, 390px);
+    aspect-ratio: auto;
+  }
+
+  .home-page .home-hero__primary-frame {
+    inset: 4% 13% 9% 0;
+    transform: rotate(-4deg);
+  }
+
+  .home-page .home-hero__secondary-frame {
+    right: 0;
+    bottom: 0;
+    left: auto;
+    width: 42%;
+    transform: rotate(6deg);
+  }
+
+  .home-page .home-hero__copy {
+    width: min(100%, 640px);
+    max-width: 640px;
+    margin-inline: auto;
+  }
+
+  .home-page .home-hero__copy h1 {
+    font-size: 42px;
+  }
+}
+
 @media (max-width: 380px) {
   .home-app-brand__meta {
     display: none;
@@ -4701,13 +4752,18 @@ img {
 
   .home-page .home-hero__media {
     order: -1;
+    width: min(100%, 640px);
     max-width: none;
+    min-height: 0;
+    margin-inline: auto;
     padding-bottom: 8px;
   }
 
   .home-page .home-hero__media-stage {
-    aspect-ratio: 1 / 0.88;
-    margin-inline: -2px;
+    width: 100%;
+    height: clamp(250px, 84vw, 390px);
+    aspect-ratio: auto;
+    margin-inline: 0;
   }
 
   .home-page .home-hero__primary-frame {

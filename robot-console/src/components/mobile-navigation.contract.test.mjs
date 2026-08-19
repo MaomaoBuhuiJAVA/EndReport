@@ -50,6 +50,17 @@ test("mobile layout removes chrome and keeps search plus bottom module navigatio
   assert.match(styles, /\.home-bottom-nav[\s\S]*?grid-template-columns:\s*repeat\(3/);
 });
 
+test("keeps the home hero stacked when a mobile browser reports a tablet-sized viewport", () => {
+  assert.match(
+    styles,
+    /@media \(min-width: 721px\) and \(max-width: 1023px\) \{[\s\S]*?\.home-page \.home-hero__inner\s*\{[\s\S]*?flex-direction:\s*column/,
+  );
+  assert.match(
+    styles,
+    /@media \(min-width: 721px\) and \(max-width: 1023px\) \{[\s\S]*?\.home-page \.home-hero__media-stage\s*\{[\s\S]*?height:\s*clamp\(300px, 46vw, 390px\)/,
+  );
+});
+
 test("keeps the mobile assistant clear of module actions and bottom navigation", () => {
   assert.match(
     styles,
