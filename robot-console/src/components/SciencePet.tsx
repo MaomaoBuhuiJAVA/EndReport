@@ -228,6 +228,8 @@ const creationFormats = ["Word 文档", "PDF 文档", "课件提纲"];
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+const VISION_MIN_IMAGE_EDGE = 512;
+const VISION_MAX_IMAGE_EDGE = 1600;
 const DIRECT_VIDEO_ATTACHMENT_NOTICE = "暂不支持直接上传视频，请先提取关键帧或整理文字记录后再上传。";
 const ATTACHMENT_TYPE_MISMATCH_NOTICE = "附件类型与文件扩展名不一致，请重新选择原始文件。";
 const UNSUPPORTED_ATTACHMENT_NOTICE = "暂不支持该附件格式，请上传图片、PDF、Word、PPT、Excel 或 TXT 文件。";
@@ -374,6 +376,51 @@ function attachmentValidationMessage(attachment: File) {
   if (!expectedMimeType) return UNSUPPORTED_ATTACHMENT_NOTICE;
   if (mimeType && mimeType !== expectedMimeType) return ATTACHMENT_TYPE_MISMATCH_NOTICE;
   return null;
+}
+
+async function normalizeSmallImageForVision(attachment: File): Promise<File> {
+  if (!attachment.type.startsWith("image/") || typeof window === "undefined") return attachment;
+
+  const sourceUrl = URL.createObjectURL(attachment);
+  try {
+    const image = new window.Image();
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("image decode failed"));
+      image.src = sourceUrl;
+    });
+
+    const width = image.naturalWidth || image.width;
+    const height = image.naturalHeight || image.height;
+    if (!width || !height || (width >= VISION_MIN_IMAGE_EDGE && height >= VISION_MIN_IMAGE_EDGE)) {
+      return attachment;
+    }
+
+    const minScale = VISION_MIN_IMAGE_EDGE / Math.min(width, height);
+    const maxScale = VISION_MAX_IMAGE_EDGE / Math.max(width, height);
+    const scale = Math.min(maxScale, Math.max(1, minScale));
+    const targetWidth = Math.max(1, Math.round(width * scale));
+    const targetHeight = Math.max(1, Math.round(height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const context = canvas.getContext("2d");
+    if (!context) return attachment;
+
+    // A white JPEG prevents transparent animation sprites from becoming unreadable to vision models.
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, targetWidth, targetHeight);
+    context.drawImage(image, 0, 0, targetWidth, targetHeight);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+    if (!blob || blob.size > MAX_ATTACHMENT_BYTES) return attachment;
+
+    const name = attachment.name.replace(/\.[^.]+$/u, "") || "image";
+    return new File([blob], `${name}.jpg`, { type: "image/jpeg" });
+  } catch {
+    return attachment;
+  } finally {
+    URL.revokeObjectURL(sourceUrl);
+  }
 }
 
 export function SciencePet() {
@@ -1332,7 +1379,7 @@ export function SciencePet() {
     });
   }
 
-  function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>, mode: "file" | "photo" = "file") {
+  async function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>, mode: "file" | "photo" = "file") {
     const attachment = event.target.files?.[0];
     if (!attachment) return;
 
@@ -1349,13 +1396,15 @@ export function SciencePet() {
       return;
     }
 
+    const visionAttachment = await normalizeSmallImageForVision(attachment);
+
     if (attachmentPreviewUrlRef.current) URL.revokeObjectURL(attachmentPreviewUrlRef.current);
-    const previewUrl = attachment.type.startsWith("image/")
-      ? URL.createObjectURL(attachment)
+    const previewUrl = visionAttachment.type.startsWith("image/")
+      ? URL.createObjectURL(visionAttachment)
       : null;
     attachmentPreviewUrlRef.current = previewUrl;
     setAttachmentPreviewUrl(previewUrl);
-    setSelectedAttachment(attachment);
+    setSelectedAttachment(visionAttachment);
     setAttachmentNotice("");
     if (mode === "photo") {
       setInput("请识别这张图片中的科学内容，并给出适合幼儿的观察建议。");

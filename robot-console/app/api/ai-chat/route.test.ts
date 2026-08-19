@@ -1611,6 +1611,40 @@ describe("POST /api/ai-chat", () => {
     );
   });
 
+  it("视觉模型只返回降级结构化结果时，仍提供可读的失败说明", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(uploadDifyFile).mockResolvedValue({
+      type: "image",
+      transfer_method: "local_file",
+      upload_file_id: "dify-vision-degraded",
+    });
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: [
+        "```agent-result",
+        JSON.stringify({
+          kind: "degraded",
+          code: "model_unavailable",
+          retry: true,
+          message: "未获得有效的视觉观察数据。",
+          retry_reason: "请重新上传清晰图片后重试。",
+        }),
+        "```",
+      ].join("\n"),
+    });
+
+    const formData = new FormData();
+    formData.set("message", "请识别这张图片");
+    formData.set("attachment", new File(["image"], "experiment.jpg", { type: "image/jpeg" }));
+
+    const response = await POST(new Request("http://localhost/api/ai-chat", { method: "POST", body: formData }));
+
+    await expect(response.json()).resolves.toMatchObject({
+      reply: expect.stringContaining("本次图片分析暂未完成。"),
+      agentResult: { kind: "degraded", code: "model_unavailable" },
+    });
+  });
+
   it("附件上传失败时继续文字对话并明确标记降级状态", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
     vi.mocked(wantsPhotoResults).mockReturnValue(false);

@@ -795,6 +795,15 @@ function buildChatResult(
   } else if (enrichment.requestedLessonTitle && !modelReply) {
     reply = buildLessonPlanReply(requestedLessonPlan, message);
     usedLessonPlanFallback = true;
+  } else if (
+    (agentResult?.kind === "degraded" || agentResult?.kind === "error") &&
+    isStructuredResultOnlyReply(modelReply)
+  ) {
+    reply = [
+      "本次图片分析暂未完成。",
+      agentResult.message,
+      agentResult.retry_reason,
+    ].filter(Boolean).join("\n\n");
   }
 
   return {
@@ -809,6 +818,11 @@ function buildChatResult(
     sources: enrichment.uniqueSources,
     labLinks: enrichment.labLinks,
   };
+}
+
+function isStructuredResultOnlyReply(reply: string | null) {
+  if (!reply?.trim()) return false;
+  return /^```(?:agent-result|json)?\s*\n[\s\S]*?\n```$/iu.test(reply.trim());
 }
 
 function acceptsEventStream(request: Request) {
@@ -831,6 +845,7 @@ function streamChatResponse(
   difyApiUrl?: string,
   difyApiKey?: string,
   attachment?: AttachmentStatus,
+  isVisionRequest = false,
 ) {
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -868,7 +883,9 @@ function streamChatResponse(
           if (request.signal.aborted) return;
           if (event.answer) {
             answer += event.answer;
-            if (!enrichment.requestedLessonTitle) {
+            // Vision replies are normally an agent-result fence. Waiting for the
+            // completed result keeps the chat from briefly rendering an empty code block.
+            if (!enrichment.requestedLessonTitle && !isVisionRequest) {
               controller.enqueue(eventFrame({ type: "delta", delta: event.answer }, encoder));
             }
           }
@@ -1037,6 +1054,7 @@ export async function POST(request: Request) {
         apiUrl,
         apiKey,
         attachmentStatus,
+        hasImageAttachment && Boolean(files?.length),
       );
     }
   }
