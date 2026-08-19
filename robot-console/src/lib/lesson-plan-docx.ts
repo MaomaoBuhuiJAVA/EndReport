@@ -201,22 +201,22 @@ function buildTableXml(title: string, ageGroup: string, duration: string, sectio
       cellXml("", c6 + c7 + c8, { gridSpan: 3, align: "center" }),
     ]),
     tableRowXml([
-      cellXml("活动目标", c1, { label: true }),
+      cellXml(["活 动", "目 标"], c1, { label: true }),
       cellXml(sections.goals, c2 + c3 + c4, { gridSpan: 3, verticalAlign: "top" }),
-      cellXml("重点难点", c5, { label: true }),
+      cellXml(["重", "难点"], c5, { label: true }),
       cellXml(sections.keyPoints, c6 + c7 + c8, { gridSpan: 3, verticalAlign: "top" }),
     ]),
     tableRowXml([
-      cellXml("活动准备", c1, { label: true }),
+      cellXml(["活 动", "准 备"], c1, { label: true }),
       cellXml(sections.preparation, c2 + c3 + c4 + c5 + c6 + c7 + c8, { gridSpan: 7, verticalAlign: "top" }),
     ]),
     tableRowXml([
-      cellXml("活动内容", c1, { label: true, verticalAlign: "top" }),
+      cellXml(["活", "动", "内", "容"], c1, { label: true, verticalAlign: "top" }),
       cellXml(sections.activity.length ? sections.activity : sections.fallback, c2 + c3 + c4 + c5 + c6, { gridSpan: 5, verticalAlign: "top" }),
       cellXml(["备注:", ...sections.notes], c7 + c8, { gridSpan: 2, verticalAlign: "top", align: "left" }),
     ]),
     tableRowXml([
-      cellXml("活动反思", c1, { label: true, verticalAlign: "top" }),
+      cellXml(["活", "动", "反", "思"], c1, { label: true, verticalAlign: "top" }),
       cellXml(sections.reflection, c2 + c3 + c4 + c5 + c6 + c7 + c8, { gridSpan: 7, verticalAlign: "top" }),
     ]),
   ].join("");

@@ -16,7 +16,8 @@ test("keeps an ai response id through each assistant reply path", () => {
 test("offers and records three teacher feedback states only for persisted assistant replies", () => {
   assert.match(component, /function submitAssistantFeedback\(/);
   assert.match(component, /fetch\("\/api\/ai-feedback"/);
-  assert.match(component, /message\.role === "assistant" && message\.responseId/);
+  assert.match(component, /message\.role === "assistant" \? \(/);
+  assert.match(component, /\{message\.responseId \? \(/);
   for (const label of ["已采用", "需修改", "无帮助"]) {
     assert.match(component, new RegExp(label));
   }

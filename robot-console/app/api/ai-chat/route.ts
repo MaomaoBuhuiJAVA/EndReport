@@ -254,39 +254,74 @@ function lessonTableCell(value: string) {
   return value.replace(/\|/gu, "／").replace(/\s*\n\s*/gu, "；").trim() || "待填写";
 }
 
-function buildLessonPlanReply(chunk: SearchChunk | null, message = "") {
+function buildLessonPlanReply(chunk: SearchChunk | null, message = "", modelReply = "") {
   const title = chunk?.title ?? explicitLessonTopic(message) ?? namedTitle(message) ?? "幼儿科学活动";
   const content = chunk?.content ?? "";
   const sourceTitle = chunk?.document.title ?? "表单填写信息";
-  const goals = sectionText(content, /(?:^|\n)\s*一[、.．]\s*活动目标\s*/u, /(?:^|\n)\s*二[、.．]\s*活动准备/u);
-  const preparation = sectionText(content, /(?:^|\n)\s*二[、.．]\s*活动准备\s*/u, /(?:^|\n)\s*三[、.．]\s*(?:活动玩法|活动过程|实验步骤)/u);
-  const activity = sectionText(
+  const sourceGoals = sectionText(content, /(?:^|\n)\s*一[、.．]\s*活动目标\s*/u, /(?:^|\n)\s*二[、.．]\s*活动准备/u);
+  const sourcePreparation = sectionText(content, /(?:^|\n)\s*二[、.．]\s*活动准备\s*/u, /(?:^|\n)\s*三[、.．]\s*(?:活动玩法|活动过程|实验步骤)/u);
+  const sourceActivity = sectionText(
     content,
     /(?:^|\n)\s*三[、.．]\s*(?:活动玩法|活动过程|实验步骤)\s*/u,
     /(?:^|\n)\s*(?:(?:四|五)[、.．]\s*|实验步骤\s*[:：]?)/u,
   );
-  const steps = numberedItems(activity);
-  const goalText = goals || "引导幼儿在操作中观察现象、表达猜想，并分享自己的发现。";
-  const preparationText = preparation || "请根据资料详情准备相应材料，并提前检查活动安全。";
+  const steps = numberedItems(sourceActivity);
+  const sourceGoalText = sourceGoals || "引导幼儿在操作中观察现象、表达猜想，并分享自己的发现。";
+  const sourcePreparationText = sourcePreparation || "请根据资料详情准备相应材料，并提前检查活动安全。";
   const operationSteps = steps.length
     ? steps.map((step, index) => `${index + 1}. ${step}`).join("\n")
     : "1. 教师出示材料，邀请幼儿说一说自己的猜想。\n2. 幼儿分组操作、观察并记录。\n3. 交流发现，教师帮助梳理科学现象。";
+  const modelFields = modelReply ? referenceLessonFields(modelReply) : new Map<string, string>();
+  const modelSections = modelReply ? lessonPlanSections(modelReply) : new Map<string, string>();
+  const usableValue = (...candidates: Array<string | undefined>) => candidates.find((value) => meaningfulReferenceValue(value))?.trim() ?? "";
   const classValue = requestLessonField(message, /班级(?:（[^）]*）)?\s*[:：]\s*([^；;。！？!?\n]+)/u);
   const durationValue = requestLessonField(message, /活动时长\s*[:：]\s*([^；;。！？!?\n]+)/u);
+  const goalText = usableValue(modelFields.get("活动目标"), modelSections.get("goals"), sourceGoalText) || sourceGoalText;
+  const preparationText = usableValue(modelFields.get("活动准备"), modelSections.get("preparation"), sourcePreparationText) || sourcePreparationText;
+  const activityCandidate = usableValue(modelFields.get("活动内容"), modelSections.get("activity"));
+  const fallbackActivity = [
+    "设计意图：以幼儿熟悉的生活情境引发好奇，鼓励幼儿先猜想、再操作、再表达，在完整探究过程中积累科学经验。",
+    "（一）情境导入与猜想（约5分钟）",
+    `1. 教师出示本次活动材料，围绕“《${title}》会发生什么变化”提出问题，请幼儿观察、触摸并说出自己的猜想。`,
+    "2. 预设幼儿回应：幼儿用自己的话表达不同想法。教师回应：每一种猜想都很有价值，我们马上用实验来验证。",
+    "（二）分组操作与记录（约15分钟）",
+    `1. 教师示范一次安全、完整的操作流程，并提醒幼儿按顺序取放材料、与同伴合作和及时记录。\n${operationSteps}`,
+    "2. 幼儿分组操作，教师巡回观察：对有困难的幼儿给予适量提示，对有新发现的幼儿追问“你是怎么做到的”“和刚才有什么不一样”。",
+    "（三）分享表达与归纳（约5分钟）",
+    "1. 邀请幼儿展示记录或操作结果，说一说自己的发现；教师将不同结果并列呈现，引导幼儿比较。",
+    "2. 教师用幼儿能理解的语言小结现象，肯定认真观察、合作和表达的行为，并提示幼儿把材料归位。",
+    "（四）总结延伸（约5分钟）",
+    "1. 教师带领幼儿回顾“猜想、操作、发现”的过程，帮助幼儿把操作结果和开始的猜想联系起来。",
+    "2. 将安全、适宜的材料投放到科学区，鼓励幼儿在区域活动中继续尝试，并请幼儿把新的发现分享给同伴。",
+  ].join("\n");
+  const activityText = hasDetailedLessonActivity(activityCandidate) ? activityCandidate : fallbackActivity;
+  const keyPointsText = usableValue(
+    modelFields.get("重点难点"),
+    "重点：观察并表达现象；难点：把猜想与操作结果联系起来。",
+  );
+  const notesText = usableValue(
+    modelFields.get("备注"),
+    modelSections.get("tips"),
+    "根据幼儿实际情况调整分组和指导方式，涉及剪切、小部件或液体操作时做好安全提醒。",
+  );
+  const reflectionText = usableValue(
+    modelFields.get("活动反思"),
+    "活动后记录幼儿表现、材料适切性和下一次调整方向。",
+  );
   const tableRows = [
-    ["主题", title],
-    ["领域", "科学"],
-    ["班级", classValue],
-    ["来源", sourceTitle],
-    ["教学活动", title],
-    ["时间", durationValue],
-    ["教师", "待填写"],
+    ["主题", usableValue(modelFields.get("主题"), title)],
+    ["领域", usableValue(modelFields.get("领域"), "科学")],
+    ["班级", usableValue(modelFields.get("班级"), classValue)],
+    ["来源", usableValue(modelFields.get("来源"), sourceTitle)],
+    ["教学活动", usableValue(modelFields.get("教学活动"), title)],
+    ["时间", usableValue(modelFields.get("时间"), durationValue)],
+    ["教师", usableValue(modelFields.get("教师"), "待填写")],
     ["活动目标", goalText],
-    ["重点难点", "重点：观察并表达现象；难点：把猜想与操作结果联系起来。"],
+    ["重点难点", keyPointsText],
     ["活动准备", preparationText],
-    ["活动内容", operationSteps],
-    ["备注", "根据幼儿实际情况调整分组和指导方式。"],
-    ["活动反思", "活动后填写幼儿表现、材料适切性和后续调整。"],
+    ["活动内容", activityText],
+    ["备注", notesText],
+    ["活动反思", reflectionText],
   ];
 
   return [
@@ -299,13 +334,10 @@ function buildLessonPlanReply(chunk: SearchChunk | null, message = "") {
     preparationText,
     "",
     "### 三、活动过程",
-    "1. **导入与猜想**：教师围绕活动材料提出问题，鼓励幼儿先观察、猜测并说出理由。",
-    `2. **操作与探究**：\n${operationSteps}`,
-    "3. **观察与表达**：幼儿根据操作结果交流变化和发现，教师追问“你看到了什么”“为什么会这样”。",
-    "4. **小结与延伸**：共同回顾猜想和结果的关系，可将材料投放到科学区供幼儿继续尝试。",
+    activityText,
     "",
     "### 四、活动提示",
-    "教师应根据幼儿年龄与材料特性进行分组指导，涉及剪切、小部件或液体操作时做好安全提醒。",
+    notesText,
     "",
     "### 备课表字段",
     "| 字段 | 内容 |",
@@ -502,6 +534,14 @@ function meaningfulReferenceValue(value: string | undefined) {
   return Boolean(normalized) && !/^(?:待填写|待补充|暂无|无)$/u.test(normalized);
 }
 
+function hasDetailedLessonActivity(value: string | undefined) {
+  const normalized = (value ?? "")
+    .replace(/[\s#*_`>|]/gu, "")
+    .trim();
+  const stages = (value ?? "").match(/(?:^|\n)\s*(?:[（(]?[一二三四五六七八九十\d]+[）)]?|\d+[.、．])/g)?.length ?? 0;
+  return normalized.length >= 120 && stages >= 4;
+}
+
 function hasReferenceLessonFields(reply: string) {
   const fields = referenceLessonFields(reply);
   const hasAllLabels = REFERENCE_LESSON_FIELD_ALIASES.every((aliases) => fields.has(aliases[0]));
@@ -519,20 +559,7 @@ function isEmptyReferenceLessonSkeleton(reply: string) {
 function hasCompleteLessonPlan(reply: string | null) {
   if (!reply) return false;
 
-  if (hasReferenceLessonFields(reply)) return true;
-
-  const sections = lessonPlanSections(reply);
-  const meaningfulLength = (value: string | undefined) =>
-    (value ?? "").replace(/[\s#*_`>\-—:：、，。！？!?()[\]{}]/gu, "").length;
-
-  return (
-    meaningfulLength(sections.get("goals")) >= 4 &&
-    meaningfulLength(sections.get("preparation")) >= 4 &&
-    meaningfulLength(sections.get("activity")) >= 12 &&
-    meaningfulLength(sections.get("observation")) >= 4 &&
-    meaningfulLength(sections.get("summary")) >= 4 &&
-    meaningfulLength(sections.get("tips")) >= 4
-  );
+  return hasReferenceLessonFields(reply) && hasDetailedLessonActivity(referenceLessonFields(reply).get("活动内容"));
 }
 
 function isCasualMessage(message: string) {
@@ -764,9 +791,7 @@ function buildChatResult(
     reply = buildLessonPlanReply(requestedLessonPlan, message);
     usedLessonPlanFallback = true;
   } else if (requestedLessonPlan && modelReply && !hasCompleteLessonPlan(modelReply)) {
-    const replyWithActivity = replaceIncompleteLessonPlanActivity(requestedLessonPlan, modelReply);
-    const supplement = buildLessonPlanSupplement(replyWithActivity);
-    reply = [replyWithActivity, supplement].filter(Boolean).join("\n\n");
+    reply = buildLessonPlanReply(requestedLessonPlan, message, modelReply);
   } else if (enrichment.requestedLessonTitle && !modelReply) {
     reply = buildLessonPlanReply(requestedLessonPlan, message);
     usedLessonPlanFallback = true;

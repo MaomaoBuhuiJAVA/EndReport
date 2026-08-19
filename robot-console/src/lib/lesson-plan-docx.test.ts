@@ -45,6 +45,14 @@ describe("buildLessonPlanDocx", () => {
     expect(documentXml).toContain('<w:gridCol w:w="1467"/>');
     expect(documentXml).toContain('w:ascii="黑体"');
     expect(documentXml).toContain('w:ascii="宋体"');
+    expect(documentXml).toContain(">活 动</w:t>");
+    expect(documentXml).toContain(">目 标</w:t>");
+    expect(documentXml).toContain(">重</w:t>");
+    expect(documentXml).toContain(">难点</w:t>");
+    expect(documentXml).toContain(">活</w:t>");
+    expect(documentXml).toContain(">动</w:t>");
+    expect(documentXml).toContain(">内</w:t>");
+    expect(documentXml).toContain(">容</w:t>");
 
     const topicLabelStart = documentXml?.indexOf(">主题</w:t>") ?? -1;
     const topicValueStart = documentXml?.indexOf(">玩转纸片</w:t>", topicLabelStart) ?? -1;
@@ -69,12 +77,18 @@ describe("buildLessonPlanDocx", () => {
       "教学活动",
       "时间",
       "教师",
-      "活动目标",
-      "重点难点",
-      "活动准备",
-      "活动内容",
+      "活 动",
+      "目 标",
+      "重",
+      "难点",
+      "准 备",
+      "活",
+      "动",
+      "内",
+      "容",
       "备注",
-      "活动反思",
+      "反",
+      "思",
     ]) {
       expect(documentXml).toContain(`>${field === "备注" ? "备注:" : field}</w:t>`);
     }
@@ -92,7 +106,7 @@ describe("buildLessonPlanDocx", () => {
     }
 
     const teacherLabelEnd = documentXml?.indexOf(">教师</w:t>");
-    const nextFieldStart = documentXml?.indexOf(">活动目标</w:t>", teacherLabelEnd);
+    const nextFieldStart = documentXml?.indexOf(">活 动</w:t>", teacherLabelEnd);
     const teacherValueXml = documentXml?.slice(
       (teacherLabelEnd ?? -1) + ">教师</w:t>".length,
       nextFieldStart,
@@ -126,10 +140,10 @@ describe("buildLessonPlanDocx", () => {
     const archive = await JSZip.loadAsync(bytes);
     const documentXml = await archive.file("word/document.xml")?.async("string");
 
-    const goalStart = documentXml?.indexOf(">活动目标</w:t>") ?? -1;
-    const keyPointStart = documentXml?.indexOf(">重点难点</w:t>", goalStart) ?? -1;
-    const preparationStart = documentXml?.indexOf(">活动准备</w:t>") ?? -1;
-    const activityStart = documentXml?.indexOf(">活动内容</w:t>") ?? -1;
+    const goalStart = documentXml?.indexOf(">目 标</w:t>") ?? -1;
+    const keyPointStart = documentXml?.indexOf(">重</w:t>", goalStart) ?? -1;
+    const preparationStart = documentXml?.indexOf(">准 备</w:t>", keyPointStart) ?? -1;
+    const activityStart = documentXml?.indexOf(">内</w:t>", preparationStart) ?? -1;
     const notesStart = documentXml?.indexOf(">备注:</w:t>", activityStart) ?? -1;
 
     expect(documentXml?.slice(goalStart, keyPointStart)).toContain("能够比较不同折法带来的纸片变化。");
@@ -158,12 +172,12 @@ describe("buildLessonPlanDocx", () => {
     const archive = await JSZip.loadAsync(bytes);
     const documentXml = await archive.file("word/document.xml")?.async("string");
 
-    const goalStart = documentXml?.indexOf(">活动目标</w:t>") ?? -1;
-    const keyPointStart = documentXml?.indexOf(">重点难点</w:t>", goalStart) ?? -1;
-    const preparationStart = documentXml?.indexOf(">活动准备</w:t>") ?? -1;
-    const activityStart = documentXml?.indexOf(">活动内容</w:t>") ?? -1;
+    const goalStart = documentXml?.indexOf(">目 标</w:t>") ?? -1;
+    const keyPointStart = documentXml?.indexOf(">重</w:t>", goalStart) ?? -1;
+    const preparationStart = documentXml?.indexOf(">准 备</w:t>", keyPointStart) ?? -1;
+    const activityStart = documentXml?.indexOf(">内</w:t>", preparationStart) ?? -1;
     const notesStart = documentXml?.indexOf(">备注:</w:t>", activityStart) ?? -1;
-    const reflectionStart = documentXml?.indexOf(">活动反思</w:t>") ?? -1;
+    const reflectionStart = documentXml?.indexOf(">反</w:t>", notesStart) ?? -1;
 
     expect(documentXml?.slice(goalStart, keyPointStart)).toContain("观察纸片在不同操作中的变化。");
     expect(documentXml?.slice(preparationStart, activityStart)).toContain("彩纸、吸管");
