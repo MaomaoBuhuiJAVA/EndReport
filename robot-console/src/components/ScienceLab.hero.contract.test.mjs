@@ -96,10 +96,19 @@ test("embeds public video resources for direct playback in the detail dialog", (
   const styles = fs.readFileSync(stylesPath, "utf8");
 
   assert.match(component, /<video[\s\S]*controls[\s\S]*playsInline[\s\S]*preload="metadata"/);
+  assert.match(component, /poster=\{videoPoster \|\| undefined\}/);
+  assert.match(component, /const videoPoster =\s*[\s\S]*display\.coverUrl/);
   assert.match(component, /function videoMimeType\(value: string\)/);
   assert.match(component, /<source[\s\S]*src=\{videoUrl \?\? ""\}[\s\S]*type=\{videoMimeType\(videoUrl \?\? ""\)\}/);
   assert.match(component, /className="video-resource__player"/);
   assert.match(styles, /\.video-resource__player\s*\{/);
+});
+
+test("does not repeat story video first-frame covers in the detail gallery", () => {
+  const component = fs.readFileSync(componentPath, "utf8");
+
+  assert.match(component, /display\.category === "科学故事" \|\| userSubmittedLiterature/);
+  assert.match(component, /images\.filter\(\(image\) => !\/\(\?:封面\|cover\)\/iu\.test\(image\.title\)\)/);
 });
 
 test("adds a compact mobile return-home control beside the lab search", () => {

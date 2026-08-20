@@ -459,9 +459,12 @@ function KnowledgeDetail({
   const userSubmittedLiterature =
     (display.category === "科学诗" || display.category === "科学故事") &&
     item?.allocationBasis === "用户提交";
-  // A cover belongs on the resource card. Do not repeat it as a large,
-  // content-less gallery entry in details for newly submitted literature.
-  const detailImages = userSubmittedLiterature
+  // Story covers are the first frame of the video. They belong on the
+  // catalogue card and as the video's poster, so showing them again as a
+  // gallery item creates a duplicate block in the detail dialog. User-
+  // submitted poem covers follow the same rule, while built-in poem artwork
+  // remains available as the poem's detail image.
+  const detailImages = display.category === "科学故事" || userSubmittedLiterature
     ? images.filter((image) => !/(?:封面|cover)/iu.test(image.title))
     : images;
   const imageGroups = [
@@ -479,6 +482,10 @@ function KnowledgeDetail({
   const videoResources = display.resources.filter(
     (resource) => resource.type === "视频资源" && resource.isPublic,
   );
+  const videoPoster =
+    display.coverUrl ||
+    images.find((image) => /(?:封面|cover)/iu.test(image.title))?.publicPath ||
+    (display.category === "科学故事" ? scienceStoryCoverPath(display) : "");
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -590,6 +597,7 @@ function KnowledgeDetail({
                           controls
                           playsInline
                           preload="metadata"
+                          poster={videoPoster || undefined}
                           aria-label={`播放${display.title}的${videoLabel}`}
                         >
                           <source src={videoUrl ?? ""} type={videoMimeType(videoUrl ?? "")} />
@@ -1366,8 +1374,22 @@ export function ScienceLab({
     (item: ScienceKnowledgeSummary, action: ExperimentAgentAction) => {
       const prompt = action === "analyze"
         ? `请解析科学实验《${item.title}》。年龄段：${item.ageLabel || "未指定"}；主题：${item.topic || "未指定"}；资源 ID：${item.id}。我会继续补充现场观察或图片。`
-        : `请参考科学实验《${item.title}》生成类似主题活动方案。年龄段：${item.ageLabel || "未指定"}；主题：${item.topic || "未指定"}；资源 ID：${item.id}。`;
-      window.dispatchEvent(new CustomEvent("kexiaobei:open", { detail: { prompt } }));
+        : `请参考科学实验《${item.title}》生成一份同主题活动方案。主题：《${item.title}》；班级（适用年龄段）：${item.ageLabel || "未指定"}；活动时长：20 分钟；输出格式：Word 文档。只输出当前主题方案，不附加其他实验链接或推荐资源。请同时导出为 DOCX 文件。参考资料主题：${item.topic || "未指定"}；资源 ID：${item.id}。`;
+      window.dispatchEvent(new CustomEvent("kexiaobei:open", {
+        detail: {
+          prompt,
+          ...(action === "similar"
+            ? {
+              lessonPlan: {
+                title: item.title,
+                ageGroup: item.ageLabel || "中班",
+                duration: "20 分钟",
+                wantsDocx: true,
+              },
+            }
+            : {}),
+        },
+      }));
     },
     [],
   );
