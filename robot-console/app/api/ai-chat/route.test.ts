@@ -1867,7 +1867,8 @@ describe("POST /api/ai-chat", () => {
       },
     ]);
     expect(openDifyStream).toHaveBeenCalledWith(expect.objectContaining({ conversationId: "old-text-conversation" }));
-    expect(vi.mocked(openDifyStream).mock.calls[0]?.[0].message).not.toContain("视觉实验分析");
+    expect(vi.mocked(openDifyStream).mock.calls[0]?.[0].message).toContain("上传文档解析");
+    expect(vi.mocked(openDifyStream).mock.calls[0]?.[0].message).not.toContain("检测到图片附件");
   });
 
   it("流式模型超时时，完整教案请求回退到教案正文而不是资料目录", async () => {

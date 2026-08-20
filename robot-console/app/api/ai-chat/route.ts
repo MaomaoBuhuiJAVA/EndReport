@@ -1686,13 +1686,20 @@ export async function POST(request: Request) {
   if (localExplanationResult) {
     return NextResponse.json(localExplanationResult);
   }
+  const documentRouteInstruction = attachment && files?.length && !hasImageAttachment
+    ? [
+      `[系统路由指令：检测到文档附件“${attachment.name}”，请直接进入“上传文档解析”分支。先使用教学文件解析器读取附件正文，再按用户问题完成分析、改写或导出；不要把文档当作图片，也不要进入视觉实验分析或实验复盘分支。]`,
+      "如果用户要求分析教案，请返回 document_diagnosis 结构化结果；如果用户要求导出文件，继续交给对应的文档交付节点。",
+      baseDifyMessage,
+    ].join("\n\n")
+    : baseDifyMessage;
   const difyMessage = buildDifyMessage(
     hasImageAttachment && files?.length
       ? [
         "[系统路由指令：检测到图片附件，请直接进入“视觉实验分析”分支。将用户输入和图片交给 qvq-max 读取；不要进入普通文本聊天、不要等待用户补充文字、不要生成文件。请尽快返回简洁的可见事实、证据不足和安全提醒。]",
         baseDifyMessage,
       ].join("\n\n")
-      : baseDifyMessage,
+      : documentRouteInstruction,
     enrichment.context,
   );
   const difyArgs = {
