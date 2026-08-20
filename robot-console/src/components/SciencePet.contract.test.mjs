@@ -96,6 +96,15 @@ test("rejects direct video and MIME-extension conflicts before creating a local 
   );
 });
 
+test("normalizes undersized images before submitting them to the visual analysis route", () => {
+  assert.match(component, /const VISION_MIN_IMAGE_EDGE = 512;/);
+  assert.match(component, /async function normalizeSmallImageForVision\(attachment: File\): Promise<File>/);
+  assert.match(component, /context\.fillStyle = "#ffffff";/);
+  assert.match(component, /canvas\.toBlob\(resolve, "image\/jpeg", 0\.9\)/);
+  assert.match(component, /const visionAttachment = await normalizeSmallImageForVision\(attachment\);/);
+  assert.match(component, /setSelectedAttachment\(visionAttachment\);/);
+});
+
 test("adds assistant-only copy and Xunfei speech actions without changing user bubbles", () => {
   assert.match(component, /import \{[^}]*\bCopy\b[^}]*\bVolume2\b[^}]*\} from "lucide-react"/);
   assert.match(component, /function handleCopyMessage\(/);

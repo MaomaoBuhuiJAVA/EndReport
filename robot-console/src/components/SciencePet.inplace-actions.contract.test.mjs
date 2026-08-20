@@ -3,8 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-const component = fs.readFileSync(path.resolve("src/components/SciencePet.tsx"), "utf8");
-const styles = fs.readFileSync(path.resolve("app/globals.css"), "utf8");
+const component = fs.readFileSync(path.resolve("src/components/SciencePet.tsx"), "utf8").replace(/\r\n/g, "\n");
+const styles = fs.readFileSync(path.resolve("app/globals.css"), "utf8").replace(/\r\n/g, "\n");
 const composerStart = component.indexOf('<div className="pet-chat__composer">');
 const composer = composerStart >= 0 ? component.slice(composerStart) : "";
 const composerForm = composer.match(/<form className="pet-chat__form"[\s\S]*?<\/form>/)?.[0] ?? "";
@@ -314,6 +314,25 @@ test("renders a large press-and-hold voice button in voice mode", () => {
   assert.match(component, /onPointerDown=\{startVoiceInput\}/);
   assert.match(component, /onPointerUp=\{stopVoiceInput\}/);
   assert.match(styles, /\.pet-chat__voice-button/);
+});
+
+test("supports WeChat-like voice gestures with a visible live transcript", () => {
+  assert.match(component, /type VoiceGesture = "send" \| "cancel" \| "transcribe"/);
+  assert.match(component, /onPointerMove=\{handleVoicePointerMove\}/);
+  assert.match(component, /onPointerCancel=\{cancelVoiceInput\}/);
+  assert.match(component, /action === "transcribe"/);
+  assert.match(component, /setComposerMode\("text"\)/);
+  assert.match(composer, /pet-chat__voice-hold/);
+  assert.match(composer, /voiceDraft/);
+  assert.match(styles, /\.pet-chat__voice-hold/);
+  assert.match(styles, /\.pet-chat__voice-hold-actions/);
+});
+
+test("keeps the mobile chat sheet stable for expanded Android viewports", () => {
+  assert.match(
+    styles,
+    /@media \(min-width: 721px\) and \(max-width: 1023px\)[\s\S]*?\.pet-chat\s*\{[\s\S]*?position:\s*fixed[\s\S]*?left:\s*6px[\s\S]*?width:\s*auto/,
+  );
 });
 
 test("styles the send control with a dark background", () => {
