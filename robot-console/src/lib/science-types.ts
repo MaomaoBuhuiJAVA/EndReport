@@ -42,6 +42,8 @@ export interface ScienceKnowledgeSummary {
   tags: string[];
   resourceTypes: ScienceResource["type"][];
   resources: ScienceResource[];
+  /** Optional generated/uploaded cover for literature resources. */
+  coverUrl?: string;
 }
 
 export interface ScienceKnowledgeItem extends ScienceKnowledgeSummary {

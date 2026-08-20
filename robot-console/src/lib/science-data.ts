@@ -1,4 +1,5 @@
 import fallbackPayload from "@/data/science-knowledge.json";
+import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import type {
   ScienceKnowledgeItem,
@@ -341,14 +342,21 @@ function groupResources(resources: ScienceResource[]) {
   return groups;
 }
 
-export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSummary[]> {
-  const packagedSummaries = fallbackItems.map(toSummary);
+const SCIENCE_DATA_CACHE_SECONDS = 60;
+const SCIENCE_DATA_CACHE_TAG = "science-knowledge";
 
-  try {
+/**
+ * The lab page is dynamic because it reads the database, but the catalogue
+ * changes much less often than it is viewed. Next's Data Cache avoids a new
+ * pair of Prisma queries for every page request while retaining a short TTL
+ * for newly imported materials.
+ */
+const getCachedDatabaseSummaries = unstable_cache(
+  async () => {
     const items = await prisma.scienceKnowledgeItem.findMany({
       orderBy: { sortOrder: "asc" },
     });
-    if (!items.length) return packagedSummaries;
+    if (!items.length) return [];
 
     const resources = await prisma.scienceKnowledgeResource.findMany({
       where: { isPublic: true },
@@ -356,7 +364,7 @@ export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSu
     });
     const groups = groupResources(resources.map(mapResource));
 
-    const databaseSummaries = items.map((item) =>
+    return items.map((item) =>
       toSummary(
         mapItem(
           {
@@ -383,28 +391,22 @@ export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSu
         ),
       ),
     );
+  },
+  ["science-knowledge-summaries-v1"],
+  { revalidate: SCIENCE_DATA_CACHE_SECONDS, tags: [SCIENCE_DATA_CACHE_TAG] },
+);
 
-    return mergeScienceKnowledgeSummaries(packagedSummaries, databaseSummaries);
-  } catch {
-    return packagedSummaries;
-  }
-}
-
-export async function getScienceKnowledgeItem(id: string): Promise<ScienceKnowledgeItem | null> {
-  const fallback = fallbackItems.find((entry) => entry.id === id);
-
-  try {
+const getCachedDatabaseItem = unstable_cache(
+  async (id: string): Promise<ScienceKnowledgeItem | null> => {
     const item = await prisma.scienceKnowledgeItem.findUnique({ where: { id } });
-    if (!item) {
-      return fallback ? normalizeFallbackItem(fallback) : null;
-    }
+    if (!item) return null;
 
     const resources = await prisma.scienceKnowledgeResource.findMany({
       where: { knowledgeBaseId: item.baseId, isPublic: true },
       orderBy: { sortOrder: "asc" },
     });
 
-    const databaseItem = mapItem(
+    return mapItem(
       {
         id: item.id,
         baseId: item.baseId,
@@ -427,6 +429,32 @@ export async function getScienceKnowledgeItem(id: string): Promise<ScienceKnowle
       },
       resources.map(mapResource),
     );
+  },
+  ["science-knowledge-item-v1"],
+  { revalidate: SCIENCE_DATA_CACHE_SECONDS, tags: [SCIENCE_DATA_CACHE_TAG] },
+);
+
+export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSummary[]> {
+  const packagedSummaries = fallbackItems.map(toSummary);
+
+  try {
+    const databaseSummaries = await getCachedDatabaseSummaries();
+    if (!databaseSummaries.length) return packagedSummaries;
+
+    return mergeScienceKnowledgeSummaries(packagedSummaries, databaseSummaries);
+  } catch {
+    return packagedSummaries;
+  }
+}
+
+export async function getScienceKnowledgeItem(id: string): Promise<ScienceKnowledgeItem | null> {
+  const fallback = fallbackItems.find((entry) => entry.id === id);
+
+  try {
+    const databaseItem = await getCachedDatabaseItem(id);
+    if (!databaseItem) {
+      return fallback ? normalizeFallbackItem(fallback) : null;
+    }
 
     if (!fallback) return applyScienceTopicCorrection(databaseItem);
 

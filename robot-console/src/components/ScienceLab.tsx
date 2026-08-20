@@ -165,7 +165,16 @@ function literatureTone(item: ScienceKnowledgeSummary) {
 }
 
 function scienceStoryCoverPath(item: ScienceKnowledgeSummary) {
-  return item.category === "科学故事" ? `/science-story-covers/${item.id}.webp` : "";
+  if (item.category !== "科学故事") return "";
+
+  if (item.coverUrl?.trim()) return item.coverUrl.trim();
+
+  const imageResource = item.resources.find(
+    (resource) => resource.type === "图片资源" && (resource.publicPath || resource.externalUrl),
+  );
+  if (imageResource) return imageResource.publicPath || imageResource.externalUrl;
+
+  return `/science-story-covers/${item.id}.webp`;
 }
 
 function sciencePoemCoverPath(item: ScienceKnowledgeSummary) {
@@ -251,6 +260,7 @@ function KnowledgeCard({
               src={literatureImage}
               alt=""
               fill
+              unoptimized
               sizes="(min-width: 720px) 30vw, 46vw"
               className="knowledge-card__literature-art"
               onError={isStory ? () => setStoryCoverFailed(true) : isPoem ? () => setPoemCoverFailed(true) : undefined}
