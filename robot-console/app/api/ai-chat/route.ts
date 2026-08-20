@@ -52,7 +52,13 @@ const ATTACHMENT_TYPE_MISMATCH_MESSAGE = "附件类型与文件扩展名不一�
 // upload/analysis before their first answer, so attachments get a longer
 // budget and periodic SSE progress frames keep the browser connection alive.
 const FAST_DIFY_STREAM_TIMEOUT_MS = 6_000;
-const COMPLEX_DIFY_STREAM_TIMEOUT_MS = 45_000;
+// A lesson-plan Chatflow usually waits for the document-generation node before
+// emitting its first SSE message.  In production that first message has taken
+// 48-55 seconds, so the old 45-second budget always fell through to the local
+// generic template.  Keep a separate budget for lesson plans so ordinary
+// requests remain responsive while generated documents are allowed to finish.
+const COMPLEX_DIFY_STREAM_TIMEOUT_MS = 90_000;
+const LESSON_PLAN_DIFY_STREAM_TIMEOUT_MS = 110_000;
 const ATTACHMENT_DIFY_STREAM_TIMEOUT_MS = 90_000;
 const SCIENCE_TOPIC_PATTERN = /(?:水|空气|气流|光影|光|影子|彩虹|植物|动物|昆虫|磁铁|磁力|磁性|磁极|吸铁|铁钉|重力|浮力|液体|溶解|蒸发|温度|热|电|能源|太阳|月亮|星星|天气|雨|雪|泡泡|身体|骨头|舌头|化学|密度|表面张力|虹吸|纸片|纸鱼|火山|流体)/u;
 const SCIENCE_CATALOG_FILTER_PATTERN = /科学诗|科学故事|科学实验|科学童谣|童谣|诗歌|托班|小班|中班|大班/u;
@@ -422,8 +428,49 @@ function lessonTableCell(value: string) {
   return value.replace(/\|/gu, "／").replace(/\s*\n\s*/gu, "；").trim() || "待填写";
 }
 
+function lessonStageDurations(value: string) {
+  const requested = Number(value.match(/\d+/u)?.[0] ?? 20);
+  const total = Number.isFinite(requested) && requested > 0 ? Math.round(requested) : 20;
+  const weights = [0.15, 0.4, 0.3, 0.15];
+  const durations = weights.map((weight) => Math.max(1, Math.round(total * weight)));
+  let difference = total - durations.reduce((sum, duration) => sum + duration, 0);
+  while (difference > 0) {
+    durations[1] += 1;
+    difference -= 1;
+  }
+  while (difference < 0) {
+    const index = durations.findIndex((duration) => duration > 1);
+    if (index < 0) break;
+    durations[index] -= 1;
+    difference += 1;
+  }
+  return durations;
+}
+
+function fallbackLessonDetails(title: string) {
+  const normalizedTitle = normalizeLessonTitle(title);
+  if (/枣/u.test(normalizedTitle)) {
+    return {
+      goals: "引导幼儿对枣子的来源产生兴趣，知道枣子长在枣树上；通过图片排序初步了解枣树开花、结青枣、成熟变红的过程，并愿意与同伴合作表达发现。",
+      preparation: "枣树开花、青枣和成熟红枣的图片或实物，去核红枣（切小块）和排序卡；每组小盘、记录纸、彩笔，活动前完成洗手并检查过敏情况。",
+      operation: "1. 教师出示枣树生长图片和排序卡，示范“枣花—青枣—红枣”的排序方法。\n2. 幼儿分组观察图片或实物，合作排序并在记录纸上画出发现。\n3. 教师巡回追问“花开后会变成什么”，根据幼儿需要提供顺序提示。",
+      question: "枣子是从哪里来的？它长在树上还是地里？",
+      response: "教师用图片和实物回应：“枣子是枣树的果实，先开花，再结出青枣，成熟后慢慢变红。”",
+    };
+  }
+
+  return {
+    goals: "引导幼儿围绕主题观察、猜想和表达，在分组操作中发现现象，学习与同伴合作并用自己的语言分享结果。",
+    preparation: "本次主题相关的安全实物或图片、分组操作材料、记录纸和彩笔；活动前检查材料完整性和操作安全。",
+    operation: "1. 教师示范安全的操作流程，幼儿先观察并说出猜想。\n2. 幼儿分组操作、观察和记录，教师巡回提供适量提示。\n3. 各组整理材料并准备分享自己的发现。",
+    question: `围绕“${title}”会发生什么，先说一说你的猜想。`,
+    response: "教师先肯定不同猜想，再引导幼儿用观察和操作寻找证据，最后用简洁语言梳理发现。",
+  };
+}
+
 function buildLessonPlanReply(chunk: SearchChunk | null, message = "", modelReply = "") {
   const title = chunk?.title ?? explicitLessonTopic(message) ?? namedTitle(message) ?? "幼儿科学活动";
+  const fallbackDetails = fallbackLessonDetails(title);
   const content = chunk?.content ?? "";
   const sourceTitle = chunk?.document.title ?? "表单填写信息";
   const sourceGoals = sectionText(content, /(?:^|\n)\s*一[、.．]\s*活动目标\s*/u, /(?:^|\n)\s*二[、.．]\s*活动准备/u);
@@ -434,33 +481,42 @@ function buildLessonPlanReply(chunk: SearchChunk | null, message = "", modelRepl
     /(?:^|\n)\s*(?:(?:四|五)[、.．]\s*|实验步骤\s*[:：]?)/u,
   );
   const steps = numberedItems(sourceActivity);
-  const sourceGoalText = sourceGoals || "引导幼儿在操作中观察现象、表达猜想，并分享自己的发现。";
-  const sourcePreparationText = sourcePreparation || "请根据资料详情准备相应材料，并提前检查活动安全。";
+  const sourceGoalText = sourceGoals || fallbackDetails.goals;
+  const sourcePreparationText = sourcePreparation || fallbackDetails.preparation;
   const operationSteps = steps.length
     ? steps.map((step, index) => `${index + 1}. ${step}`).join("\n")
-    : "1. 教师出示材料，邀请幼儿说一说自己的猜想。\n2. 幼儿分组操作、观察并记录。\n3. 交流发现，教师帮助梳理科学现象。";
+    : fallbackDetails.operation;
   const modelFields = modelReply ? referenceLessonFields(modelReply) : new Map<string, string>();
   const modelSections = modelReply ? lessonPlanSections(modelReply) : new Map<string, string>();
   const usableValue = (...candidates: Array<string | undefined>) => candidates.find((value) => meaningfulReferenceValue(value))?.trim() ?? "";
   const classValue = requestLessonField(message, /班级(?:（[^）]*）)?\s*[:：]\s*([^；;。！？!?\n]+)/u);
   const durationValue = requestLessonField(message, /活动时长\s*[:：]\s*([^；;。！？!?\n]+)/u);
+  const [introMinutes, operationMinutes, shareMinutes, summaryMinutes] = lessonStageDurations(durationValue);
   const goalText = usableValue(modelFields.get("活动目标"), modelSections.get("goals"), sourceGoalText) || sourceGoalText;
   const preparationText = usableValue(modelFields.get("活动准备"), modelSections.get("preparation"), sourcePreparationText) || sourcePreparationText;
   const activityCandidate = usableValue(modelFields.get("活动内容"), modelSections.get("activity"));
   const fallbackActivity = [
     "设计意图：以幼儿熟悉的生活情境引发好奇，鼓励幼儿先猜想、再操作、再表达，在完整探究过程中积累科学经验。",
-    "（一）情境导入与猜想（约5分钟）",
-    `1. 教师出示本次活动材料，围绕“《${title}》会发生什么变化”提出问题，请幼儿观察、触摸并说出自己的猜想。`,
-    "2. 预设幼儿回应：幼儿用自己的话表达不同想法。教师回应：每一种猜想都很有价值，我们马上用实验来验证。",
-    "（二）分组操作与记录（约15分钟）",
-    `1. 教师示范一次安全、完整的操作流程，并提醒幼儿按顺序取放材料、与同伴合作和及时记录。\n${operationSteps}`,
-    "2. 幼儿分组操作，教师巡回观察：对有困难的幼儿给予适量提示，对有新发现的幼儿追问“你是怎么做到的”“和刚才有什么不一样”。",
-    "（三）分享表达与归纳（约5分钟）",
-    "1. 邀请幼儿展示记录或操作结果，说一说自己的发现；教师将不同结果并列呈现，引导幼儿比较。",
-    "2. 教师用幼儿能理解的语言小结现象，肯定认真观察、合作和表达的行为，并提示幼儿把材料归位。",
-    "（四）总结延伸（约5分钟）",
-    "1. 教师带领幼儿回顾“猜想、操作、发现”的过程，帮助幼儿把操作结果和开始的猜想联系起来。",
-    "2. 将安全、适宜的材料投放到科学区，鼓励幼儿在区域活动中继续尝试，并请幼儿把新的发现分享给同伴。",
+    `（一）情境导入与猜想（导入猜想，约${introMinutes}分钟）`,
+    `教师行为：${fallbackDetails.question}出示安全材料，请幼儿观察并说出猜想。`,
+    "幼儿可能回应或表现：幼儿用自己的话表达不同想法，也可能暂时说不清楚。",
+    `教师回应：${fallbackDetails.response}`,
+    `建议时长：${introMinutes}分钟。`,
+    `（二）分组操作与记录（分组操作，约${operationMinutes}分钟）`,
+    `教师行为：示范一次安全、完整的操作流程，提醒幼儿按顺序取放材料、与同伴合作和及时记录。\n${operationSteps}`,
+    "幼儿可能回应或表现：幼儿分组观察、操作和记录，可能因顺序或材料使用产生讨论。",
+    "教师回应：教师巡回观察，对有困难的幼儿给予适量提示，对有新发现的幼儿追问“你是怎么做到的”“和刚才有什么不一样”。",
+    `建议时长：${operationMinutes}分钟。`,
+    `（三）分享表达与归纳（分享表达，约${shareMinutes}分钟）`,
+    "教师行为：邀请各组展示记录或操作结果，说一说自己的发现，并将不同结果并列呈现，引导幼儿比较。",
+    "幼儿可能回应或表现：幼儿用动作、词语或记录图表达发现，部分幼儿需要同伴或图片提示。",
+    "教师回应：先肯定认真观察和合作，再用幼儿能理解的语言梳理共同点与差异，提示幼儿把材料归位。",
+    `建议时长：${shareMinutes}分钟。`,
+    `（四）总结延伸（总结延伸，约${summaryMinutes}分钟）`,
+    "教师行为：带领幼儿回顾“猜想、操作、发现”的过程，把操作结果和开始的猜想联系起来，并提出生活延伸问题。",
+    "幼儿可能回应或表现：幼儿说出最想继续尝试的内容，或联系家庭生活分享经验。",
+    "教师回应：肯定幼儿的提问，将安全、适宜的材料投放到科学区，鼓励幼儿继续观察并把新的发现分享给同伴。",
+    `建议时长：${summaryMinutes}分钟。`,
   ].join("\n");
   const activityText = hasDetailedLessonActivity(activityCandidate) ? activityCandidate : fallbackActivity;
   const keyPointsText = usableValue(
@@ -576,10 +632,30 @@ function referenceTableCells(line: string) {
 function referenceLessonFields(reply: string) {
   const fields = new Map<string, string>();
   let pendingHeaders: Array<string | null> | null = null;
+  let activeLabel: string | null = null;
+  let activeLines: string[] = [];
+
+  const flushActiveField = () => {
+    if (!activeLabel) return;
+    const value = activeLines.join("\n").trim();
+    // Keep an explicitly present but empty field (for example “教师：”) so
+    // the completeness check can distinguish a real template from a missing
+    // section.  Required fields still reject empty/placeholder values below.
+    fields.set(activeLabel, value);
+    activeLabel = null;
+    activeLines = [];
+  };
+
+  const normalizedHeading = (value: string) => value
+    .replace(/^\s*#{1,6}\s*/u, "")
+    .replace(/^\s*[一二三四五六七八九十\d]+\s*[、.．]\s*/u, "")
+    .replace(/[：:]\s*$/u, "")
+    .trim();
 
   for (const rawLine of reply.replace(/\r/g, "").split("\n")) {
     const cells = referenceTableCells(rawLine);
     if (cells !== null) {
+      flushActiveField();
       if (!cells.length) continue;
       const labels = cells.map((cell) => referenceLessonField(cell));
       if (cells.length === 2 && labels[0] && !labels[1]) {
@@ -598,9 +674,27 @@ function referenceLessonFields(reply: string) {
 
     pendingHeaders = null;
     const fieldMatch = rawLine.match(/^\s*(?:#{1,6}\s*)?(?:[-*]\s*)?([^：:|]{1,12})\s*[：:]\s*(.*)$/u);
-    const label = fieldMatch ? referenceLessonField(fieldMatch[1] ?? "") : null;
-    if (label) fields.set(label, fieldMatch?.[2]?.trim() ?? "");
+    const inlineLabel = fieldMatch ? referenceLessonField(fieldMatch[1] ?? "") : null;
+    const headingCandidate = normalizedHeading(rawLine);
+    const headingLabel = !inlineLabel && headingCandidate
+      ? referenceLessonField(headingCandidate)
+      : null;
+    const label = inlineLabel ?? headingLabel;
+    if (label) {
+      flushActiveField();
+      activeLabel = label;
+      const inlineValue = inlineLabel ? fieldMatch?.[2]?.trim() ?? "" : "";
+      if (inlineValue) activeLines.push(inlineValue);
+      continue;
+    }
+
+    // No new field label: retain the paragraph under the current field. This
+    // is essential for the no-table DOCX style, where headings such as
+    // “四、活动内容” are followed by several paragraphs and stage labels.
+    if (activeLabel && rawLine.trim()) activeLines.push(rawLine.trim());
   }
+
+  flushActiveField();
 
   return fields;
 }
@@ -1069,9 +1163,9 @@ async function buildBlockingDifyResult(
 }
 
 function difyStreamTimeout(message: string, attachment?: AttachmentStatus) {
-  return attachment
-    ? ATTACHMENT_DIFY_STREAM_TIMEOUT_MS
-    : /(?:生成|创作|绘制|封面|图片|图像|导出|下载|文件|完整教案|分析(?:附件|图片))/u.test(message)
+  if (attachment) return ATTACHMENT_DIFY_STREAM_TIMEOUT_MS;
+  if (lessonPlanTitle(message)) return LESSON_PLAN_DIFY_STREAM_TIMEOUT_MS;
+  return /(?:生成|创作|绘制|封面|图片|图像|导出|下载|文件|完整教案|分析(?:附件|图片))/u.test(message)
     ? COMPLEX_DIFY_STREAM_TIMEOUT_MS
     : FAST_DIFY_STREAM_TIMEOUT_MS;
 }
@@ -1183,6 +1277,20 @@ function answerWithoutStructuredFence(answer: string) {
   return answer.replace(/```agent-result\s*[\s\S]*?\n```/giu, "").trim();
 }
 
+function visionVisibleAnswer(answer: string, agentResult?: AgentResult) {
+  const visible = answerWithoutStructuredFence(answer);
+  // The classifier often prefixes the final fenced result with a short label
+  // such as “视觉实验分析”. Do not expose that label as the completed answer;
+  // let the structured-result card provide the stable user-facing summary.
+  if (
+    agentResult?.kind === "vision_observation" &&
+    (!visible || /^(?:视觉实验分析|视觉分析|图片识别|图片分析)(?:[：:：\s].*)?$/iu.test(visible))
+  ) {
+    return structuredResultReply(agentResult);
+  }
+  return visible || structuredResultReply(agentResult) || "图片识别已完成。";
+}
+
 function acceptsEventStream(request: Request) {
   return request.headers
     .get("accept")
@@ -1241,11 +1349,18 @@ function streamChatResponse(
         const metadataSources: unknown[] = [];
         const files: unknown[] = [];
         let directVisionAnswer: string | null = null;
+        // qvq-max normally emits ordinary prose from its node before the
+        // downstream DeepSeek advice node produces the structured
+        // `vision_observation`. Keep that prose as a fallback, but do not
+        // close the stream on it: the structured result is more useful and
+        // must be allowed to arrive first.
+        let visionFallbackAnswer: string | null = null;
         let streamError: string | undefined;
         let receivedAnswer = false;
         let streamTimedOut = false;
         let progressTimer: ReturnType<typeof setInterval> | null = null;
         const upstreamAbortController = new AbortController();
+        let finishDirectVision: ((directAnswer: string) => void) | null = null;
         const closeController = () => {
           if (streamClosed) return;
           streamClosed = true;
@@ -1261,6 +1376,10 @@ function streamChatResponse(
             clearInterval(progressTimer);
             progressTimer = null;
           }
+          if (isVisionRequest && visionFallbackAnswer && finishDirectVision) {
+            finishDirectVision(visionFallbackAnswer);
+            return;
+          }
           const fallback = fallbackChatResult(enrichment, message, casualMessage, attachment, isVisionRequest);
           controller.enqueue(eventFrame({ type: "done", ...fallback }, encoder));
           closeController();
@@ -1270,7 +1389,7 @@ function streamChatResponse(
         // the optional knowledge-retrieval and DeepSeek advice nodes complete.
         // Finish the image request here so the user sees the observation as
         // soon as the visual model is done.
-        const finishDirectVision = (directAnswer: string) => {
+        finishDirectVision = (directAnswer: string) => {
           if (streamClosed || request.signal.aborted) return;
           clearTimeout(firstAnswerTimeout);
           if (progressTimer) {
@@ -1290,7 +1409,7 @@ function streamChatResponse(
             sameOrigin: request.url,
             difyApiUrl,
           });
-          const visibleAnswer = answerWithoutStructuredFence(safeAnswer) || structuredResultReply(parsedResult) || "图片识别已完成。";
+          const visibleAnswer = visionVisibleAnswer(safeAnswer, parsedResult);
           const result = buildChatResult(
             enrichment,
             message,
@@ -1337,7 +1456,8 @@ function streamChatResponse(
               // The classifier node also emits a short `answer` event (often
               // just “视觉实验分析”). It is not the image result and must not
               // stop the attachment timeout. Only a complete vision result can
-              // do that; qvq node output is handled below and returns directly.
+              // do that; qvq node output is handled below and only a complete
+              // structured observation may return directly.
               const completeVisionAnswer = isVisionRequest &&
                 parseDifyAgentResult(answer, message, metadata, [], request, difyApiUrl)?.kind === "vision_observation";
               if (((!isVisionRequest && meaningfulAnswer) || completeVisionAnswer) && !receivedAnswer) {
@@ -1359,14 +1479,36 @@ function streamChatResponse(
             if (isVisionRequest && event.data !== undefined) {
               const visualOutput = directVisionOutputFromEvent(event);
               if (visualOutput && !directVisionAnswer) {
-                directVisionAnswer = visualOutput;
-                finishDirectVision(visualOutput);
-                return;
+                // A qvq node's plain-text observation is useful evidence, but
+                // it is not the final contract consumed by the UI. Only an
+                // actually parseable, complete vision result may finish the
+                // stream early; otherwise continue to the downstream advice
+                // and structured-output nodes.
+                const parsedVisualOutput = parseDifyAgentResult(
+                  visualOutput,
+                  message,
+                  undefined,
+                  [],
+                  request,
+                  difyApiUrl,
+                );
+                if (parsedVisualOutput?.kind === "vision_observation") {
+                  directVisionAnswer = visualOutput;
+                  finishDirectVision?.(visualOutput);
+                  return;
+                }
+                if (!visionFallbackAnswer) visionFallbackAnswer = visualOutput;
               }
             }
             if (event.error) {
               streamError = event.error;
-              controller.enqueue(eventFrame({ type: "error", message: event.error }, encoder));
+              // A qvq observation collected before a downstream failure is a
+              // usable, evidence-bounded answer. Let the normal fallback
+              // completion below deliver it instead of terminating on an
+              // error-only frame.
+              if (!isVisionRequest || !visionFallbackAnswer) {
+                controller.enqueue(eventFrame({ type: "error", message: event.error }, encoder));
+              }
               break;
             }
           }
@@ -1381,6 +1523,10 @@ function streamChatResponse(
 
         if (streamTimedOut || streamClosed) return;
         if (streamError) {
+          if (isVisionRequest && visionFallbackAnswer && finishDirectVision) {
+            finishDirectVision(visionFallbackAnswer);
+            return;
+          }
           closeController();
           return;
         }
@@ -1395,12 +1541,17 @@ function streamChatResponse(
           difyApiUrl,
           requestUrl: request.url,
         });
-        // Prefer the completed qvq-max node output when the downstream
-        // structured-output node returned only `{type: boolean}` or an
-        // incomplete fence. This keeps the image evidence visible without
-        // changing ordinary text-chat responses.
-        const answerForVision = isVisionRequest && directVisionAnswer && isVisionPlaceholderAnswer(answer)
-          ? directVisionAnswer
+        // Prefer a completed downstream vision result. If the downstream
+        // result is only a placeholder (or ordinary classifier prose), use
+        // the qvq observation captured above instead of exposing an empty or
+        // misleading answer. Ordinary text-chat responses are unchanged.
+        const parsedStreamAnswer = isVisionRequest
+          ? parseDifyAgentResult(answer || null, message, metadata, outputFileSources, request, difyApiUrl)
+          : undefined;
+        const visionFallback = directVisionAnswer ?? visionFallbackAnswer;
+        const answerForVision = isVisionRequest && visionFallback &&
+          parsedStreamAnswer?.kind !== "vision_observation"
+          ? visionFallback
           : answer;
         const parsedResult = enrichment.requestedLessonTitle
           ? undefined
@@ -1416,7 +1567,7 @@ function streamChatResponse(
           difyApiUrl,
         });
         const visibleAnswer = stripLessonPlanCatalogLinks(
-          answerWithoutStructuredFence(safeAnswer),
+          isVisionRequest ? visionVisibleAnswer(safeAnswer, parsedResult) : answerWithoutStructuredFence(safeAnswer),
           enrichment.requestedLessonTitle,
           enrichment.unrelatedResourceTitles,
         ) || structuredResultReply(parsedResult) || null;
@@ -1491,7 +1642,12 @@ export async function POST(request: Request) {
   // Do not carry a previous text conversation into visual analysis. A stale
   // conversation can send the Dify classifier back through the regular chat
   // branch before it reaches qvq-max.
-  const conversationId = hasImageAttachment ? undefined : difyConversationId(body.conversationId);
+  // A generated lesson is a standalone artifact.  Reusing the chat's previous
+  // conversation can send Dify back through an earlier classifier branch and
+  // make the result depend on unrelated messages in the floating assistant.
+  const conversationId = hasImageAttachment || lessonPlanTitle(message)
+    ? undefined
+    : difyConversationId(body.conversationId);
   const targetResourceId = poetryCoverTargetId(body.targetResourceId);
   let attachmentStatus: AttachmentStatus | undefined;
   let files: DifyFileReference[] | undefined;

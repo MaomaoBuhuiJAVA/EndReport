@@ -143,6 +143,15 @@ function parseLessonMarkdown(markdown: string): LessonSections {
   return sections;
 }
 
+function removeGeneratedFieldAppendix(markdown: string) {
+  // The chat fallback includes a compact field table for display.  It is
+  // useful in the message, but feeding that appendix back into the DOCX
+  // parser appends the entire activity cell a second time.  Keep genuine
+  // field tables (which may be the model's only output) and remove only the
+  // explicitly labelled generated appendix.
+  return markdown.replace(/(?:^|\n)\s*#{1,6}\s*备课表字段\s*\n[\s\S]*$/u, "").trim();
+}
+
 function paragraphXml(
   value: string,
   options: { align?: "left" | "center"; bold?: boolean; size?: number; font?: "黑体" | "宋体" } = {},
@@ -273,7 +282,10 @@ export async function buildLessonPlanDocx(
   const zip = new JSZip();
   zip.file("[Content_Types].xml", contentTypesXml());
   zip.file("_rels/.rels", rootRelationshipsXml());
-  zip.file("word/document.xml", buildDocumentXml(title.trim(), ageGroup.trim(), duration.trim(), markdown));
+  zip.file(
+    "word/document.xml",
+    buildDocumentXml(title.trim(), ageGroup.trim(), duration.trim(), removeGeneratedFieldAppendix(markdown)),
+  );
   zip.file("word/_rels/document.xml.rels", documentRelationshipsXml());
   zip.file("word/styles.xml", stylesXml());
   zip.file("word/settings.xml", settingsXml());

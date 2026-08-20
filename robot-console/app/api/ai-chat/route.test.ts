@@ -696,6 +696,69 @@ describe("POST /api/ai-chat", () => {
     expect(payload.reply).not.toContain("延伸与安全提示");
   });
 
+  it("保留 Dify 返回的无表格完整教案，不用通用兜底内容覆盖", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [{
+        id: "science-jujube",
+        documentId: "jujube",
+        title: "枣子是怎么来的",
+        document: { title: "科小贝实验室：枣子是怎么来的" },
+        content: "园本主题资料。",
+      }],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: [
+        "主题：枣子是怎么来的",
+        "领域：科学（自然探究）",
+        "班级：中班",
+        "来源：教师自编",
+        "教学活动：综合探究活动",
+        "时间：20分钟",
+        "教师：",
+        "活动目标：",
+        "知道枣子长在枣树上，愿意观察并表达自己的猜想。",
+        "重点难点：重点是认识枣子的来源；难点是理解开花、结果、成熟的顺序。",
+        "活动准备：枣树图片、枣花青枣红枣排序卡、记录纸。",
+        "活动内容：",
+        "设计意图：从幼儿熟悉的食物经验出发，引导其观察、排序和表达。",
+        "（一）导入猜想（约3分钟）",
+        "教师行为：出示红枣并提问枣子从哪里来。",
+        "幼儿可能回应或表现：有人说树上，有人说地里。",
+        "教师回应：肯定不同猜想并出示枣树图片。",
+        "（二）分组操作（约8分钟）",
+        "教师行为：指导幼儿合作排列枣花、青枣和红枣卡片。",
+        "幼儿可能回应或表现：幼儿讨论先后顺序并记录。",
+        "教师回应：追问花谢后会发生什么。",
+        "（三）分享表达（约6分钟）",
+        "教师行为：请各组说明排序依据。",
+        "幼儿可能回应或表现：幼儿用语言或动作讲述生长过程。",
+        "教师回应：用完整句式梳理共同发现。",
+        "（四）总结延伸（约3分钟）",
+        "教师行为：回顾枣子从开花到成熟的过程并提出家庭观察任务。",
+        "幼儿可能回应或表现：联系生活说出红枣食物。",
+        "教师回应：鼓励继续观察并分享。",
+        "备注：枣子去核切小后再提供，关注过敏和吞咽安全。",
+        "活动反思：记录幼儿是否能按顺序表达并调整分组材料。",
+      ].join("\n"),
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "请生成《枣子是怎么来的》完整教案" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload.provider).toBe("dify");
+    expect(payload.reply).toContain("枣子长在枣树上");
+    expect(payload.reply).toContain("（二）分组操作（约8分钟）");
+    expect(payload.reply).not.toContain("请根据资料详情准备相应材料");
+    expect(payload.reply).not.toContain("### 备课表字段");
+  });
+
   it("教案分析语义不会被当成完整教案生成", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({
       chunks: [{
@@ -1609,6 +1672,31 @@ describe("POST /api/ai-chat", () => {
     );
   });
 
+  it("生成完整教案时不复用聊天中的旧 Dify 会话", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: "《枣子是怎么来的》教案已生成。",
+      conversationId: "fresh-lesson-conversation",
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({
+          message: "请生成一份完整教案。主题：枣子是怎么来的；班级（适用年龄段）：中班；活动时长：20 分钟。",
+          conversationId: "old-unrelated-conversation",
+        }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      conversationId: "fresh-lesson-conversation",
+    });
+    expect(generateDifyReply).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: undefined }),
+    );
+  });
+
   it("使用已配置的 Dify API 地址", async () => {
     const previousApiUrl = process.env.DIFY_API_URL;
     process.env.DIFY_API_URL = "https://dify.example/v1/chat-messages";
@@ -1958,6 +2046,133 @@ describe("POST /api/ai-chat", () => {
       type: "done",
       reply: "图片中可见透明杯、吸管和清水。",
       conversationId: "qvq-fallback",
+    });
+  });
+
+  it("图片流等待下游结构化结果，并优先返回它而不是 qvq 普通文本", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(uploadDifyFile).mockResolvedValue({
+      type: "image",
+      transfer_method: "local_file",
+      upload_file_id: "dify-qvq-structured",
+    });
+    const visionResult = {
+      kind: "vision_observation",
+      image_type: "实验材料图",
+      facts: ["下游整理确认图片中可见透明杯"],
+      judgements: ["材料摆放属于准备阶段"],
+      missing_evidence: ["未看到完整操作过程"],
+      actions: ["补充操作步骤照片"],
+      safety: ["玻璃器皿由教师协助"],
+      confidence: 0.9,
+      privacy_visibility: "teacher_only",
+      privacy_risk: false,
+    };
+    const structuredAnswer = ["```agent-result", JSON.stringify(visionResult), "```"].join("\n");
+    vi.mocked(openDifyStream).mockResolvedValue(
+      new Response(
+        [
+          `data: ${JSON.stringify({ event: "message", answer: "视觉实验分析" })}`,
+          "",
+          `data: ${JSON.stringify({
+            event: "node_finished",
+            conversation_id: "qvq-structured",
+            data: {
+              node_type: "llm",
+              title: "qvq-max 视觉实验观察",
+              outputs: { text: "qvq先看到透明杯和吸管。" },
+            },
+          })}`,
+          "",
+          `data: ${JSON.stringify({
+            event: "message",
+            answer: structuredAnswer,
+          })}`,
+          "",
+          `data: ${JSON.stringify({ event: "message_end", conversation_id: "qvq-structured" })}`,
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+
+    const formData = new FormData();
+    formData.set("message", "请识别这张图片");
+    formData.set("attachment", new File(["image"], "experiment.png", { type: "image/png" }));
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: formData,
+      }),
+    );
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+
+    expect(events.map((event) => event.type)).toEqual(["meta", "status", "done"]);
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      conversationId: "qvq-structured",
+      reply: "图片识别已完成，详细的可见内容、证据缺口和安全提醒见下方。",
+      agentResult: {
+        kind: "vision_observation",
+        facts: ["下游整理确认图片中可见透明杯"],
+      },
+    });
+    expect(events.at(-1).reply).not.toContain("qvq先看到");
+  });
+
+  it("图片下游报错时仍用已暂存的 qvq 观察文本完成兜底", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(uploadDifyFile).mockResolvedValue({
+      type: "image",
+      transfer_method: "local_file",
+      upload_file_id: "dify-qvq-error-fallback",
+    });
+    vi.mocked(openDifyStream).mockResolvedValue(
+      new Response(
+        [
+          `data: ${JSON.stringify({
+            event: "node_finished",
+            conversation_id: "qvq-error-fallback",
+            data: {
+              node_type: "llm",
+              title: "qvq-max 视觉实验观察",
+              outputs: { text: "图片中可见透明杯和吸管。" },
+            },
+          })}`,
+          "",
+          `data: ${JSON.stringify({ event: "error", message: "下游建议节点暂时不可用" })}`,
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+
+    const formData = new FormData();
+    formData.set("message", "请识别这张图片");
+    formData.set("attachment", new File(["image"], "experiment.png", { type: "image/png" }));
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: formData,
+      }),
+    );
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+
+    expect(events.map((event) => event.type)).toEqual(["meta", "status", "done"]);
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      conversationId: "qvq-error-fallback",
+      reply: "图片中可见透明杯和吸管。",
     });
   });
 
@@ -2425,6 +2640,48 @@ describe("POST /api/ai-chat", () => {
         url: signedDownloadUrl(),
       },
     ]);
+  });
+
+  it("流式教案仅在回答 Markdown 链接中返回 DOCX 时也能交付文件", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(openDifyStream).mockResolvedValue(
+      new Response(
+        [
+          `data: ${JSON.stringify({
+            event: "message",
+            answer: "[枣子是怎么来的完整教案.docx](https://upload.dify.ai/files/tools/jujube-plan.docx?timestamp=1&sign=abc)",
+          })}`,
+          "",
+          `data: ${JSON.stringify({ event: "message_end", conversation_id: "lesson-file-link" })}`,
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: JSON.stringify({
+          message: "请生成一份完整教案。主题：枣子是怎么来的；班级（适用年龄段）：中班；活动时长：20 分钟。",
+        }),
+      }),
+    );
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      files: [{
+        type: "document",
+        name: "枣子是怎么来的完整教案.docx",
+        url: signedDownloadUrl(),
+      }],
+    });
   });
 
   it("流式响应在 Dify 直接 files 为空时保留 metadata.files 中的教案", async () => {

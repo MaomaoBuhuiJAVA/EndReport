@@ -150,6 +150,8 @@ describe("buildLessonPlanDocx", () => {
     expect(documentXml?.slice(preparationStart, activityStart)).toContain("彩纸、吸管和记录卡。");
     expect(documentXml?.slice(activityStart, notesStart)).toContain("幼儿先观察纸片，再动手折叠并记录。");
     expect(documentXml?.slice(activityStart, notesStart)).not.toContain("能够比较不同折法带来的纸片变化。");
+    expect(documentXml).not.toContain("备课表字段");
+    expect(documentXml?.match(/幼儿先观察纸片，再动手折叠并记录。/gu)?.length).toBe(1);
   });
 
   it("maps the reference field table from a model reply into the template cells", async () => {
