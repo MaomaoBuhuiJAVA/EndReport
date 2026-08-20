@@ -197,6 +197,18 @@ function isDirectVideoUrl(value: string) {
   }
 }
 
+function videoMimeType(value: string) {
+  try {
+    const pathname = new URL(value).pathname.toLowerCase();
+    if (pathname.endsWith(".webm")) return "video/webm";
+    if (pathname.endsWith(".mov")) return "video/quicktime";
+    if (pathname.endsWith(".m4v")) return "video/x-m4v";
+  } catch {
+    // Invalid URLs are filtered by isDirectVideoUrl before this is used.
+  }
+  return "video/mp4";
+}
+
 function StoryVideoCover({ source, fallback, onError }: { source: string; fallback: string; onError: () => void }) {
   const [frame, setFrame] = useState("");
   useEffect(() => {
@@ -536,6 +548,7 @@ function KnowledgeDetail({
                       src={image.publicPath}
                       alt={image.title}
                       fill
+                      unoptimized={/^https?:\/\//iu.test(image.publicPath)}
                       sizes="(min-width: 720px) 410px, 90vw"
                     />
                   </span>
@@ -579,7 +592,7 @@ function KnowledgeDetail({
                           preload="metadata"
                           aria-label={`播放${display.title}的${videoLabel}`}
                         >
-                          <source src={videoUrl} type="video/mp4" />
+                          <source src={videoUrl ?? ""} type={videoMimeType(videoUrl ?? "")} />
                           您的浏览器不支持视频播放，请使用下方链接打开。
                         </video>
                       ) : null}
@@ -587,7 +600,7 @@ function KnowledgeDetail({
                         {videoUrl ? (
                           <a className="video-link" href={videoUrl} target="_blank" rel="noreferrer">
                             <PlayCircle size={19} />
-                            播放视频
+                            {isPlayableVideo ? "播放视频" : "打开视频页面"}
                             <ExternalLink size={15} />
                           </a>
                         ) : null}

@@ -61,7 +61,7 @@ describe("POST /api/ai-chat", () => {
     expect(payload.responseId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   });
 
-  it("先完成资料检索，再将结果传给 Dify", async () => {
+  it("先完成资料检索，明确资源请求无结果时直接返回零匹配", async () => {
     let searchStarted = false;
     let difyStarted = false;
     let releaseSearch!: (value: never) => void;
@@ -96,9 +96,12 @@ describe("POST /api/ai-chat", () => {
 
     releaseSearch({ chunks: [], photos: [] } as never);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(difyStarted).toBe(true);
+    expect(difyStarted).toBe(false);
     releaseDify({ answer: "可以试试一个小班科学实验。" } as never);
-    await expect(responsePromise).resolves.toBeInstanceOf(Response);
+    const response = await responsePromise;
+    await expect(response.json()).resolves.toMatchObject({
+      reply: expect.stringContaining("暂时没有匹配的小班科学实验"),
+    });
   });
 
   it("流式请求逐段返回 Dify 回复，并保留实验室详情入口", async () => {
@@ -252,8 +255,13 @@ describe("POST /api/ai-chat", () => {
       }),
     );
 
-    expect(response.headers.get("content-type")).not.toContain("text/event-stream");
-    await expect(response.json()).resolves.toMatchObject({
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
       reply: expect.stringContaining("你好，我是科小贝"),
       provider: "fallback",
     });
@@ -277,7 +285,7 @@ describe("POST /api/ai-chat", () => {
       new Request("http://localhost/api/ai-chat", {
         method: "POST",
         headers: { Accept: "text/event-stream" },
-        body: JSON.stringify({ message: "推荐一个小班科学实验" }),
+        body: JSON.stringify({ message: "请介绍一下你自己" }),
       }),
     );
 
@@ -1611,6 +1619,59 @@ describe("POST /api/ai-chat", () => {
     expect(vi.mocked(generateDifyReply).mock.calls[0]?.[0]).not.toHaveProperty("context");
   });
 
+  it("明确请求小班光影实验时不会返回其他类型资源", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [{
+        id: "science-poem-shadow",
+        documentId: "POEM-shadow",
+        title: "影子",
+        document: { title: "科小贝实验室：影子" },
+        content: "[LAB:POEM-shadow]\n类别：科学诗\n适用年龄：小班\n主题：光影\n摘要：一首关于影子的科学诗。",
+      }],
+      photos: [],
+    } as never);
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "推荐一个适合小班的光影实验，并说明材料和步骤。" }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      reply: expect.stringContaining("暂时没有匹配的小班科学实验"),
+      sources: [],
+      labLinks: [],
+    });
+    expect(generateDifyReply).not.toHaveBeenCalled();
+  });
+
+  it("科学特点问句优先返回资料中的原理而不是目录", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [{
+        id: "science-magnet-principle",
+        documentId: "EXP-magnet",
+        title: "磁铁的秘密",
+        document: { title: "科小贝实验室：磁铁的秘密" },
+        content: "[LAB:EXP-magnet]\n类别：科学实验\n适用年龄：小班\n主题：磁力\n科学原理：磁铁有南极和北极，同极相斥、异极相吸，并能吸引铁磁性材料。",
+      }],
+      photos: [],
+    } as never);
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "磁极有什么特点？" }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      reply: expect.stringContaining("同极相斥、异极相吸"),
+      provider: "fallback",
+    });
+    expect(generateDifyReply).not.toHaveBeenCalled();
+  });
+
   it("裸输入科学主题也会检索并直接返回本地依据", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({
       chunks: [{
@@ -1894,8 +1955,11 @@ describe("POST /api/ai-chat", () => {
         }),
       }),
     );
-    const payload = await response.json();
-
+    const fallbackEvents = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+    const payload = fallbackEvents.at(-1);
     expect(payload).toMatchObject({ provider: "fallback" });
     expect(payload.reply).toContain("《果农大冒险》完整教案");
     expect(payload.reply).toContain("活动过程");
@@ -2124,6 +2188,238 @@ describe("POST /api/ai-chat", () => {
       },
     });
     expect(events.at(-1).reply).not.toContain("qvq先看到");
+  });
+
+  it("图片流将 Dify 四段式普通文本转换为视觉结果卡片", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(uploadDifyFile).mockResolvedValue({
+      type: "image",
+      transfer_method: "local_file",
+      upload_file_id: "dify-plain-vision",
+    });
+    const plainVisionAnswer = [
+      "【可见证据】",
+      "- 一个白色纸杯，杯口朝上",
+      "- 一张浅蓝色纸片",
+      "",
+      "【不确定项】",
+      "- 无法确认纸杯内是否有液体",
+      "",
+      "【安全提示】",
+      "未见明确风险。",
+      "",
+      "【隐私提示】",
+      "未见明显隐私线索。",
+    ].join("\n");
+    vi.mocked(openDifyStream).mockResolvedValue(
+      new Response(
+        [
+          `data: ${JSON.stringify({ event: "message", answer: plainVisionAnswer })}`,
+          "",
+          `data: ${JSON.stringify({ event: "message_end", conversation_id: "plain-vision" })}`,
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+
+    const formData = new FormData();
+    formData.set("message", "请识别这张图片");
+    formData.set("attachment", new File(["image"], "experiment.png", { type: "image/png" }));
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: formData,
+      }),
+    );
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      conversationId: "plain-vision",
+      reply: "图片识别已完成，详细的可见内容、证据缺口和安全提醒见下方。",
+      agentResult: {
+        kind: "vision_observation",
+        facts: ["一个白色纸杯，杯口朝上", "一张浅蓝色纸片"],
+        missing_evidence: ["无法确认纸杯内是否有液体"],
+        privacy_risk: false,
+      },
+    });
+  });
+
+  it("阻塞图片请求也能解析 Dify 四段式普通文本", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(uploadDifyFile).mockResolvedValue({
+      type: "image",
+      transfer_method: "local_file",
+      upload_file_id: "dify-plain-vision-blocking",
+    });
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: [
+        "【可见证据】\n- 桌面上有透明杯和吸管",
+        "【不确定项】\n- 未看到完整操作步骤",
+        "【安全提示】\n玻璃容器应由教师协助使用",
+        "【隐私提示】\n未见儿童人像或姓名信息",
+      ].join("\n\n"),
+    });
+
+    const formData = new FormData();
+    formData.set("message", "请分析这张实验图片");
+    formData.set("attachment", new File(["image"], "experiment.png", { type: "image/png" }));
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: formData,
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      provider: "dify",
+      agentResult: {
+        kind: "vision_observation",
+        facts: ["桌面上有透明杯和吸管"],
+        judgements: ["未看到完整操作步骤"],
+        safety: ["玻璃容器应由教师协助使用"],
+      },
+    });
+  });
+
+  it("qvq 四段式观察文本不会抢先结束，仍优先采用下游结构化结果", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(uploadDifyFile).mockResolvedValue({
+      type: "image",
+      transfer_method: "local_file",
+      upload_file_id: "dify-qvq-plain-then-structured",
+    });
+    const qvqPlainAnswer = [
+      "【可见证据】\n- qvq 看到透明杯",
+      "【不确定项】\n- qvq 无法确认液体状态",
+      "【安全提示】\n未见明确风险",
+      "【隐私提示】\n未见明显隐私线索",
+    ].join("\n\n");
+    const downstreamResult = {
+      kind: "vision_observation",
+      image_type: "实验材料图",
+      facts: ["下游确认透明杯内有清水"],
+      judgements: ["材料处于实验准备阶段"],
+      missing_evidence: ["未看到操作过程"],
+      actions: ["补充操作步骤照片"],
+      safety: ["玻璃容器由教师协助"],
+      confidence: 0.88,
+      privacy_visibility: "public_after_review",
+      privacy_risk: false,
+    };
+    vi.mocked(openDifyStream).mockResolvedValue(
+      new Response(
+        [
+          `data: ${JSON.stringify({
+            event: "node_finished",
+            conversation_id: "qvq-plain-then-structured",
+            data: {
+              node_type: "llm",
+              title: "qvq-max 视觉实验观察",
+              outputs: { text: qvqPlainAnswer },
+            },
+          })}`,
+          "",
+          `data: ${JSON.stringify({
+            event: "message",
+            answer: ["```agent-result", JSON.stringify(downstreamResult), "```"].join("\n"),
+          })}`,
+          "",
+          `data: ${JSON.stringify({ event: "message_end", conversation_id: "qvq-plain-then-structured" })}`,
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+
+    const formData = new FormData();
+    formData.set("message", "请识别这张图片");
+    formData.set("attachment", new File(["image"], "experiment.png", { type: "image/png" }));
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: formData,
+      }),
+    );
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      agentResult: {
+        kind: "vision_observation",
+        facts: ["下游确认透明杯内有清水"],
+      },
+    });
+  });
+
+  it("视觉流为空时返回明确的可重试降级结果", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(uploadDifyFile).mockResolvedValue({
+      type: "image",
+      transfer_method: "local_file",
+      upload_file_id: "dify-empty-vision-stream",
+    });
+    vi.mocked(openDifyStream).mockResolvedValue(null);
+
+    const formData = new FormData();
+    formData.set("message", "请识别这张图片");
+    formData.set("attachment", new File(["image"], "experiment.png", { type: "image/png" }));
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: formData,
+      }),
+    );
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      agentResult: { kind: "degraded", code: "model_unavailable", retry: true },
+      reply: expect.stringContaining("图片分析暂未完成"),
+    });
+  });
+
+  it("图片上传失败时不把四段式文字误标为视觉识别结果", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(uploadDifyFile).mockResolvedValue(null);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: [
+        "【可见证据】\n请先重新上传图片",
+        "【不确定项】\n当前没有可读取的附件",
+        "【安全提示】\n请勿上传包含儿童姓名的图片",
+        "【隐私提示】\n建议仅教师可见",
+      ].join("\n\n"),
+    });
+
+    const formData = new FormData();
+    formData.set("message", "请识别这张图片");
+    formData.set("attachment", new File(["image"], "experiment.png", { type: "image/png" }));
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", { method: "POST", body: formData }),
+    );
+    const payload = await response.json();
+
+    expect(payload.attachment).toMatchObject({ name: "experiment.png", status: "unavailable" });
+    expect(payload.agentResult).toBeUndefined();
   });
 
   it("图片下游报错时仍用已暂存的 qvq 观察文本完成兜底", async () => {

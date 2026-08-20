@@ -200,6 +200,38 @@ function applyScienceTopicCorrection<T extends ScienceKnowledgeSummary>(item: T)
   };
 }
 
+const staleStoryAvailability = /视频原文件已按本地资料目录归档；公开播放地址接入后可直接替换此资源链接。/gu;
+
+function applyScienceContentCorrection<T extends ScienceKnowledgeSummary>(item: T): T {
+  const corrected = applyScienceTopicCorrection(item);
+  let excerpt = corrected.excerpt;
+  let body = "body" in corrected && typeof corrected.body === "string" ? corrected.body : "";
+  if (corrected.category === "科学故事" && corrected.videoUrl) {
+    const availability = "本故事视频已接入在线播放，可在资源详情中直接观看。";
+    excerpt = excerpt.replace(staleStoryAvailability, availability);
+    body = body.replace(staleStoryAvailability, availability);
+  }
+  if (corrected.title === "火焰掌" || corrected.title === "神奇的热气球") {
+    const warning = "安全警示：涉及易燃气体或明火，仅限成人教师在合规场所演示，幼儿不得操作、触碰或靠近点火区域；不具备安全条件时请改用视频观察。";
+    if (!excerpt.includes("安全警示")) excerpt = `${warning}\n${excerpt}`;
+    if (body && !body.includes("安全警示")) body = `${warning}\n\n${body}`;
+  }
+  if (corrected.title === "盐水发电风扇") {
+    const principle = "科学原理：镁片和碳片是两种不同电极，盐水充当电解质；电极发生电化学反应并形成闭合回路后产生电流，驱动小风扇。盐水帮助离子传导，但不是电能本身的来源。";
+    excerpt = excerpt.replace(/盐水可以产生电能，让风扇转动/gu, "不同电极与盐水电解质形成电化学电池，让风扇转动");
+    if (body && !body.includes("科学原理：镁片和碳片")) body = `${principle}\n\n${body}`;
+  }
+  if (corrected.title === "神奇泡泡实验") {
+    excerpt = excerpt.replace(/吸管[^。]*轻轻吸[^。]*液体/gu, "使用安全吹泡工具，禁止把液体吸入口中");
+    body = body.replace(/拿吸管伸进混合好的红色洗洁精液体中，轻轻吸一点液体。/u, "使用不会回吸液体的吹泡工具，禁止把液体吸入口中。");
+  }
+  return {
+    ...corrected,
+    excerpt,
+    ...(body ? { body } : {}),
+  } as T;
+}
+
 function toSummary(item: ScienceKnowledgeItem): ScienceKnowledgeSummary {
   const normalizedItem = {
     ...item,
@@ -281,7 +313,7 @@ function normalizeFallbackItem(item: ScienceKnowledgeItem) {
     sourceFile: cleanKnowledgeName(item.sourceFile),
   };
   const resources = normalizeResources(item.resources);
-  return applyScienceTopicCorrection({
+  return applyScienceContentCorrection({
     ...normalizedItem,
     resources,
     resourceTypes: Array.from(new Set(resources.map((resource) => resource.type))),
@@ -312,7 +344,7 @@ export function mergeScienceKnowledgeSummaries(
       (item) =>
         !packagedIds.has(item.id) && !packagedExperimentKeys.has(packagedExperimentKey(item)),
     ),
-  ].map(applyScienceTopicCorrection);
+  ].map(applyScienceContentCorrection);
 }
 
 function scienceResourceKey(resource: ScienceResource) {
@@ -472,7 +504,7 @@ const getCachedDatabaseItem = unstable_cache(
 );
 
 export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSummary[]> {
-  const packagedSummaries = fallbackItems.map(toSummary);
+  const packagedSummaries = fallbackItems.map((item) => applyScienceContentCorrection(toSummary(item)));
 
   try {
     const databaseSummaries = await getCachedDatabaseSummaries();
@@ -493,10 +525,10 @@ export async function getScienceKnowledgeItem(id: string): Promise<ScienceKnowle
       return fallback ? normalizeFallbackItem(fallback) : null;
     }
 
-    if (!fallback) return applyScienceTopicCorrection(databaseItem);
+    if (!fallback) return applyScienceContentCorrection(databaseItem);
 
     const packagedItem = normalizeFallbackItem(fallback);
-    return applyScienceTopicCorrection({
+    return applyScienceContentCorrection({
       ...mergeScienceKnowledgeRecord(packagedItem, databaseItem),
       videoUrl: databaseItem.videoUrl || packagedItem.videoUrl,
     });

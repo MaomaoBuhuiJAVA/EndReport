@@ -79,7 +79,17 @@ function normalizeBaseUrl(value) {
 
 function publicUrl(resource, publicBaseUrl) {
   if (!resource.publicPath) return "";
+  if (/^https?:\/\//iu.test(resource.publicPath)) return resource.publicPath;
   return `${publicBaseUrl}${resource.publicPath.startsWith("/") ? resource.publicPath : `/${resource.publicPath}`}`;
+}
+
+function currentStoryCopy(value, item) {
+  const text = String(value ?? "");
+  if (item.category !== "科学故事" || !item.videoUrl) return text;
+  return text.replace(
+    /视频原文件已按本地资料目录归档；公开播放地址接入后可直接替换此资源链接。/gu,
+    "本故事视频已接入在线播放，可通过本条目的视频资源直接观看。",
+  );
 }
 
 function resourceLines(resources, publicBaseUrl) {
@@ -107,7 +117,8 @@ function resourceLines(resources, publicBaseUrl) {
 
 function renderKnowledgeItem(item, publicBaseUrl) {
   const tags = (item.tags ?? []).map((tag) => displayText(tag)).filter(Boolean);
-  const body = redactDifyKnowledgeText(item.body) || redactDifyKnowledgeText(item.excerpt);
+  const body = redactDifyKnowledgeText(currentStoryCopy(item.body, item))
+    || redactDifyKnowledgeText(currentStoryCopy(item.excerpt, item));
   const metadata = [
     `- 资源类别：${item.category}`,
     `- 年龄段：${item.ageLabel}`,

@@ -51,17 +51,17 @@ const ATTACHMENT_TYPE_MISMATCH_MESSAGE = "附件类型与文件扩展名不一�
 // a short text reply. Vision workflows commonly spend over 45 seconds on
 // upload/analysis before their first answer, so attachments get a longer
 // budget and periodic SSE progress frames keep the browser connection alive.
-const FAST_DIFY_STREAM_TIMEOUT_MS = 6_000;
+const FAST_DIFY_STREAM_TIMEOUT_MS = 4_500;
 // A lesson-plan Chatflow usually waits for the document-generation node before
 // emitting its first SSE message.  In production that first message has taken
-// 48-55 seconds, so the old 45-second budget always fell through to the local
-// generic template.  Keep a separate budget for lesson plans so ordinary
+// 48-105 seconds, so the old 45-second budget often fell through to the local
+// generic template. Keep a separate budget for lesson plans so ordinary
 // requests remain responsive while generated documents are allowed to finish.
 const COMPLEX_DIFY_STREAM_TIMEOUT_MS = 90_000;
-const LESSON_PLAN_DIFY_STREAM_TIMEOUT_MS = 110_000;
+const LESSON_PLAN_DIFY_STREAM_TIMEOUT_MS = 118_000;
 const ATTACHMENT_DIFY_STREAM_TIMEOUT_MS = 90_000;
 const SCIENCE_TOPIC_PATTERN = /(?:水|空气|气流|光影|光|影子|彩虹|植物|动物|昆虫|磁铁|磁力|磁性|磁极|吸铁|铁钉|重力|浮力|液体|溶解|蒸发|温度|热|电|能源|太阳|月亮|星星|天气|雨|雪|泡泡|身体|骨头|舌头|化学|密度|表面张力|虹吸|纸片|纸鱼|火山|流体)/u;
-const SCIENCE_CATALOG_FILTER_PATTERN = /科学诗|科学故事|科学实验|科学童谣|童谣|诗歌|托班|小班|中班|大班/u;
+const SCIENCE_CATALOG_FILTER_PATTERN = /科学诗|科学故事|科学实验|科学童谣|童谣|诗歌|故事|实验|托班|小班|中班|大班/u;
 
 type AttachmentStatus = {
   name: string;
@@ -878,6 +878,95 @@ function parseDifyAgentResult(
   }) ?? undefined;
 }
 
+const PLAIN_VISION_SECTION_PATTERN = /(?:^|\n)\s*(?:[#>*-]+\s*)?(?:[【\[]\s*)?(可见证据|不确定项|安全提示|隐私提示)(?:\s*[】\]])?\s*[:：]?\s*[*_]*\s*/gu;
+
+function plainVisionSections(answer: string) {
+  const matches = Array.from(answer.matchAll(PLAIN_VISION_SECTION_PATTERN));
+  if (matches.length < 4) return null;
+
+  const sections = new Map<string, string>();
+  matches.forEach((match, index) => {
+    const label = match[1];
+    if (!label || sections.has(label)) return;
+    const start = (match.index ?? 0) + match[0].length;
+    const end = matches[index + 1]?.index ?? answer.length;
+    sections.set(label, answer.slice(start, end).trim());
+  });
+  return ["可见证据", "不确定项", "安全提示", "隐私提示"].every((label) => sections.has(label))
+    ? sections
+    : null;
+}
+
+function plainVisionItems(value: string | undefined) {
+  if (!value) return [];
+  const items: string[] = [];
+  for (const rawLine of value.split(/\r?\n/u)) {
+    const line = rawLine.replace(/\s+/gu, " ").trim();
+    if (!line) continue;
+    const item = line.replace(/^(?:[-*•]|\d+[.、)]|[一二三四五六七八九十]+[、.])\s*/u, "").trim();
+    if (!item) continue;
+    if (/^(?:[-*•]|\d+[.、)]|[一二三四五六七八九十]+[、.])\s*/u.test(line) || !items.length) {
+      items.push(item);
+    } else {
+      items[items.length - 1] = `${items[items.length - 1]} ${item}`.trim();
+    }
+  }
+  return items.slice(0, 12);
+}
+
+function parsePlainVisionObservation(
+  answer: string | null | undefined,
+  query: string,
+  metadata: unknown,
+  files: unknown,
+  request: Request,
+  difyApiUrl?: string,
+) {
+  if (!answer) return undefined;
+  const sections = plainVisionSections(answer);
+  if (!sections) return undefined;
+
+  const facts = plainVisionItems(sections.get("可见证据"));
+  const uncertain = plainVisionItems(sections.get("不确定项"));
+  const safety = plainVisionItems(sections.get("安全提示"));
+  const privacyText = sections.get("隐私提示") ?? "";
+  const privacyRisk = /仅教师可见|儿童|人像|姓名|隐私|身份|可识别/u.test(privacyText) &&
+    !/未见(?:明显)?(?:隐私|儿童|人像|姓名|身份)/u.test(privacyText);
+  const candidate = {
+    kind: "vision_observation",
+    image_type: "static_image",
+    facts: facts.length ? facts : ["图片中暂未读取到足够清晰的可见证据。"],
+    judgements: uncertain.length ? uncertain : ["仅凭当前图片无法确认实验目的或完整步骤。"],
+    missing_evidence: uncertain.length ? uncertain : ["未提供完整实验过程或结果证据。"],
+    actions: ["补充关键步骤照片或文字记录，便于进一步判断。"],
+    safety: safety.length ? safety : ["未见明确风险。"],
+    confidence: 0.65,
+    privacy_visibility: privacyRisk ? "teacher_only" : "public_after_review",
+    privacy_risk: privacyRisk,
+  };
+  return parseDifyAgentResult(
+    `\`\`\`agent-result\n${JSON.stringify(candidate)}\n\`\`\``,
+    query,
+    undefined,
+    undefined,
+    request,
+    difyApiUrl,
+  );
+}
+
+function parseDifyVisionResult(
+  answer: string | null | undefined,
+  query: string,
+  metadata: unknown,
+  files: unknown,
+  request: Request,
+  difyApiUrl?: string,
+) {
+  const parsed = parseDifyAgentResult(answer, query, metadata, files, request, difyApiUrl);
+  if (parsed?.kind === "vision_observation") return parsed;
+  return parsePlainVisionObservation(answer, query, metadata, files, request, difyApiUrl) ?? parsed;
+}
+
 async function synchronizeGeneratedPoetryCover(
   targetResourceId: string | undefined,
   agentResult: AgentResult | undefined,
@@ -975,20 +1064,17 @@ function buildDifyMessage(message: string, context: string) {
 }
 
 function isDirectScienceCatalogLookup(message: string, enrichment: ChatEnrichment) {
-  if (!enrichment.scienceChunks.length) return false;
   if (isContentCreationOrAnalysisRequest(message)) return false;
   const compact = message.replace(/[\s，,。！？!?、；：,.!?;:()[\]{}《》〈〉「」“”‘’"']/gu, "");
-  const asksForGenerationOrExplanation = /生成|创作|编写|写一|设计|教案|为什么|为何|原理|怎么|如何|解释|区别|作用/u.test(compact);
+  const asksForGenerationOrExplanation = /生成|创作|编写|写一|设计|教案|为什么|为何|原理|怎么|如何|解释|特点|特征|区别|作用/u.test(compact);
   if (asksForGenerationOrExplanation) return false;
 
   const hasCategory = SCIENCE_CATALOG_FILTER_PATTERN.test(compact);
-  const hasLookupIntent = /找|查|搜|检索|资源|资料|内容|目录|列表|查看|看看|展示|列出|哪些|有哪|有没有|想要|给我/u.test(compact);
+  const hasLookupIntent = /找|查|搜|检索|推荐|资源|资料|内容|目录|列表|查看|看看|展示|列出|哪些|有哪|有没有|想要|给我/u.test(compact);
   const hasScienceTopic = SCIENCE_TOPIC_PATTERN.test(compact);
 
   return (hasCategory && (hasLookupIntent || hasScienceTopic)) ||
-    // A short classroom prompt such as “磁极有什么特点” is normally a
-    // request to inspect the current topic, even when it omits “查找”.
-    (hasScienceTopic && (hasLookupIntent || compact.length <= 12));
+    (enrichment.scienceChunks.length > 0 && hasScienceTopic && compact.length <= 12);
 }
 
 function searchChunkField(chunk: SearchChunk, label: string) {
@@ -1011,11 +1097,49 @@ function localScienceCatalogReply(enrichment: ChatEnrichment) {
   ].join("\n");
 }
 
+function requestedScienceCategory(message: string) {
+  if (/科学实验|实验/u.test(message)) return "科学实验";
+  if (/科学故事|故事/u.test(message)) return "科学故事";
+  if (/科学诗|科学童谣|童谣|诗歌/u.test(message)) return "科学诗";
+  return "";
+}
+
+function chunkScienceCategory(chunk: SearchChunk) {
+  return searchChunkField(chunk, "类别");
+}
+
 function localScienceCatalogResult(enrichment: ChatEnrichment, message: string): ChatResult | null {
   if (!isDirectScienceCatalogLookup(message, enrichment)) return null;
-  const reply = localScienceCatalogReply(enrichment);
-  if (!reply) return null;
-  const matches = enrichment.scienceChunks.slice(0, 6);
+  const requestedCategory = requestedScienceCategory(message);
+  const chunkCategories = enrichment.scienceChunks
+    .map(chunkScienceCategory)
+    .filter(Boolean);
+  // Legacy or third-party search chunks may not expose a structured category.
+  // In that case keep the existing Dify path instead of guessing their type.
+  if (requestedCategory && enrichment.scienceChunks.length > 0 && chunkCategories.length === 0) {
+    return null;
+  }
+  const matchingChunks = requestedCategory
+    ? enrichment.scienceChunks.filter((chunk) => {
+      const chunkCategory = chunkScienceCategory(chunk);
+      return !chunkCategory || chunkCategory === requestedCategory;
+    })
+    : enrichment.scienceChunks;
+  const matchingEnrichment = { ...enrichment, scienceChunks: matchingChunks };
+  const reply = localScienceCatalogReply(matchingEnrichment);
+  if (!reply) {
+    const canonicalCategory = requestedCategory || "园本资源";
+    const age = message.match(/托班|小班|中班|大班/u)?.[0];
+    return {
+      responseId: randomUUID(),
+      reply: `资料库中暂时没有匹配的${age ? `${age}` : ""}${canonicalCategory}。你可以换一个主题或年龄段，我再继续查找。`,
+      provider: "fallback",
+      photos: [],
+      sources: [],
+      labLinks: [],
+    };
+  }
+  const matches = matchingChunks.slice(0, 6);
   return {
     responseId: randomUUID(),
     reply,
@@ -1039,7 +1163,7 @@ function sciencePrincipleFromChunk(chunk: SearchChunk) {
 }
 
 function isScienceExplanationQuestion(message: string) {
-  return /为什么|为何|原理|怎么(?:会|回事)?|如何|是什么|什么是|作用|区别|能否|是否|为什么会/u.test(message);
+  return /为什么|为何|原理|怎么(?:会|回事)?|如何|是什么|什么是|特点|特征|作用|区别|能否|是否|为什么会/u.test(message);
 }
 
 function localScienceExplanationResult(enrichment: ChatEnrichment, message: string): ChatResult | null {
@@ -1120,13 +1244,16 @@ async function buildBlockingDifyResult(
   difyApiKey?: string,
   attachment?: AttachmentStatus,
   targetResourceId?: string,
+  isVisionRequest = false,
 ) {
   const outputFileSources = mergeDifyOutputFileSources(
     { answer: difyReply?.answer, files: difyReply?.files, metadata: difyReply?.metadata },
     { sameOrigin: request.url, difyApiUrl },
   );
   const agentResult = difyReply && !enrichment.requestedLessonTitle
-    ? parseDifyAgentResult(difyReply.answer, message, difyReply.metadata, outputFileSources, request, difyApiUrl)
+    ? isVisionRequest
+      ? parseDifyVisionResult(difyReply.answer, message, difyReply.metadata, outputFileSources, request, difyApiUrl)
+      : parseDifyAgentResult(difyReply.answer, message, difyReply.metadata, outputFileSources, request, difyApiUrl)
     : undefined;
   const normalizedOutputFiles = normalizeDifyOutputFiles(outputFileSources, { sameOrigin: request.url, difyApiUrl });
   const outputFiles = signAiChatOutputFiles(normalizedOutputFiles, {
@@ -1284,7 +1411,9 @@ function visionVisibleAnswer(answer: string, agentResult?: AgentResult) {
   // let the structured-result card provide the stable user-facing summary.
   if (
     agentResult?.kind === "vision_observation" &&
-    (!visible || /^(?:视觉实验分析|视觉分析|图片识别|图片分析)(?:[：:：\s].*)?$/iu.test(visible))
+    (!visible ||
+      /^(?:视觉实验分析|视觉分析|图片识别|图片分析)(?:[：:：\s].*)?$/iu.test(visible) ||
+      plainVisionSections(visible) !== null)
   ) {
     return structuredResultReply(agentResult);
   }
@@ -1304,7 +1433,7 @@ function eventFrame(payload: unknown, encoder: TextEncoder) {
 
 function streamChatResponse(
   searchPromise: Promise<Awaited<ReturnType<typeof searchKnowledge>> | null>,
-  difyStream: Response,
+  difyStreamPromise: Promise<Response | null>,
   message: string,
   casualMessage: boolean,
   request: Request,
@@ -1319,9 +1448,11 @@ function streamChatResponse(
     async start(controller) {
       const encoder = new TextEncoder();
       let streamClosed = false;
+      let streamEnrichment: ChatEnrichment | null = null;
       try {
         const search = await searchPromise;
         const enrichment = buildChatEnrichment(search, message, casualMessage);
+        streamEnrichment = enrichment;
         controller.enqueue(
           eventFrame(
             {
@@ -1335,8 +1466,9 @@ function streamChatResponse(
           ),
         );
 
-        if (!difyStream.body) {
-          const result = buildChatResult(enrichment, message, casualMessage, null, undefined, attachment);
+        const difyStream = await difyStreamPromise;
+        if (!difyStream?.body) {
+          const result = fallbackChatResult(enrichment, message, casualMessage, attachment, isVisionRequest);
           controller.enqueue(eventFrame({ type: "done", ...result }, encoder));
           streamClosed = true;
           controller.close();
@@ -1397,7 +1529,7 @@ function streamChatResponse(
             progressTimer = null;
           }
           receivedAnswer = true;
-          const parsedResult = parseDifyAgentResult(
+          const parsedResult = parseDifyVisionResult(
             directAnswer,
             message,
             undefined,
@@ -1432,11 +1564,17 @@ function streamChatResponse(
           closeController();
         };
 
-        if (attachment) {
-          const progress = isVisionRequest
-            ? "图片正在识别，模型分析可能需要几十秒，请保持页面打开。"
-            : "文档正在解析，模型分析可能需要几十秒，请保持页面打开。";
-          controller.enqueue(eventFrame({ type: "status", message: progress }, encoder));
+        const isLessonRequest = Boolean(lessonPlanTitle(message));
+        if (attachment || isLessonRequest) {
+          const progress = attachment
+            ? isVisionRequest
+              ? "图片正在识别，模型分析可能需要几十秒，请保持页面打开。"
+              : "文档正在解析，模型分析可能需要几十秒，请保持页面打开。"
+            : "完整教案正在生成，正在整理活动过程和 DOCX 文件，请保持页面打开。";
+          // Attachments get immediate feedback; lesson generation gets a
+          // delayed heartbeat so the fast unit-test streams remain unchanged
+          // while long Dify document workflows do not look frozen.
+          if (attachment) controller.enqueue(eventFrame({ type: "status", message: progress }, encoder));
           progressTimer = setInterval(() => {
             if (!streamClosed && !streamTimedOut && !request.signal.aborted && !receivedAnswer) {
               controller.enqueue(eventFrame({ type: "status", message: progress }, encoder));
@@ -1546,7 +1684,7 @@ function streamChatResponse(
         // the qvq observation captured above instead of exposing an empty or
         // misleading answer. Ordinary text-chat responses are unchanged.
         const parsedStreamAnswer = isVisionRequest
-          ? parseDifyAgentResult(answer || null, message, metadata, outputFileSources, request, difyApiUrl)
+          ? parseDifyVisionResult(answer || null, message, metadata, outputFileSources, request, difyApiUrl)
           : undefined;
         const visionFallback = directVisionAnswer ?? visionFallbackAnswer;
         const answerForVision = isVisionRequest && visionFallback &&
@@ -1555,7 +1693,9 @@ function streamChatResponse(
           : answer;
         const parsedResult = enrichment.requestedLessonTitle
           ? undefined
-          : parseDifyAgentResult(answerForVision || null, message, metadata, outputFileSources, request, difyApiUrl);
+          : isVisionRequest
+            ? parseDifyVisionResult(answerForVision || null, message, metadata, outputFileSources, request, difyApiUrl)
+            : parseDifyAgentResult(answerForVision || null, message, metadata, outputFileSources, request, difyApiUrl);
         const coverSync = await synchronizeGeneratedPoetryCover(
           targetResourceId,
           parsedResult,
@@ -1597,7 +1737,12 @@ function streamChatResponse(
         closeController();
       } catch {
         if (!request.signal.aborted && !streamClosed) {
-          controller.enqueue(eventFrame({ type: "error", message: "对话服务暂时不可用" }, encoder));
+          if (isVisionRequest && streamEnrichment) {
+            const fallback = fallbackChatResult(streamEnrichment, message, casualMessage, attachment, true);
+            controller.enqueue(eventFrame({ type: "done", ...fallback }, encoder));
+          } else {
+            controller.enqueue(eventFrame({ type: "error", message: "对话服务暂时不可用" }, encoder));
+          }
           streamClosed = true;
           controller.close();
         }
@@ -1678,13 +1823,13 @@ export async function POST(request: Request) {
     : message;
   const search = await searchPromise;
   const enrichment = buildChatEnrichment(search, message, casualMessage);
-  const localCatalogResult = attachment ? null : localScienceCatalogResult(enrichment, message);
-  if (localCatalogResult) {
-    return NextResponse.json(localCatalogResult);
-  }
   const localExplanationResult = attachment ? null : localScienceExplanationResult(enrichment, message);
   if (localExplanationResult) {
     return NextResponse.json(localExplanationResult);
+  }
+  const localCatalogResult = attachment ? null : localScienceCatalogResult(enrichment, message);
+  if (localCatalogResult) {
+    return NextResponse.json(localCatalogResult);
   }
   const documentRouteInstruction = attachment && files?.length && !hasImageAttachment
     ? [
@@ -1714,31 +1859,23 @@ export async function POST(request: Request) {
   if (acceptsEventStream(request)) {
     const streamTimeoutMs = difyStreamTimeout(message, attachmentStatus);
     const streamStartedAt = Date.now();
-    const difyStream = await openDifyStream({
+    const difyStreamPromise = openDifyStream({
       ...difyArgs,
       signal: request.signal,
       timeoutMs: streamTimeoutMs,
     });
-    if (difyStream) {
-      return streamChatResponse(
-        Promise.resolve(search),
-        difyStream,
-        message,
-        casualMessage,
-        request,
-        apiUrl,
-        apiKey,
-        attachmentStatus,
-        Math.max(250, streamTimeoutMs - (Date.now() - streamStartedAt)),
-        targetResourceId,
-        hasImageAttachment && Boolean(files?.length),
-      );
-    }
-    // Do not make a second blocking Dify request after the streaming provider
-    // has already missed the fast-response deadline. It doubles the wait and
-    // can leave the teacher staring at a spinner with no usable answer.
-    return NextResponse.json(
-      fallbackChatResult(enrichment, message, casualMessage, attachmentStatus, hasImageAttachment && Boolean(files?.length)),
+    return streamChatResponse(
+      Promise.resolve(search),
+      difyStreamPromise,
+      message,
+      casualMessage,
+      request,
+      apiUrl,
+      apiKey,
+      attachmentStatus,
+      Math.max(250, streamTimeoutMs - (Date.now() - streamStartedAt)),
+      targetResourceId,
+      hasImageAttachment && Boolean(files?.length),
     );
   }
 
@@ -1748,7 +1885,9 @@ export async function POST(request: Request) {
     { sameOrigin: request.url, difyApiUrl: apiUrl },
   );
   const agentResult = difyReply && !enrichment.requestedLessonTitle
-    ? parseDifyAgentResult(difyReply.answer, message, difyReply.metadata, outputFileSources, request, apiUrl)
+    ? hasImageAttachment && Boolean(files?.length)
+      ? parseDifyVisionResult(difyReply.answer, message, difyReply.metadata, outputFileSources, request, apiUrl)
+      : parseDifyAgentResult(difyReply.answer, message, difyReply.metadata, outputFileSources, request, apiUrl)
     : undefined;
   const normalizedOutputFiles = normalizeDifyOutputFiles(outputFileSources, { sameOrigin: request.url, difyApiUrl: apiUrl });
   const outputFiles = signAiChatOutputFiles(normalizedOutputFiles, {

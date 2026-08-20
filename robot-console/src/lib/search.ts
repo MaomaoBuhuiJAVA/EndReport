@@ -204,8 +204,8 @@ function withCanonicalScienceCategory(query: string) {
     : query;
   if (/科学诗|科学故事|科学实验/u.test(topicNormalized)) return topicNormalized;
   if (/科学童谣|童谣|诗歌|(?:^|[的与和相关])诗(?:歌)?$/u.test(topicNormalized)) return `${topicNormalized} 科学诗`;
-  if (/(?:^|[的与和相关])故事$/u.test(topicNormalized)) return `${topicNormalized} 科学故事`;
-  if (/(?:^|[的与和相关])实验$/u.test(topicNormalized)) return `${topicNormalized} 科学实验`;
+  if (/故事/u.test(topicNormalized)) return `${topicNormalized} 科学故事`;
+  if (/实验/u.test(topicNormalized)) return `${topicNormalized} 科学实验`;
   return topicNormalized;
 }
 
@@ -254,16 +254,37 @@ function scienceResourceLines(resources: ScienceKnowledgeItem["resources"]) {
     });
 }
 
+function currentScienceCopy(value: string, item: ScienceKnowledgeItem | ScienceKnowledgeSummary) {
+  let text = value;
+  if (item.category === "科学故事" && item.videoUrl) {
+    text = text.replace(
+      /视频原文件已按本地资料目录归档；公开播放地址接入后可直接替换此资源链接。/gu,
+      "本故事视频已接入在线播放，可在资源详情中直接观看。",
+    );
+  }
+  if (item.title === "火焰掌" || item.title === "神奇的热气球") {
+    text = `安全警示：涉及易燃气体或明火，仅限成人教师在合规场所演示，幼儿不得操作或靠近点火区域。\n${text}`;
+  }
+  if (item.title === "盐水发电风扇") {
+    text = text.replace(/盐水可以产生电能，让风扇转动/gu, "不同电极与盐水电解质形成电化学电池，让风扇转动");
+  }
+  if (item.title === "神奇泡泡实验") {
+    text = text.replace(/轻轻吸一点液体/gu, "禁止把液体吸入口中");
+  }
+  return text;
+}
+
 function scienceItemToSearchChunk(item: ScienceKnowledgeItem | ScienceKnowledgeSummary) {
   const resourceLines = scienceResourceLines(item.resources);
-  const body = "body" in item ? item.body.trim() : "";
+  const body = "body" in item ? currentScienceCopy(item.body.trim(), item) : "";
+  const excerpt = currentScienceCopy(item.excerpt, item);
   const context = [
     `[LAB:${item.id}]`,
     `类别：${item.category}`,
     `适用年龄：${item.ageLabel}`,
     `主题：${item.topic}`,
     item.author ? `作者：${item.author}` : "",
-    item.excerpt ? `摘要：${item.excerpt}` : "",
+    excerpt ? `摘要：${excerpt}` : "",
     resourceLines.length ? `媒体资源：\n${resourceLines.join("\n")}` : "",
     // Media links belong ahead of the long article body. The conversational
     // context is deliberately capped for speed, so links must not be pushed
@@ -281,7 +302,7 @@ function scienceItemToSearchChunk(item: ScienceKnowledgeItem | ScienceKnowledgeS
     document: {
       title: `科小贝实验室：${item.title}`,
       category: "COURSE" as const,
-      summary: item.excerpt,
+      summary: excerpt,
     },
     score: 1000,
   };

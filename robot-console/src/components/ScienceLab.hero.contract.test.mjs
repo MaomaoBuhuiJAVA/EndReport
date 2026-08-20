@@ -96,7 +96,8 @@ test("embeds public video resources for direct playback in the detail dialog", (
   const styles = fs.readFileSync(stylesPath, "utf8");
 
   assert.match(component, /<video[\s\S]*controls[\s\S]*playsInline[\s\S]*preload="metadata"/);
-  assert.match(component, /<source[\s\S]*src=\{videoUrl\}[\s\S]*type="video\/mp4"/);
+  assert.match(component, /function videoMimeType\(value: string\)/);
+  assert.match(component, /<source[\s\S]*src=\{videoUrl \?\? ""\}[\s\S]*type=\{videoMimeType\(videoUrl \?\? ""\)\}/);
   assert.match(component, /className="video-resource__player"/);
   assert.match(styles, /\.video-resource__player\s*\{/);
 });
@@ -163,6 +164,13 @@ test("only embeds direct video URLs and keeps QR redirects as links", () => {
   assert.match(component, /const isPlayableVideo = Boolean\(videoUrl && isDirectVideoUrl\(videoUrl\)\)/);
   assert.match(component, /\{isPlayableVideo \? \([\s\S]*?<video/);
   assert.match(component, /\{videoUrl \? \([\s\S]*?className="video-link"/);
+  assert.match(component, /isPlayableVideo \? "播放视频" : "打开视频页面"/);
+});
+
+test("bypasses Next image optimization for public external detail covers", () => {
+  const component = fs.readFileSync(componentPath, "utf8");
+
+  assert.match(component, /unoptimized=\{\/\^https\?:\\\/\\\//);
 });
 
 test("keeps literature card icons and age labels in separate top corners", () => {
