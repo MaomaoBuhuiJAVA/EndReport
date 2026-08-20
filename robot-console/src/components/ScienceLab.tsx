@@ -1489,6 +1489,7 @@ export function ScienceLab({
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
+                itemId: createdSummary.id,
                 title: createdSummary.title,
                 category,
                 topic: createdSummary.topic,
@@ -1498,19 +1499,26 @@ export function ScienceLab({
             });
             const coverPayload = (await coverResponse.json().catch(() => null)) as unknown;
             const coverUrl = isRecord(coverPayload) ? firstText(coverPayload, ["coverUrl"]) : "";
-            const coverPersisted = isRecord(coverPayload) && coverPayload.persisted === true;
-            if (!coverResponse.ok || !coverUrl || !coverPersisted) throw new Error("cover generation failed");
+            const coverSynced = isRecord(coverPayload) && coverPayload.synced === true;
+            if (!coverResponse.ok || !coverUrl) throw new Error("cover generation failed");
 
-            const persistResponse = await fetch("/api/science-resources/sync-cover", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id: createdSummary.id, coverUrl }),
-            });
-            const persistedPayload = (await persistResponse.json().catch(() => null)) as unknown;
-            const persistedCoverUrl = isRecord(persistedPayload)
-              ? firstText(persistedPayload, ["coverUrl", "cover_url"])
-              : "";
-            if (!persistResponse.ok || !persistedCoverUrl) throw new Error("cover persistence failed");
+            setItems((current) => current.map((item) => (
+              item.id === createdSummary.id ? { ...item, coverUrl } : item
+            )));
+
+            let persistedCoverUrl = coverUrl;
+            if (!coverSynced) {
+              const persistResponse = await fetch("/api/science-resources/sync-cover", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: createdSummary.id, coverUrl }),
+              });
+              const persistedPayload = (await persistResponse.json().catch(() => null)) as unknown;
+              persistedCoverUrl = isRecord(persistedPayload)
+                ? firstText(persistedPayload, ["coverUrl", "cover_url"])
+                : "";
+              if (!persistResponse.ok || !persistedCoverUrl) throw new Error("cover persistence failed");
+            }
             const persisted = { ...createdSummary, coverUrl: persistedCoverUrl };
 
             setItems((current) => current.map((item) => item.id === persisted.id ? persisted : item));

@@ -12,6 +12,39 @@ const COVER_CONTENT_TYPES = new Map([
   ["image/webp", "webp"],
 ]);
 
+function detectedCoverFormat(bytes: Uint8Array, declaredContentType: string) {
+  const declaredExtension = COVER_CONTENT_TYPES.get(declaredContentType);
+  if (declaredExtension) return { contentType: declaredContentType, extension: declaredExtension };
+
+  const startsWith = (...signature: number[]) => signature.every((value, index) => bytes[index] === value);
+  if (startsWith(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) {
+    return { contentType: "image/png", extension: "png" };
+  }
+  if (startsWith(0xff, 0xd8, 0xff)) return { contentType: "image/jpeg", extension: "jpg" };
+  if (bytes.length >= 6) {
+    const gifHeader = String.fromCharCode(...bytes.slice(0, 6));
+    if (gifHeader === "GIF87a" || gifHeader === "GIF89a") {
+      return { contentType: "image/gif", extension: "gif" };
+    }
+  }
+  if (
+    bytes.length >= 12 &&
+    String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" &&
+    String.fromCharCode(...bytes.slice(8, 12)) === "WEBP"
+  ) {
+    return { contentType: "image/webp", extension: "webp" };
+  }
+  if (startsWith(0x42, 0x4d)) return { contentType: "image/bmp", extension: "bmp" };
+  if (
+    bytes.length >= 12 &&
+    String.fromCharCode(...bytes.slice(4, 8)) === "ftyp" &&
+    ["avif", "avis"].includes(String.fromCharCode(...bytes.slice(8, 12)))
+  ) {
+    return { contentType: "image/avif", extension: "avif" };
+  }
+  return null;
+}
+
 export type SciencePoetryCoverSync = {
   itemId: string;
   title: string;
@@ -55,20 +88,20 @@ export async function persistScienceCoverImage(
     const response = await fetch(url, { headers, redirect: "follow" });
     if (!response.ok) return null;
 
-    const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-    const extension = COVER_CONTENT_TYPES.get(contentType);
-    if (!extension) return null;
+    const declaredContentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
 
     const advertisedLength = Number(response.headers.get("content-length"));
     if (Number.isFinite(advertisedLength) && advertisedLength > MAX_COVER_BYTES) return null;
 
-    const bytes = await response.arrayBuffer();
-    if (!bytes.byteLength || bytes.byteLength > MAX_COVER_BYTES) return null;
+    const buffer = await response.arrayBuffer();
+    if (!buffer.byteLength || buffer.byteLength > MAX_COVER_BYTES) return null;
+    const format = detectedCoverFormat(new Uint8Array(buffer), declaredContentType);
+    if (!format) return null;
 
     const blob = await put(
-      `science-resource-covers/${safeCoverName(title)}-${crypto.randomUUID()}.${extension}`,
-      new Blob([bytes], { type: contentType }),
-      { access: "public", contentType, cacheControlMaxAge: 31536000 },
+      `science-resource-covers/${safeCoverName(title)}-${crypto.randomUUID()}.${format.extension}`,
+      new Blob([buffer], { type: format.contentType }),
+      { access: "public", contentType: format.contentType, cacheControlMaxAge: 31536000 },
     );
     return blob.url;
   } catch {

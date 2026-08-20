@@ -3,7 +3,7 @@ import { checkPublicRateLimit } from "@/lib/public-rate-limit";
 import { generateDifyReply } from "@/lib/dify";
 import { mergeDifyOutputFileSources, normalizeDifyOutputFiles } from "@/lib/ai-chat-files";
 import { parseAgentResult } from "@/lib/agent-result";
-import { persistScienceCoverImage } from "@/lib/science-cover-sync";
+import { persistScienceCoverImage, persistSciencePoetryCoverUrl } from "@/lib/science-cover-sync";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -17,13 +17,21 @@ function fallbackCover(category: string) {
 export async function POST(request: Request) {
   const limited = checkPublicRateLimit(request, "science-cover", 6);
   if (limited) return limited;
-  let body: { title?: unknown; category?: unknown; topic?: unknown; poem?: unknown; author?: unknown };
+  let body: {
+    itemId?: unknown;
+    title?: unknown;
+    category?: unknown;
+    topic?: unknown;
+    poem?: unknown;
+    author?: unknown;
+  };
   try {
     body = (await request.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: "请求格式无效" }, { status: 400 });
   }
   const title = typeof body.title === "string" ? body.title.trim().slice(0, 120) : "";
+  const itemId = typeof body.itemId === "string" ? body.itemId.trim().slice(0, 160) : "";
   const category = body.category === "科学故事" ? "科学故事" : "科学诗";
   const topic = typeof body.topic === "string" ? body.topic.trim().slice(0, 160) : "";
   const poem = typeof body.poem === "string" ? body.poem.trim().slice(0, 6000) : "";
@@ -81,9 +89,15 @@ export async function POST(request: Request) {
     difyApiUrl: process.env.DIFY_API_URL,
     difyApiKey: apiKey,
   });
+  const generatedCoverUrl = persistedCoverUrl || sourceUrl;
+  const synced = itemId
+    ? await persistSciencePoetryCoverUrl(itemId, generatedCoverUrl).catch(() => null)
+    : null;
   return NextResponse.json({
-    coverUrl: persistedCoverUrl || sourceUrl,
+    coverUrl: synced?.coverUrl || generatedCoverUrl,
     persisted: Boolean(persistedCoverUrl),
+    synced: Boolean(synced),
+    ...(synced ? { itemId: synced.itemId } : {}),
     title,
     category,
   });

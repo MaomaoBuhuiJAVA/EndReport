@@ -56,6 +56,26 @@ describe("science poetry cover synchronization", () => {
     );
   });
 
+  it("detects a PNG returned as a generic binary stream", async () => {
+    fetchMock.mockResolvedValue(new Response(
+      new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]),
+      { headers: { "content-type": "application/octet-stream" } },
+    ));
+    vi.mocked(put).mockResolvedValue({ url: "https://blob.vercel-storage.com/covers/tissue.png" } as never);
+
+    await expect(persistScienceCoverImage(
+      "https://upload.dify.ai/files/tissue",
+      "测试",
+      { difyApiKey: "test-dify-key" },
+    )).resolves.toBe("https://blob.vercel-storage.com/covers/tissue.png");
+
+    expect(put).toHaveBeenCalledWith(
+      expect.stringMatching(/\.png$/u),
+      expect.any(Blob),
+      expect.objectContaining({ contentType: "image/png" }),
+    );
+  });
+
   it("updates only the explicitly selected science poem and returns the persisted cover", async () => {
     vi.mocked(prisma.scienceKnowledgeItem.findUnique).mockResolvedValue(poem as never);
     fetchMock.mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), {
