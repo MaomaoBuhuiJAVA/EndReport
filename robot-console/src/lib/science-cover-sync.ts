@@ -87,12 +87,38 @@ export async function synchronizeSciencePoetryCover(
 ): Promise<SciencePoetryCoverSync | null> {
   const id = itemId.trim().slice(0, 160);
   if (!id) return null;
-
   const item = await prisma.scienceKnowledgeItem.findUnique({ where: { id } });
   if (!item || item.category !== "科学诗") return null;
 
   const coverUrl = await persistScienceCoverImage(sourceUrl, item.title, options);
   if (!coverUrl) return null;
+
+  return persistSciencePoetryCoverUrl(itemId, coverUrl);
+}
+
+/**
+ * Persists an already-public cover URL for a science poem. This is kept
+ * separate from image fetching so the public upload flow can complete the
+ * same durable update after its async cover-generation request.
+ */
+export async function persistSciencePoetryCoverUrl(
+  itemId: string,
+  coverUrl: string,
+): Promise<SciencePoetryCoverSync | null> {
+  const id = itemId.trim().slice(0, 160);
+  if (!id) return null;
+
+  let normalizedCoverUrl: string;
+  try {
+    const parsed = new URL(coverUrl.trim());
+    if (!/^https?:$/u.test(parsed.protocol)) return null;
+    normalizedCoverUrl = parsed.toString();
+  } catch {
+    return null;
+  }
+
+  const item = await prisma.scienceKnowledgeItem.findUnique({ where: { id } });
+  if (!item || item.category !== "科学诗") return null;
 
   await prisma.$transaction(async (tx) => {
     await tx.scienceKnowledgeResource.deleteMany({
@@ -110,8 +136,8 @@ export async function synchronizeSciencePoetryCover(
         semester: item.semester,
         title: `${item.title} · 封面`,
         filePath: item.sourceFile,
-        publicPath: coverUrl,
-        externalUrl: coverUrl,
+        publicPath: normalizedCoverUrl,
+        externalUrl: normalizedCoverUrl,
         source: "科小贝智能体生成封面",
         isPublic: true,
         sortOrder: 0,
@@ -123,5 +149,5 @@ export async function synchronizeSciencePoetryCover(
     await tx.scienceKnowledgeItem.update({ where: { id }, data: { imageCount } });
   });
 
-  return { itemId: item.id, title: item.title, coverUrl };
+  return { itemId: item.id, title: item.title, coverUrl: normalizedCoverUrl };
 }

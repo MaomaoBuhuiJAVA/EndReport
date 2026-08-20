@@ -83,6 +83,14 @@ test("submits the lesson-plan dialog with local DOCX fallback metadata", () => {
   assert.match(component, /URL\.createObjectURL/);
 });
 
+test("carries card lesson-plan metadata into the existing composer send", () => {
+  assert.match(component, /type KexiaobeiOpenDetail = \{[\s\S]*lessonPlan\?: LessonPlanRequest/);
+  assert.match(component, /pendingLessonPlanRef = useRef<PendingLessonPlanRequest \| null>\(null\)/);
+  assert.match(component, /pendingLessonPlanRef\.current = prompt && detail\?\.lessonPlan/);
+  assert.match(component, /const lessonPlan = options\?\.lessonPlan \?\?/);
+  assert.match(component, /if \(lessonPlan\?\.wantsDocx && canPackageLessonPlan/);
+});
+
 test("does not package an error placeholder as a lesson-plan DOCX", () => {
   assert.match(component, /reply\.provider === "dify" \|\| reply\.provider === "fallback"/);
   assert.match(component, /活动目标/);

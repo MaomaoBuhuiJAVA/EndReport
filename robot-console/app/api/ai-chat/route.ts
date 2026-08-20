@@ -299,6 +299,22 @@ function validateAttachment(file: File) {
   return null;
 }
 
+async function extractLocalAttachmentText(file: File) {
+  const extension = attachmentExtension(file.name);
+  if (extension !== ".docx") return "";
+
+  try {
+    const mammothModule = await import("mammoth");
+    const mammoth = mammothModule.default ?? mammothModule;
+    const result = await mammoth.extractRawText({
+      buffer: Buffer.from(await file.arrayBuffer()),
+    });
+    return typeof result.value === "string" ? result.value.trim().slice(0, 50_000) : "";
+  } catch {
+    return "";
+  }
+}
+
 async function parseChatRequest(request: Request): Promise<ParsedChatRequest> {
   const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
   if (!contentType.includes("multipart/form-data")) {
@@ -343,7 +359,8 @@ function explicitLessonTopic(message: string) {
 }
 
 function lessonPlanTitle(message: string) {
-  const hasGenerationVerb = /(?:生成|编写|撰写|设计|制定|制作|输出|导出)[^。！？!?\n]{0,24}(?:教案|活动方案|教学设计)/u.test(message);
+  if (isGenericDocumentCreationRequest(message)) return null;
+  const hasGenerationVerb = /(?:生成|编写|撰写|设计|制定|制作|输出|导出)[^。！？!?\n]{0,24}(?:教案|活动方案|教学设计|课件|教学文档|文档)/u.test(message);
   const isAnalysisRequest = LESSON_ANALYSIS_PATTERN.test(message);
   const isLessonPlanGeneration = hasGenerationVerb || /完整(?:教案|活动方案|教学设计)/u.test(message);
   if (!isLessonPlanGeneration || isAnalysisRequest) return null;
@@ -355,16 +372,27 @@ function lessonPlanTitle(message: string) {
   if (quotedTitle) return quotedTitle;
 
   const naturalTitle = message.match(
-    /(?:生成|编写|撰写|设计|制定|制作|输出|导出)\s*(?:一份|一个|一套)?\s*([^；;。！？!?\n]+?)\s*完整(?:教案|活动方案|教学设计)/u,
+    /(?:生成|编写|撰写|设计|制定|制作|输出|导出)\s*(?:一份|一个|一套)?\s*([^；;。！？!?\n]+?)\s*(?:完整)?(?:教案|活动方案|教学设计|课件|教学文档|文档)/u,
   )?.[1]
     ?.replace(/[《》〈〉「」“”"'`]/gu, "")
     .replace(/的\s*$/u, "")
     .trim();
-  return naturalTitle && naturalTitle !== "完整" ? naturalTitle : null;
+  if (!naturalTitle || /^(?:课件|文档|教学文档|一个|一份|一套)(?:[/／]?(?:课件|文档))?$/u.test(naturalTitle)) return null;
+  return naturalTitle !== "完整" ? naturalTitle : null;
+}
+
+function isGenericDocumentCreationRequest(message: string) {
+  return /^(?:我想|我要|请|帮我)?\s*(?:生成|制作|编写|整理|导出)\s*(?:一个|一份|一套)?\s*(?:课件[/／]文档|课件|教学文档|文档|Word文档|PPT课件)(?:吧|。|！|!|？|\?)?$/iu.test(message.trim());
+}
+
+function genericDocumentCreationReply(message: string) {
+  return isGenericDocumentCreationRequest(message)
+    ? "可以生成课件或教学文档。请补充：主题、适用年龄段、使用用途（课堂教学/家长会等）以及输出格式（Word、PPT 或仅聊天内容）。"
+    : null;
 }
 
 function isContentCreationOrAnalysisRequest(message: string) {
-  const creation = /(?:生成|创作|编写|撰写|设计|制定|制作|输出|导出|策划)[^。！？!?\n]{0,32}(?:教案|活动方案|教学设计|课件|文档)/u.test(message);
+  const creation = /(?:生成|创作|编写|撰写|设计|制定|制作|输出|导出|策划|做)[^。！？!?\n]{0,32}(?:教案|活动方案|教学设计|课件|文档)/u.test(message);
   const analysis = /(?:分析|评估|审阅|诊断|复盘|修改|优化)[^。！？!?\n]{0,24}(?:教案|活动方案|教学设计|课件|文档)|(?:教案|活动方案|教学设计|课件|文档)[^。！？!?\n]{0,24}(?:分析|评估|审阅|诊断|复盘|修改|优化)/u.test(message);
   return creation || analysis;
 }
@@ -1063,6 +1091,14 @@ function buildDifyMessage(message: string, context: string) {
   ].join("\n");
 }
 
+function creationRouteInstruction(message: string) {
+  if (!isContentCreationOrAnalysisRequest(message)) return "";
+  const template = lessonPlanTitle(message)
+    ? "请按温州市龙湾区国科温州第二幼儿园教育教学活动设计表的字段顺序输出：主题、领域、班级、来源、教学活动、时间、教师、活动目标、重点难点、活动准备、活动内容、备注、活动反思；活动内容必须包含设计意图、导入猜想、分组操作、分享表达、总结延伸五部分。"
+    : "用户要生成课件或文档，不是检索资料。若主题、年龄段、用途或输出格式缺失，请先用一句话列出需要补充的字段；不要返回“资料库没有匹配”或资料检索示例。";
+  return `【系统路由指令：内容创作】\n${template}`;
+}
+
 function isDirectScienceCatalogLookup(message: string, enrichment: ChatEnrichment) {
   if (isContentCreationOrAnalysisRequest(message)) return false;
   const compact = message.replace(/[\s，,。！？!?、；：,.!?;:()[\]{}《》〈〉「」“”‘’"']/gu, "");
@@ -1208,6 +1244,7 @@ function fallbackChatResult(
   const lessonPlanReply = enrichment.requestedLessonTitle
     ? buildLessonPlanReply(enrichment.requestedLessonPlan, message)
     : null;
+  const creationReply = genericDocumentCreationReply(message);
   const attachmentReply = timeoutResult
     ? ["本次图片分析暂未完成。", timeoutResult.message, timeoutResult.retry_reason].join("\n\n")
     : attachment
@@ -1215,7 +1252,7 @@ function fallbackChatResult(
       : null;
   return {
     responseId: randomUUID(),
-    reply: attachmentReply ?? lessonPlanReply ?? (catalogReply
+    reply: attachmentReply ?? lessonPlanReply ?? creationReply ?? (catalogReply
       ? `我先为你整理已检索到的园本资料：\n\n${catalogReply}`
       : fallbackReply(enrichment.context, enrichment.uniqueSources, message, casualMessage)),
     provider: "fallback",
@@ -1344,6 +1381,7 @@ function buildChatResult(
   const { requestedLessonPlan } = enrichment;
   let reply = modelReply;
   let usedLessonPlanFallback = false;
+  const genericCreationReply = genericDocumentCreationReply(message);
 
   if (requestedLessonPlan && modelReply && isEmptyReferenceLessonSkeleton(modelReply)) {
     reply = buildLessonPlanReply(requestedLessonPlan, message);
@@ -1352,6 +1390,9 @@ function buildChatResult(
     reply = buildLessonPlanReply(requestedLessonPlan, message, modelReply);
   } else if (enrichment.requestedLessonTitle && !modelReply) {
     reply = buildLessonPlanReply(requestedLessonPlan, message);
+    usedLessonPlanFallback = true;
+  } else if (!modelReply && genericCreationReply) {
+    reply = genericCreationReply;
     usedLessonPlanFallback = true;
   }
 
@@ -1790,35 +1831,48 @@ export async function POST(request: Request) {
   // A generated lesson is a standalone artifact.  Reusing the chat's previous
   // conversation can send Dify back through an earlier classifier branch and
   // make the result depend on unrelated messages in the floating assistant.
-  const conversationId = hasImageAttachment || lessonPlanTitle(message)
+  // Treat each uploaded file as a standalone evidence package. Reusing an
+  // older text conversation makes Dify re-read unrelated history and can
+  // send document analysis through the slower general-chat branch.
+  const conversationId = attachment || hasImageAttachment || lessonPlanTitle(message)
     ? undefined
     : difyConversationId(body.conversationId);
   const targetResourceId = poetryCoverTargetId(body.targetResourceId);
   let attachmentStatus: AttachmentStatus | undefined;
   let files: DifyFileReference[] | undefined;
+  let localAttachmentText = "";
 
   if (attachment) {
-    const uploadedFile = await uploadDifyFile({
-      apiKey,
-      apiUrl,
-      file: attachment,
-      fileName: attachment.name,
-      user,
-      signal: request.signal,
-    });
-    if (uploadedFile) {
-      files = [uploadedFile];
-      attachmentStatus = { name: attachment.name, status: "uploaded" };
-    } else {
+    if (!hasImageAttachment) localAttachmentText = await extractLocalAttachmentText(attachment);
+    if (localAttachmentText) {
       attachmentStatus = {
         name: attachment.name,
-        status: "unavailable",
-        message: "附件暂未上传，已继续文字对话；请稍后重试或补充文字描述。",
+        status: "uploaded",
+        message: "已在本地提取正文，正在交给智能体分析。",
       };
+    } else {
+      const uploadedFile = await uploadDifyFile({
+        apiKey,
+        apiUrl,
+        file: attachment,
+        fileName: attachment.name,
+        user,
+        signal: request.signal,
+      });
+      if (uploadedFile) {
+        files = [uploadedFile];
+        attachmentStatus = { name: attachment.name, status: "uploaded" };
+      } else {
+        attachmentStatus = {
+          name: attachment.name,
+          status: "unavailable",
+          message: "附件暂未上传，已继续文字对话；请稍后重试或补充文字描述。",
+        };
+      }
     }
   }
 
-  const baseDifyMessage = attachment && !files?.length
+  const baseDifyMessage = attachment && !files?.length && !localAttachmentText
     ? `${message}\n\n[系统提示：用户附件未能上传，请不要假设可以看到附件内容；明确说明证据不足，并请求用户补充文字描述。]`
     : message;
   const search = await searchPromise;
@@ -1831,10 +1885,13 @@ export async function POST(request: Request) {
   if (localCatalogResult) {
     return NextResponse.json(localCatalogResult);
   }
-  const documentRouteInstruction = attachment && files?.length && !hasImageAttachment
+  const documentRouteInstruction = attachment && !hasImageAttachment
     ? [
-      `[系统路由指令：检测到文档附件“${attachment.name}”，请直接进入“上传文档解析”分支。先使用教学文件解析器读取附件正文，再按用户问题完成分析、改写或导出；不要把文档当作图片，也不要进入视觉实验分析或实验复盘分支。]`,
+      localAttachmentText
+        ? `[系统路由指令：检测到文档附件“${attachment.name}”，正文已由本地解析器提取。请直接进入“上传文档解析”分支，依据下面的正文完成分析、改写或导出；不要把文档当作图片，也不要进入视觉实验分析或实验复盘分支。]`
+        : `[系统路由指令：检测到文档附件“${attachment.name}”，请直接进入“上传文档解析”分支。先使用教学文件解析器读取附件正文，再按用户问题完成分析、改写或导出；不要把文档当作图片，也不要进入视觉实验分析或实验复盘分支。]`,
       "如果用户要求分析教案，请返回 document_diagnosis 结构化结果；如果用户要求导出文件，继续交给对应的文档交付节点。",
+      ...(localAttachmentText ? [`【本地附件正文】\n${localAttachmentText}\n【本地附件正文结束】`] : []),
       baseDifyMessage,
     ].join("\n\n")
     : baseDifyMessage;
@@ -1844,7 +1901,7 @@ export async function POST(request: Request) {
         "[系统路由指令：检测到图片附件，请直接进入“视觉实验分析”分支。将用户输入和图片交给 qvq-max 读取；不要进入普通文本聊天、不要等待用户补充文字、不要生成文件。请尽快返回简洁的可见事实、证据不足和安全提醒。]",
         baseDifyMessage,
       ].join("\n\n")
-      : documentRouteInstruction,
+      : [creationRouteInstruction(message), documentRouteInstruction].filter(Boolean).join("\n\n"),
     enrichment.context,
   );
   const difyArgs = {

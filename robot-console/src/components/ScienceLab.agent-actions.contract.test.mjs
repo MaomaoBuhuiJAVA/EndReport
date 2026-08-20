@@ -24,3 +24,12 @@ test("opens the existing pet for an experiment action without directly calling a
   assert.doesNotMatch(actionPath, /\bDify\b/iu);
   assert.doesNotMatch(actionPath, /https?:\/\//);
 });
+
+test("marks the similar-theme action as a Word lesson-plan request", () => {
+  const actionPath = component.match(/const openExperimentAgent[\s\S]*?\n  \);/u)?.[0] ?? "";
+
+  assert.match(actionPath, /输出格式：Word 文档/);
+  assert.match(actionPath, /lessonPlan:/);
+  assert.match(actionPath, /wantsDocx: true/);
+  assert.match(actionPath, /duration: "20 分钟"/);
+});

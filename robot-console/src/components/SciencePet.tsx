@@ -178,6 +178,7 @@ type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 type KexiaobeiOpenDetail = {
   prompt?: string;
   targetResourceId?: string;
+  lessonPlan?: LessonPlanRequest;
 };
 
 type KexiaobeiWindow = typeof window & { __kexiaobeiOpenRequested?: boolean };
@@ -185,6 +186,11 @@ type KexiaobeiWindow = typeof window & { __kexiaobeiOpenRequested?: boolean };
 type PendingPoetryCoverTarget = {
   prompt: string;
   resourceId: string;
+};
+
+type PendingLessonPlanRequest = {
+  prompt: string;
+  request: LessonPlanRequest;
 };
 
 type PetAnimationState =
@@ -241,6 +247,8 @@ const creationFormats = ["Word 文档", "PDF 文档", "课件提纲"];
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+const MAX_IMAGE_INPUT_BYTES = 12 * 1024 * 1024;
+const VISION_IMAGE_TARGET_BYTES = 1.8 * 1024 * 1024;
 const DIRECT_VIDEO_ATTACHMENT_NOTICE = "暂不支持直接上传视频，请先提取关键帧或整理文字记录后再上传。";
 const ATTACHMENT_TYPE_MISMATCH_NOTICE = "附件类型与文件扩展名不一致，请重新选择原始文件。";
 const UNSUPPORTED_ATTACHMENT_NOTICE = "暂不支持该附件格式，请上传图片、PDF、Word、PPT、Excel 或 TXT 文件。";
@@ -390,6 +398,33 @@ function attachmentValidationMessage(attachment: File) {
   return null;
 }
 
+async function compressVisionImage(file: File): Promise<File> {
+  if (!file.type.startsWith("image/") || file.size <= VISION_IMAGE_TARGET_BYTES) return file;
+  if (typeof createImageBitmap !== "function" || typeof document === "undefined") return file;
+
+  try {
+    const bitmap = await createImageBitmap(file);
+    const longestSide = Math.max(bitmap.width, bitmap.height);
+    const scale = Math.min(1, 1800 / Math.max(1, longestSide));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) return file;
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, "image/webp", 0.82);
+    });
+    if (!blob || blob.size >= file.size || blob.size > MAX_ATTACHMENT_BYTES) return file;
+    const baseName = file.name.replace(/\.[^.]+$/u, "") || "photo";
+    return new File([blob], `${baseName}.webp`, { type: "image/webp", lastModified: Date.now() });
+  } catch {
+    return file;
+  }
+}
+
 export function SciencePet() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
@@ -431,6 +466,7 @@ export function SciencePet() {
   const messagesRef = useRef<PetMessage[]>(messages);
   const difyConversationIdRef = useRef<string | undefined>(undefined);
   const pendingPoetryCoverTargetRef = useRef<PendingPoetryCoverTarget | null>(null);
+  const pendingLessonPlanRef = useRef<PendingLessonPlanRequest | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -621,6 +657,9 @@ export function SciencePet() {
       const targetResourceId = detail?.targetResourceId?.trim();
       pendingPoetryCoverTargetRef.current = prompt && targetResourceId
         ? { prompt, resourceId: targetResourceId }
+        : null;
+      pendingLessonPlanRef.current = prompt && detail?.lessonPlan
+        ? { prompt, request: detail.lessonPlan }
         : null;
       if (prompt) setInput(prompt);
       setOpen(true);
@@ -1384,6 +1423,7 @@ export function SciencePet() {
 
   function handleCloseChat() {
     stopAllVoice();
+    pendingLessonPlanRef.current = null;
     setMoreMenuOpen(false);
     setCreationDialog(null);
     setOpen(false);
@@ -1476,20 +1516,29 @@ export function SciencePet() {
     });
   }
 
-  function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>, mode: "file" | "photo" = "file") {
-    const attachment = event.target.files?.[0];
-    if (!attachment) return;
+  async function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>, mode: "file" | "photo" = "file") {
+    const originalAttachment = event.target.files?.[0];
+    if (!originalAttachment) return;
 
-    const attachmentError = attachmentValidationMessage(attachment);
+    const attachmentError = attachmentValidationMessage(originalAttachment);
     if (attachmentError) {
       event.currentTarget.value = "";
       setAttachmentNotice(attachmentError);
       return;
     }
 
+    const isImage = originalAttachment.type.startsWith("image/");
+    if (originalAttachment.size > (isImage ? MAX_IMAGE_INPUT_BYTES : MAX_ATTACHMENT_BYTES)) {
+      event.currentTarget.value = "";
+      setAttachmentNotice(isImage ? "图片不能超过 12MB，请选择更小的图片。" : "附件不能超过 4MB，请压缩后重试。");
+      return;
+    }
+
+    setAttachmentNotice(isImage && originalAttachment.size > VISION_IMAGE_TARGET_BYTES ? "正在压缩图片以加快识别..." : "");
+    const attachment = isImage ? await compressVisionImage(originalAttachment) : originalAttachment;
     if (attachment.size > MAX_ATTACHMENT_BYTES) {
       event.currentTarget.value = "";
-      setAttachmentNotice("附件不能超过 4MB，请压缩后重试。");
+      setAttachmentNotice("图片压缩后仍超过 4MB，请选择更小的图片。");
       return;
     }
 
@@ -1528,6 +1577,9 @@ export function SciencePet() {
     const coverTarget = pendingPoetryCoverTargetRef.current;
     const targetResourceId = coverTarget?.prompt === content ? coverTarget.resourceId : undefined;
     pendingPoetryCoverTargetRef.current = null;
+    const pendingLessonPlan = pendingLessonPlanRef.current;
+    const lessonPlan = options?.lessonPlan ?? pendingLessonPlan?.request;
+    pendingLessonPlanRef.current = null;
 
     const userMessageId = messageIdRef.current++;
     const assistantMessageId = messageIdRef.current++;
@@ -1575,19 +1627,19 @@ export function SciencePet() {
         /活动目标/u.test(reply.text) &&
         /活动准备/u.test(reply.text) &&
         /(?:活动内容|活动过程)/u.test(reply.text);
-      if (options?.lessonPlan?.wantsDocx && canPackageLessonPlan && !outputFiles?.some((file) => file.type === "document")) {
+      if (lessonPlan?.wantsDocx && canPackageLessonPlan && !outputFiles?.some((file) => file.type === "document")) {
         try {
           const bytes = await buildLessonPlanDocx(
-            options.lessonPlan.title,
-            options.lessonPlan.ageGroup,
-            options.lessonPlan.duration,
+            lessonPlan.title,
+            lessonPlan.ageGroup,
+            lessonPlan.duration,
             reply.text,
           );
           const blobBytes = new ArrayBuffer(bytes.byteLength);
           new Uint8Array(blobBytes).set(bytes);
           const objectUrl = URL.createObjectURL(new Blob([blobBytes], { type: DOCX_MIME }));
           localObjectUrlsRef.current.add(objectUrl);
-          const safeTitle = options.lessonPlan.title
+          const safeTitle = lessonPlan.title
             .replace(/[\\/:*?"<>|]/gu, "-")
             .trim() || "幼儿科学活动";
           outputFiles = [
@@ -1990,6 +2042,7 @@ export function SciencePet() {
     }
     if (open) {
       stopAllVoice();
+      pendingLessonPlanRef.current = null;
       setOpen(false);
       return;
     }

@@ -1501,14 +1501,17 @@ export function ScienceLab({
             const coverPersisted = isRecord(coverPayload) && coverPayload.persisted === true;
             if (!coverResponse.ok || !coverUrl || !coverPersisted) throw new Error("cover generation failed");
 
-            const persistResponse = await fetch("/api/science-resources", {
-              method: "PATCH",
+            const persistResponse = await fetch("/api/science-resources/sync-cover", {
+              method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ id: createdSummary.id, coverUrl }),
             });
             const persistedPayload = (await persistResponse.json().catch(() => null)) as unknown;
-            const persisted = summaryFromMaterialResponse(persistedPayload, category, form);
-            if (!persistResponse.ok || !persisted) throw new Error("cover persistence failed");
+            const persistedCoverUrl = isRecord(persistedPayload)
+              ? firstText(persistedPayload, ["coverUrl", "cover_url"])
+              : "";
+            if (!persistResponse.ok || !persistedCoverUrl) throw new Error("cover persistence failed");
+            const persisted = { ...createdSummary, coverUrl: persistedCoverUrl };
 
             setItems((current) => current.map((item) => item.id === persisted.id ? persisted : item));
             setMaterialSuccessNotice({
