@@ -13,9 +13,13 @@ vi.mock("@/lib/dify", async () => {
     uploadDifyFile: vi.fn(),
   };
 });
+vi.mock("@/lib/science-cover-sync", () => ({
+  synchronizeSciencePoetryCover: vi.fn(),
+}));
 
 import { maxDuration, POST } from "./route";
 import { generateDifyReply, openDifyStream, uploadDifyFile } from "@/lib/dify";
+import { synchronizeSciencePoetryCover } from "@/lib/science-cover-sync";
 import { searchKnowledge, wantsPhotoResults } from "@/lib/search";
 
 const chunk = (title: string, content: string) => ({
@@ -157,11 +161,88 @@ describe("POST /api/ai-chat", () => {
     ]);
   });
 
-  it("流式通道不可用时仍返回旧 JSON 协议", async () => {
+  it("明确查找园本科学资料时直接返回本地命中，不等待 Dify", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-POEM-magnet-small",
+          documentId: "POEM-magnet-small",
+          title: "磁铁的秘密",
+          document: { title: "科小贝实验室：磁铁的秘密" },
+          content: "[LAB:POEM-magnet-small]\n类别：科学诗\n适用年龄：小班\n主题：磁力\n摘要：磁铁姥姥穿花袄，铁针宝宝蹦蹦跳。",
+        },
+        {
+          id: "science-POEM-magnet-large",
+          documentId: "POEM-magnet-large",
+          title: "磁铁小精灵",
+          document: { title: "科小贝实验室：磁铁小精灵" },
+          content: "[LAB:POEM-magnet-large]\n类别：科学诗\n适用年龄：大班\n主题：磁力\n摘要：小磁铁，有魔法。",
+        },
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "帮我查找科学诗里和磁铁有关的内容" }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      provider: "fallback",
+      reply: expect.stringContaining("磁铁的秘密"),
+      labLinks: expect.arrayContaining([
+        { id: "POEM-magnet-small", title: "磁铁的秘密", href: "/lab?item=POEM-magnet-small" },
+      ]),
+    });
+    expect(generateDifyReply).not.toHaveBeenCalled();
+    expect(openDifyStream).not.toHaveBeenCalled();
+  });
+
+  it("命中园本科学原理时直接回答解释型问题，不让 Dify 否认已有资料", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [
+        {
+          id: "science-POEM-magnet-principle",
+          documentId: "POEM-magnet-principle",
+          title: "磁铁小精灵",
+          document: { title: "科小贝实验室：磁铁小精灵" },
+          content: [
+            "[LAB:POEM-magnet-principle]",
+            "类别：科学诗",
+            "适用年龄：大班",
+            "主题：磁力",
+            "正文：磁铁小精灵。",
+            "科学原理：铁磁材料内部的磁畴在外场中定向排列，所以磁铁能够吸引铁钉。",
+          ].join("\n"),
+        },
+      ],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "磁铁为什么能吸住铁钉？" }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      provider: "fallback",
+      reply: expect.stringContaining("磁铁能够吸引铁钉"),
+      labLinks: [{ id: "POEM-magnet-principle", title: "磁铁小精灵", href: "/lab?item=POEM-magnet-principle" }],
+    });
+    expect(generateDifyReply).not.toHaveBeenCalled();
+    expect(openDifyStream).not.toHaveBeenCalled();
+  });
+
+  it("流式通道不可用时立即返回本地降级结果而不重复请求 Dify", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
     vi.mocked(wantsPhotoResults).mockReturnValue(false);
     vi.mocked(openDifyStream).mockResolvedValue(null);
-    vi.mocked(generateDifyReply).mockResolvedValue({ answer: "降级回复" });
 
     const response = await POST(
       new Request("http://localhost/api/ai-chat", {
@@ -172,7 +253,11 @@ describe("POST /api/ai-chat", () => {
     );
 
     expect(response.headers.get("content-type")).not.toContain("text/event-stream");
-    await expect(response.json()).resolves.toMatchObject({ reply: "降级回复", provider: "dify" });
+    await expect(response.json()).resolves.toMatchObject({
+      reply: expect.stringContaining("你好，我是科小贝"),
+      provider: "fallback",
+    });
+    expect(generateDifyReply).not.toHaveBeenCalled();
   });
 
   it("Dify SSE 错误事件不会再被包装成正常 done 回复", async () => {
@@ -1463,6 +1548,35 @@ describe("POST /api/ai-chat", () => {
     expect(vi.mocked(generateDifyReply).mock.calls[0]?.[0]).not.toHaveProperty("context");
   });
 
+  it("裸输入科学主题也会检索并直接返回本地依据", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [{
+        id: "science-POEM-magnet",
+        documentId: "POEM-magnet",
+        title: "磁铁的秘密",
+        document: { title: "科小贝实验室：磁铁的秘密" },
+        content: "[LAB:POEM-magnet]\n适用年龄：小班\n主题：磁力\n正文：磁铁姥姥穿花袄。",
+      }],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({ answer: "磁铁可以吸住一些铁制品。" });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "磁铁" }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      reply: expect.stringContaining("磁铁的秘密"),
+      provider: "fallback",
+    });
+    expect(searchKnowledge).toHaveBeenCalledWith("磁铁");
+    expect(generateDifyReply).not.toHaveBeenCalled();
+  });
+
   it("将浏览器会话传给 Dify，并返回新的 Dify conversation ID", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
     vi.mocked(generateDifyReply).mockResolvedValue({
@@ -1551,7 +1665,7 @@ describe("POST /api/ai-chat", () => {
     );
     expect(generateDifyReply).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: "请观察这张实验图片",
+        message: expect.stringContaining("请观察这张实验图片"),
         files: [
           {
             type: "image",
@@ -1607,6 +1721,244 @@ describe("POST /api/ai-chat", () => {
         files: [{ type: "image", transfer_method: "local_file", upload_file_id: "dify-file-stream" }],
       }),
     );
+  });
+
+  it("Word 教案走文档解析提示，不显示图片识别状态或视觉路由指令", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(uploadDifyFile).mockResolvedValue({
+      type: "document",
+      transfer_method: "local_file",
+      upload_file_id: "dify-docx-stream",
+    });
+    vi.mocked(openDifyStream).mockResolvedValue(
+      new Response(
+        'data: {"event":"message","answer":"已完成教案分析"}\n\ndata: {"event":"message_end","conversation_id":"docx-stream"}\n\n',
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+
+    const formData = new FormData();
+    formData.set("message", "请分析我上传的备课.docx教案");
+    formData.set("conversationId", "old-text-conversation");
+    formData.set(
+      "attachment",
+      new File(["docx"], "备课.docx", {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      }),
+    );
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: formData,
+      }),
+    );
+
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+    expect(events).toEqual([
+      {
+        type: "meta",
+        photos: [],
+        sources: [],
+        labLinks: [],
+        attachment: { name: "备课.docx", status: "uploaded" },
+      },
+      { type: "status", message: "文档正在解析，模型分析可能需要几十秒，请保持页面打开。" },
+      { type: "delta", delta: "已完成教案分析" },
+      {
+        type: "done",
+        provider: "dify",
+        reply: "已完成教案分析",
+        conversationId: "docx-stream",
+        responseId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
+        attachment: { name: "备课.docx", status: "uploaded" },
+      },
+    ]);
+    expect(openDifyStream).toHaveBeenCalledWith(expect.objectContaining({ conversationId: "old-text-conversation" }));
+    expect(vi.mocked(openDifyStream).mock.calls[0]?.[0].message).not.toContain("视觉实验分析");
+  });
+
+  it("流式模型超时时，完整教案请求回退到教案正文而不是资料目录", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [{
+        id: "science-STORY-water",
+        documentId: "story-water",
+        title: "会变色的小水滴",
+        document: { title: "科小贝实验室：会变色的小水滴" },
+        content: "无关资料。",
+      }],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(openDifyStream).mockResolvedValue(null);
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: JSON.stringify({
+          message: "请生成一份完整教案。年龄段：小班；主题：果农大冒险；活动时长：30 分钟；输出格式：Word 文档。",
+        }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload).toMatchObject({ provider: "fallback" });
+    expect(payload.reply).toContain("《果农大冒险》完整教案");
+    expect(payload.reply).toContain("活动过程");
+    expect(payload.reply).not.toContain("我先为你整理已检索到的园本资料");
+  });
+
+  it("课件文档请求不会因年龄段和展示用途命中科学资料目录", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      chunks: [{
+        id: "science-STORY-water",
+        documentId: "story-water",
+        title: "会变色的小水滴",
+        document: { title: "科小贝实验室：会变色的小水滴" },
+        content: "无关资料。",
+      }],
+      photos: [],
+    } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({ answer: "已生成课件提纲。" });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({
+          message: "请策划课件或教学文档。年龄段：小班；主题：果农大冒险；使用用途：家长会展示；输出格式：Word 文档。",
+        }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(payload).toMatchObject({ provider: "dify", reply: "已生成课件提纲。" });
+    expect(payload.reply).not.toContain("已从园本资料库中匹配到");
+    expect(generateDifyReply).toHaveBeenCalled();
+  });
+
+  it("图片流只在完整 agent-result 到达后结束，不把开头围栏发成空消息", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(uploadDifyFile).mockResolvedValue({
+      type: "image",
+      transfer_method: "local_file",
+      upload_file_id: "dify-vision-stream",
+    });
+    const visionResult = {
+      kind: "vision_observation",
+      image_type: "实验材料图",
+      facts: ["图片中可见透明杯"],
+      judgements: ["可能用于观察液体变化"],
+      missing_evidence: ["未看到完整操作过程"],
+      actions: ["补充操作步骤照片"],
+      safety: ["玻璃器皿由教师协助"],
+      confidence: 0.84,
+      privacy_visibility: "public_after_review",
+      privacy_risk: false,
+    };
+    vi.mocked(openDifyStream).mockResolvedValue(
+      new Response(
+        [
+          `data: ${JSON.stringify({ event: "message", answer: "```agent-result\n" })}`,
+          "",
+          `data: ${JSON.stringify({ event: "message", answer: JSON.stringify(visionResult) })}`,
+          "",
+          `data: ${JSON.stringify({ event: "message", answer: "\n```" })}`,
+          "",
+          `data: ${JSON.stringify({ event: "message_end", conversation_id: "vision-stream" })}`,
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+
+    const formData = new FormData();
+    formData.set("message", "请识别这张图片");
+    formData.set("conversationId", "old-text-conversation");
+    formData.set("attachment", new File(["image"], "experiment.png", { type: "image/png" }));
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: formData,
+      }),
+    );
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+
+    expect(events.map((event) => event.type)).toEqual(["meta", "status", "done"]);
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      conversationId: "vision-stream",
+      reply: "图片识别已完成，详细的可见内容、证据缺口和安全提醒见下方。",
+      agentResult: { kind: "vision_observation", facts: ["图片中可见透明杯"] },
+    });
+    expect(openDifyStream).toHaveBeenCalledWith(expect.objectContaining({ conversationId: undefined }));
+  });
+
+  it("图片流在最终结构化占位符无效时回退到 qvq 节点输出", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(uploadDifyFile).mockResolvedValue({
+      type: "image",
+      transfer_method: "local_file",
+      upload_file_id: "dify-qvq-fallback",
+    });
+    vi.mocked(openDifyStream).mockResolvedValue(
+      new Response(
+        [
+          `data: ${JSON.stringify({ event: "message", answer: "视觉实验分析" })}`,
+          "",
+          `data: ${JSON.stringify({ event: "message", answer: '{"type":"boolean"}' })}`,
+          "",
+          `data: ${JSON.stringify({
+            event: "node_finished",
+            conversation_id: "qvq-fallback",
+            data: {
+              node_type: "llm",
+              title: "视觉实验观察",
+              outputs: { text: "图片中可见透明杯、吸管和清水。" },
+            },
+          })}`,
+          "",
+          `data: ${JSON.stringify({
+            event: "workflow_finished",
+            data: { status: "succeeded", outputs: { result: '{"type":"boolean"}' } },
+          })}`,
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+
+    const formData = new FormData();
+    formData.set("message", "请直接识别图片");
+    formData.set("attachment", new File(["image"], "experiment.png", { type: "image/png" }));
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: formData,
+      }),
+    );
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      reply: "图片中可见透明杯、吸管和清水。",
+      conversationId: "qvq-fallback",
+    });
   });
 
   it("附件上传失败时继续文字对话并明确标记降级状态", async () => {
@@ -2165,5 +2517,148 @@ describe("POST /api/ai-chat", () => {
       error: "附件类型与文件扩展名不一致，请重新选择原始文件。",
     });
     expect(uploadDifyFile).not.toHaveBeenCalled();
+  });
+
+  it("为明确指定的科学诗将生成封面同步到对应资源，并返回持久化后的地址", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: "科学诗封面已生成。",
+      files: [{
+        type: "image",
+        remote_url: "https://upload.dify.ai/files/wind-trip.png",
+        name: "风的旅行封面.png",
+      }],
+    });
+    vi.mocked(synchronizeSciencePoetryCover).mockResolvedValue({
+      itemId: "POEM-wind-trip",
+      title: "风的旅行",
+      coverUrl: "https://blob.vercel-storage.com/science-resource-covers/wind-trip.png",
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({
+          message: "为《风的旅行》生成科学诗封面",
+          targetResourceId: "POEM-wind-trip",
+        }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      agentResult: {
+        kind: "poetry_cover",
+        cover_url: "https://upload.dify.ai/files/wind-trip.png",
+      },
+      coverSync: {
+        itemId: "POEM-wind-trip",
+        title: "风的旅行",
+        coverUrl: "https://blob.vercel-storage.com/science-resource-covers/wind-trip.png",
+      },
+    });
+    expect(synchronizeSciencePoetryCover).toHaveBeenCalledWith(
+      "POEM-wind-trip",
+      "https://upload.dify.ai/files/wind-trip.png",
+      expect.objectContaining({ difyApiKey: "route-test-dify-key" }),
+    );
+  });
+
+  it("没有目标资源 ID 时只返回聊天封面，不触发资料库写入", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({
+      answer: "科学诗封面已生成。",
+      files: [{ type: "image", remote_url: "https://upload.dify.ai/files/wind-trip.png" }],
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "生成《风的旅行》科学诗封面" }),
+      }),
+    );
+
+    const payload = await response.json();
+    expect(payload.agentResult).toMatchObject({
+      kind: "poetry_cover",
+      cover_url: "https://upload.dify.ai/files/wind-trip.png",
+    });
+    expect(payload.coverSync).toBeUndefined();
+    expect(synchronizeSciencePoetryCover).not.toHaveBeenCalled();
+  });
+
+  it("没有解析到有效封面图片时，即使给出目标资源也不写入资料库", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue({ answer: "封面暂时无法生成，请稍后重试。" });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        body: JSON.stringify({
+          message: "为《风的旅行》生成科学诗封面",
+          targetResourceId: "POEM-wind-trip",
+        }),
+      }),
+    );
+
+    const payload = await response.json();
+    expect(payload.agentResult).toMatchObject({ kind: "degraded", code: "generation_failed" });
+    expect(payload.coverSync).toBeUndefined();
+    expect(synchronizeSciencePoetryCover).not.toHaveBeenCalled();
+  });
+
+  it("流式聊天在完成事件中返回科学诗封面同步结果", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(openDifyStream).mockResolvedValue(
+      new Response(
+        [
+          `data: ${JSON.stringify({ event: "message", answer: "科学诗封面已生成。" })}`,
+          "",
+          `data: ${JSON.stringify({
+            event: "message_end",
+            files: [{ type: "image", remote_url: "https://upload.dify.ai/files/wind-trip.png" }],
+          })}`,
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+    vi.mocked(synchronizeSciencePoetryCover).mockResolvedValue({
+      itemId: "POEM-wind-trip",
+      title: "风的旅行",
+      coverUrl: "https://blob.vercel-storage.com/science-resource-covers/wind-trip.png",
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: JSON.stringify({
+          message: "为《风的旅行》生成科学诗封面",
+          targetResourceId: "POEM-wind-trip",
+        }),
+      }),
+    );
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      coverSync: {
+        itemId: "POEM-wind-trip",
+        title: "风的旅行",
+        coverUrl: "https://blob.vercel-storage.com/science-resource-covers/wind-trip.png",
+      },
+    });
+    expect(synchronizeSciencePoetryCover).toHaveBeenCalledWith(
+      "POEM-wind-trip",
+      "https://upload.dify.ai/files/wind-trip.png",
+      expect.objectContaining({ difyApiKey: "route-test-dify-key" }),
+    );
   });
 });

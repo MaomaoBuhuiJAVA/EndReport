@@ -47,7 +47,7 @@ function isScienceChunk(chunk: SearchChunk) {
   );
 }
 
-export function buildScienceLabLinks(chunks: SearchChunk[], query = ""): ScienceLabLink[] {
+export function buildScienceLabLinks(chunks: SearchChunk[], query = "", limit = 3): ScienceLabLink[] {
   const namedTitles = namedResourceTitles(query);
   const seen = new Set<string>();
   const links: ScienceLabLink[] = [];
@@ -71,7 +71,7 @@ export function buildScienceLabLinks(chunks: SearchChunk[], query = ""): Science
       title: chunk.title,
       href: `/lab?item=${encodeURIComponent(chunk.documentId)}`,
     });
-    if (links.length === 3) break;
+    if (links.length === Math.max(1, limit)) break;
   }
 
   return links;

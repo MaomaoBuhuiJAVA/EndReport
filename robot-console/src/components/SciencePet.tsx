@@ -31,13 +31,14 @@ import { AgentResultCard } from "@/components/AgentResultCard";
 import {
   readAiChatResponse,
   type AiChatAttachmentStatus,
+  type AiChatCoverSync,
   type AiChatStreamEvent,
 } from "@/lib/ai-chat-stream";
 import { buildAiChatDocumentDownloadUrl } from "@/lib/ai-chat-download";
 import type { AiChatOutputFile } from "@/lib/ai-chat-files";
 import { buildLessonPlanDocx } from "@/lib/lesson-plan-docx";
 import type { AgentResult } from "@/lib/agent-result";
-import { assistantDisplayText } from "@/lib/assistant-display-text";
+import { assistantDisplayText, assistantFallbackText } from "@/lib/assistant-display-text";
 import { createDifyWebUserId } from "@/lib/dify-session";
 import type { ScienceLabLink } from "@/lib/science-lab-links";
 import {
@@ -82,6 +83,7 @@ type PetMessage = {
   role: "user" | "assistant";
   text: string;
   pending?: boolean;
+  statusText?: string;
   responseId?: string;
   photos?: PetPhoto[];
   labLinks?: ScienceLabLink[];
@@ -113,6 +115,7 @@ type DragState = {
 };
 
 type VoiceStatus = "idle" | "starting" | "listening" | "processing" | "error" | "unsupported";
+type VoiceReleaseAction = "send" | "cancel" | "edit";
 type ComposerMode = "text" | "voice";
 type CallPhase = "idle" | "preparing" | "listening" | "thinking" | "speaking" | "muted" | "error";
 type FeedbackRating = "adopted" | "needs_revision" | "not_helpful";
@@ -125,6 +128,7 @@ type AssistantReply = {
   labLinks?: ScienceLabLink[];
   attachment?: AiChatAttachmentStatus;
   agentResult?: AgentResult;
+  coverSync?: AiChatCoverSync;
   files?: AiChatOutputFile[];
 };
 
@@ -171,7 +175,17 @@ type SpeechRecognitionLike = {
 };
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+type KexiaobeiOpenDetail = {
+  prompt?: string;
+  targetResourceId?: string;
+};
+
 type KexiaobeiWindow = typeof window & { __kexiaobeiOpenRequested?: boolean };
+
+type PendingPoetryCoverTarget = {
+  prompt: string;
+  resourceId: string;
+};
 
 type PetAnimationState =
   | "idle"
@@ -230,6 +244,7 @@ const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
 const DIRECT_VIDEO_ATTACHMENT_NOTICE = "暂不支持直接上传视频，请先提取关键帧或整理文字记录后再上传。";
 const ATTACHMENT_TYPE_MISMATCH_NOTICE = "附件类型与文件扩展名不一致，请重新选择原始文件。";
 const UNSUPPORTED_ATTACHMENT_NOTICE = "暂不支持该附件格式，请上传图片、PDF、Word、PPT、Excel 或 TXT 文件。";
+const DIRECT_IMAGE_RECOGNITION_PROMPT = "请直接识别图片中可见的科学材料、操作或现象，简要列出观察事实、证据不足和安全提醒。";
 const ATTACHMENT_MIME_BY_EXTENSION = new Map([
   [".jpg", "image/jpeg"],
   [".jpeg", "image/jpeg"],
@@ -389,6 +404,8 @@ export function SciencePet() {
   const [busy, setBusy] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("idle");
   const [voiceNotice, setVoiceNotice] = useState("");
+  const [voiceReleaseAction, setVoiceReleaseAction] = useState<VoiceReleaseAction>("send");
+  const [voiceOverlayBottom, setVoiceOverlayBottom] = useState(150);
   const [copiedMessageId, setCopiedMessageId] = useState<number | null>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<number | null>(null);
   const [callPhase, setCallPhase] = useState<CallPhase>("idle");
@@ -413,6 +430,7 @@ export function SciencePet() {
   ]);
   const messagesRef = useRef<PetMessage[]>(messages);
   const difyConversationIdRef = useRef<string | undefined>(undefined);
+  const pendingPoetryCoverTargetRef = useRef<PendingPoetryCoverTarget | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -425,9 +443,22 @@ export function SciencePet() {
   const positionRef = useRef(position);
   const suppressClickRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const voiceButtonRef = useRef<HTMLButtonElement>(null);
   const voicePressedRef = useRef(false);
+  const voiceStartXRef = useRef(0);
+  const voiceReleaseActionRef = useRef<VoiceReleaseAction>("send");
+  const voiceReleasedRef = useRef(false);
+  const voiceCancelledRef = useRef(false);
   const voiceBaseInputRef = useRef("");
   const voiceTranscriptRef = useRef("");
+  const voiceCancelTargetRef = useRef<HTMLSpanElement>(null);
+  const voiceEditTargetRef = useRef<HTMLSpanElement>(null);
+  const voiceWaveBarsRef = useRef<Array<HTMLSpanElement | null>>([]);
+  const voiceMeterStreamRef = useRef<MediaStream | null>(null);
+  const voiceMeterContextRef = useRef<AudioContext | null>(null);
+  const voiceMeterSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const voiceMeterFrameRef = useRef<number | null>(null);
+  const voiceMeterSessionRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioObjectUrlRef = useRef<string | null>(null);
   const ttsAbortRef = useRef<AbortController | null>(null);
@@ -442,6 +473,12 @@ export function SciencePet() {
   const callFinalTranscriptRef = useRef("");
   const callRestartTimerRef = useRef<number | null>(null);
   const localObjectUrlsRef = useRef<Set<string>>(new Set());
+
+  const measureVoiceOverlayBottom = useCallback((button = voiceButtonRef.current) => {
+    if (!button) return;
+    const bounds = button.getBoundingClientRect();
+    setVoiceOverlayBottom(Math.max(12, Math.round(window.innerHeight - bounds.top + 12)));
+  }, []);
 
   useLayoutEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -458,6 +495,14 @@ export function SciencePet() {
 
     return () => window.cancelAnimationFrame(frame);
   }, []);
+
+  useEffect(() => {
+    if (voiceStatus !== "starting" && voiceStatus !== "listening" && voiceStatus !== "processing") return;
+    const updateVoiceOverlayPosition = () => measureVoiceOverlayBottom();
+    updateVoiceOverlayPosition();
+    window.addEventListener("resize", updateVoiceOverlayPosition);
+    return () => window.removeEventListener("resize", updateVoiceOverlayPosition);
+  }, [measureVoiceOverlayBottom, voiceStatus]);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -571,7 +616,12 @@ export function SciencePet() {
     const assistantWindow = window as KexiaobeiWindow;
     function openChat(event?: Event) {
       assistantWindow.__kexiaobeiOpenRequested = false;
-      const prompt = (event as CustomEvent<{ prompt?: string }> | undefined)?.detail?.prompt?.trim();
+      const detail = (event as CustomEvent<KexiaobeiOpenDetail> | undefined)?.detail;
+      const prompt = detail?.prompt?.trim();
+      const targetResourceId = detail?.targetResourceId?.trim();
+      pendingPoetryCoverTargetRef.current = prompt && targetResourceId
+        ? { prompt, resourceId: targetResourceId }
+        : null;
       if (prompt) setInput(prompt);
       setOpen(true);
       window.requestAnimationFrame(() => inputRef.current?.focus());
@@ -688,8 +738,85 @@ export function SciencePet() {
     return () => window.cancelAnimationFrame(frame);
   }, [open, position, autoWalk]);
 
-  const stopPressAndHoldVoice = useCallback(() => {
+  const resetVoiceWaveBars = useCallback(() => {
+    voiceWaveBarsRef.current.forEach((bar) => bar?.style.removeProperty("--pet-voice-level"));
+  }, []);
+
+  const stopVoiceWaveMeter = useCallback(() => {
+    voiceMeterSessionRef.current += 1;
+    if (voiceMeterFrameRef.current !== null) {
+      window.cancelAnimationFrame(voiceMeterFrameRef.current);
+      voiceMeterFrameRef.current = null;
+    }
+    voiceMeterSourceRef.current?.disconnect();
+    voiceMeterSourceRef.current = null;
+    voiceMeterStreamRef.current?.getTracks().forEach((track) => track.stop());
+    voiceMeterStreamRef.current = null;
+    const context = voiceMeterContextRef.current;
+    voiceMeterContextRef.current = null;
+    if (context && context.state !== "closed") {
+      void context.close();
+    }
+    resetVoiceWaveBars();
+  }, [resetVoiceWaveBars]);
+
+  const startVoiceWaveMeter = useCallback(() => {
+    const AudioContextConstructor = window.AudioContext
+      ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextConstructor || !navigator.mediaDevices?.getUserMedia) return;
+
+    stopVoiceWaveMeter();
+    const session = voiceMeterSessionRef.current;
+    void navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+      if (voiceMeterSessionRef.current !== session || !voicePressedRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      const context = new AudioContextConstructor();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.78;
+      const source = context.createMediaStreamSource(stream);
+      source.connect(analyser);
+      void context.resume();
+
+      voiceMeterStreamRef.current = stream;
+      voiceMeterContextRef.current = context;
+      voiceMeterSourceRef.current = source;
+      const samples = new Uint8Array(analyser.fftSize);
+      const barWeight = [0.8, 1.08, 1.35, 1.02, 0.78];
+
+      const update = () => {
+        if (voiceMeterSessionRef.current !== session || !voicePressedRef.current) return;
+        analyser.getByteTimeDomainData(samples);
+        let energy = 0;
+        for (const sample of samples) {
+          const amplitude = (sample - 128) / 128;
+          energy += amplitude * amplitude;
+        }
+        const level = Math.min(1, Math.sqrt(energy / samples.length) * 8);
+        voiceWaveBarsRef.current.forEach((bar, index) => {
+          const scale = Math.min(1.34, 0.38 + level * barWeight[index]);
+          bar?.style.setProperty("--pet-voice-level", scale.toFixed(3));
+        });
+        voiceMeterFrameRef.current = window.requestAnimationFrame(update);
+      };
+
+      update();
+    }).catch(() => {
+      // Browser speech recognition still reports the user-facing microphone error.
+      resetVoiceWaveBars();
+    });
+  }, [resetVoiceWaveBars, stopVoiceWaveMeter]);
+
+  const stopPressAndHoldVoice = useCallback(({ resetUi = true }: { resetUi?: boolean } = {}) => {
     voicePressedRef.current = false;
+    voiceReleasedRef.current = false;
+    voiceReleaseActionRef.current = "send";
+    voiceCancelledRef.current = true;
+    if (resetUi) setVoiceReleaseAction("send");
+    stopVoiceWaveMeter();
     const recognition = recognitionRef.current;
     recognitionRef.current = null;
     if (!recognition) return;
@@ -702,7 +829,7 @@ export function SciencePet() {
     } catch {
       // The recognition result has already been released by the browser.
     }
-  }, []);
+  }, [stopVoiceWaveMeter]);
 
   const stopCallRecognition = useCallback(() => {
     const recognition = callRecognitionRef.current;
@@ -733,7 +860,7 @@ export function SciencePet() {
 
   const stopAllVoice = useCallback(
     ({ resetUi = true }: { resetUi?: boolean } = {}) => {
-      stopPressAndHoldVoice();
+      stopPressAndHoldVoice({ resetUi });
       stopCallRecognition();
       clearCallTimers();
       if (copyTimeoutRef.current) {
@@ -799,6 +926,7 @@ export function SciencePet() {
     signal?: AbortSignal,
     onEvent?: (event: AiChatStreamEvent) => void,
     attachment?: File | null,
+    targetResourceId?: string,
   ): Promise<AssistantReply> {
     const formData = attachment ? new FormData() : null;
     if (formData && attachment) {
@@ -808,6 +936,7 @@ export function SciencePet() {
       if (difyConversationIdRef.current) {
         formData.append("conversationId", difyConversationIdRef.current);
       }
+      if (targetResourceId) formData.append("targetResourceId", targetResourceId);
       formData.append("attachment", attachment);
     }
 
@@ -822,6 +951,7 @@ export function SciencePet() {
         history,
         userId: difyUserId,
         conversationId: difyConversationIdRef.current,
+        ...(targetResourceId ? { targetResourceId } : {}),
       }),
     });
     if (!response.ok) {
@@ -838,15 +968,21 @@ export function SciencePet() {
     }
 
     const data = await readAiChatResponse(response, onEvent);
-    if (data.conversationId) difyConversationIdRef.current = data.conversationId;
+    // A locally-grounded answer did not enter Dify's conversation memory. Do
+    // not carry an older remote conversation into the next question, where it
+    // can add stale context and make the next response both slower and less
+    // accurate.
+    if (data.provider === "fallback") difyConversationIdRef.current = undefined;
+    else if (data.conversationId) difyConversationIdRef.current = data.conversationId;
     return {
-      text: data.reply?.trim() || "资料库暂时没有返回内容，请换个问法试试。",
+      text: data.reply?.trim() || assistantFallbackText(data.agentResult?.kind) || "资料库暂时没有返回内容，请换个问法试试。",
       provider: data.provider,
       responseId: data.responseId,
       photos: data.photos,
       labLinks: data.labLinks,
       attachment: data.attachment,
       agentResult: data.agentResult,
+      coverSync: data.coverSync,
       files: data.files,
     };
   }
@@ -869,18 +1005,32 @@ export function SciencePet() {
         agentResult: event.agentResult ?? message.agentResult,
         files: event.files ?? message.files,
       }));
+    } else if (event.type === "status") {
+      updatePetMessage(messageId, (message) => ({
+        ...message,
+        statusText: event.message,
+      }));
     } else if (event.type === "delta") {
       updatePetMessage(messageId, (message) => ({
         ...message,
         pending: false,
+        statusText: undefined,
         text: `${message.text}${event.delta}`,
       }));
       onText?.(event.delta, "delta");
     } else if (event.type === "done") {
+      const visibleReply = event.reply.trim() || assistantFallbackText(event.agentResult?.kind);
+      if (!visibleReply) {
+        // A vision workflow can close a stream with metadata before its text
+        // answer is available. Keep the pending bubble alive; the final
+        // response fallback will settle it instead of flashing an empty one.
+        return;
+      }
       updatePetMessage(messageId, (message) => ({
         ...message,
         pending: false,
-        text: event.reply,
+        statusText: undefined,
+        text: visibleReply,
         responseId: event.responseId ?? message.responseId,
         photos: event.photos,
         labLinks: event.labLinks,
@@ -1352,7 +1502,7 @@ export function SciencePet() {
     setSelectedAttachment(attachment);
     setAttachmentNotice("");
     if (mode === "photo") {
-      setInput("请识别这张图片中的科学内容，并给出适合幼儿的观察建议。");
+      setInput(DIRECT_IMAGE_RECOGNITION_PROMPT);
       focusComposerInput();
     }
   }
@@ -1374,6 +1524,10 @@ export function SciencePet() {
   async function sendMessage(prompt: string, options?: SendMessageOptions) {
     const content = prompt.trim();
     if (!content || busy || callActiveRef.current) return;
+
+    const coverTarget = pendingPoetryCoverTargetRef.current;
+    const targetResourceId = coverTarget?.prompt === content ? coverTarget.resourceId : undefined;
+    pendingPoetryCoverTargetRef.current = null;
 
     const userMessageId = messageIdRef.current++;
     const assistantMessageId = messageIdRef.current++;
@@ -1412,6 +1566,7 @@ export function SciencePet() {
         undefined,
         (event) => applyAssistantStreamEvent(assistantMessageId, event),
         attachment,
+        targetResourceId,
       );
       let outputFiles = reply.files;
       const canPackageLessonPlan =
@@ -1460,6 +1615,9 @@ export function SciencePet() {
         agentResult: reply.agentResult,
         files: outputFiles,
       }));
+      if (reply.coverSync) {
+        window.dispatchEvent(new CustomEvent("kexiaobei:cover-synced", { detail: reply.coverSync }));
+      }
       requestSucceeded = true;
     } catch (error) {
       const errorMessage = error instanceof Error && error.message.trim()
@@ -1480,7 +1638,7 @@ export function SciencePet() {
     if (input.trim()) return input;
     if (!selectedAttachment) return "";
     return selectedAttachment.type.startsWith("image/")
-      ? "请识别这张图片中的科学内容，并给出适合幼儿的观察建议。"
+      ? DIRECT_IMAGE_RECOGNITION_PROMPT
       : `请阅读我上传的《${selectedAttachment.name}》，提炼关键内容并给出可执行建议。`;
   }
 
@@ -1504,6 +1662,11 @@ export function SciencePet() {
 
     if (composerMode === "voice") {
       voicePressedRef.current = false;
+      voiceReleasedRef.current = false;
+      voiceCancelledRef.current = true;
+      voiceReleaseActionRef.current = "send";
+      setVoiceReleaseAction("send");
+      stopVoiceWaveMeter();
       const recognition = recognitionRef.current;
       if (recognition) {
         try {
@@ -1527,6 +1690,12 @@ export function SciencePet() {
     if (busy || callPhase !== "idle" || callActiveRef.current || voiceStatus === "starting" || voiceStatus === "listening") return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
+    measureVoiceOverlayBottom(event.currentTarget);
+    voiceStartXRef.current = event.clientX;
+    voiceReleaseActionRef.current = "send";
+    voiceReleasedRef.current = false;
+    voiceCancelledRef.current = false;
+    setVoiceReleaseAction("send");
 
     const Recognition = getSpeechRecognitionConstructor();
     if (!Recognition) {
@@ -1538,9 +1707,10 @@ export function SciencePet() {
     const recognition = new Recognition();
     let failed = false;
     voicePressedRef.current = true;
-    voiceBaseInputRef.current = input.trim();
+    voiceBaseInputRef.current = input;
     voiceTranscriptRef.current = "";
     recognitionRef.current = recognition;
+    startVoiceWaveMeter();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "zh-CN";
@@ -1562,18 +1732,22 @@ export function SciencePet() {
       const spokenText = transcript.trim();
       voiceTranscriptRef.current = spokenText;
       if (spokenText) {
-        const base = voiceBaseInputRef.current;
+        const base = voiceBaseInputRef.current.trim();
         setInput(`${base}${base ? " " : ""}${spokenText}`);
       }
     };
     recognition.onerror = (errorEvent) => {
       if (errorEvent.error === "aborted" && !voicePressedRef.current) return;
+      stopVoiceWaveMeter();
+      voiceReleasedRef.current = false;
+      voiceReleaseActionRef.current = "send";
+      setVoiceReleaseAction("send");
       failed = true;
       const errorMessages: Record<string, string> = {
         "not-allowed": "麦克风权限未开启，请在浏览器设置中允许访问。",
         "service-not-allowed": "浏览器已禁用语音识别服务。",
         "audio-capture": "没有检测到可用的麦克风。",
-        "no-speech": "没有听到声音，请按住后再说一次。",
+        "no-speech": "录音太短或没有听到声音，请按住后再说一次。",
         network: "语音服务暂时无法连接，请稍后重试。",
       };
       setVoiceStatus("error");
@@ -1582,11 +1756,41 @@ export function SciencePet() {
     recognition.onend = () => {
       recognitionRef.current = null;
       voicePressedRef.current = false;
+      stopVoiceWaveMeter();
+      if (voiceCancelledRef.current) {
+        voiceCancelledRef.current = false;
+        voiceReleasedRef.current = false;
+        voiceReleaseActionRef.current = "send";
+        return;
+      }
       if (failed) return;
+      const releaseAction = voiceReleaseActionRef.current;
+      const releasedByUser = voiceReleasedRef.current;
+      voiceReleaseActionRef.current = "send";
+      voiceReleasedRef.current = false;
+      setVoiceReleaseAction("send");
+      const spokenText = voiceTranscriptRef.current.trim();
+      if (!releasedByUser) {
+        setVoiceStatus("idle");
+        setVoiceNotice(spokenText ? "语音已转成文字，可以继续编辑或发送。" : "录音太短或没有听清，请按住麦克风再试一次。");
+        return;
+      }
       setVoiceStatus("idle");
-      setVoiceNotice(
-        voiceTranscriptRef.current ? "语音已转成文字，可以继续编辑或发送。" : "没有听清，请按住麦克风再试一次。",
-      );
+      if (!spokenText) {
+        setVoiceNotice("录音太短或没有听清，请按住麦克风再试一次。");
+        return;
+      }
+      const base = voiceBaseInputRef.current.trim();
+      const voiceText = `${base}${base ? " " : ""}${spokenText}`;
+      if (releaseAction === "edit") {
+        setInput(voiceText);
+        setComposerMode("text");
+        setVoiceNotice("语音已转成文字，可以修改后再发送。");
+        window.requestAnimationFrame(() => focusComposerInput());
+        return;
+      }
+      setVoiceNotice("语音已发送，正在等待回复。");
+      void sendMessage(voiceText);
     };
 
     setVoiceStatus("starting");
@@ -1594,6 +1798,7 @@ export function SciencePet() {
     try {
       recognition.start();
     } catch {
+      stopVoiceWaveMeter();
       recognitionRef.current = null;
       voicePressedRef.current = false;
       setVoiceStatus("error");
@@ -1601,11 +1806,97 @@ export function SciencePet() {
     }
   }
 
-  function stopVoiceInput(event: ReactPointerEvent<HTMLButtonElement>) {
+  function isPointInsideVoiceReleaseTarget(
+    target: HTMLSpanElement | null,
+    clientX: number,
+    clientY: number,
+  ) {
+    if (!target) return false;
+    const bounds = target.getBoundingClientRect();
+    const horizontalHitSlop = 18;
+    const verticalHitSlop = 20;
+    return clientX >= bounds.left - horizontalHitSlop
+      && clientX <= bounds.right + horizontalHitSlop
+      && clientY >= bounds.top - verticalHitSlop
+      && clientY <= bounds.bottom + verticalHitSlop;
+  }
+
+  function updateVoiceReleaseTarget(clientX: number, clientY: number) {
+    // Pointer capture stays on the hold button, so compare movement with the visible targets.
+    const hasVisibleReleaseTargets = Boolean(
+      voiceCancelTargetRef.current && voiceEditTargetRef.current,
+    );
+    const action: VoiceReleaseAction = isPointInsideVoiceReleaseTarget(
+      voiceCancelTargetRef.current,
+      clientX,
+      clientY,
+    )
+      ? "cancel"
+      : isPointInsideVoiceReleaseTarget(
+        voiceEditTargetRef.current,
+        clientX,
+        clientY,
+      )
+        ? "edit"
+        : hasVisibleReleaseTargets
+          ? "send"
+          : clientX < voiceStartXRef.current - 72
+            ? "cancel"
+            : clientX > voiceStartXRef.current + 72
+              ? "edit"
+              : "send";
+    if (voiceReleaseActionRef.current === action) return;
+    voiceReleaseActionRef.current = action;
+    setVoiceReleaseAction(action);
+  }
+
+  function handleVoicePointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!voicePressedRef.current) return;
+    updateVoiceReleaseTarget(event.clientX, event.clientY);
+  }
+
+  function cancelVoiceInput(event: ReactPointerEvent<HTMLButtonElement>) {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     voicePressedRef.current = false;
+    voiceReleasedRef.current = false;
+    voiceCancelledRef.current = true;
+    voiceReleaseActionRef.current = "send";
+    setVoiceReleaseAction("send");
+    setInput(voiceBaseInputRef.current);
+    voiceTranscriptRef.current = "";
+    stopVoiceWaveMeter();
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+    if (recognition) {
+      recognition.onstart = null;
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.onend = null;
+      try {
+        recognition.abort();
+      } catch {
+        // The browser may already have ended the recognition session.
+      }
+    }
+    setVoiceStatus("idle");
+    setVoiceNotice("已取消本次语音输入。");
+  }
+
+  function stopVoiceInput(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (voiceReleaseActionRef.current === "cancel") {
+      cancelVoiceInput(event);
+      return;
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    voicePressedRef.current = false;
+    voiceReleasedRef.current = true;
+    voiceCancelledRef.current = false;
+    setVoiceReleaseAction("send");
+    stopVoiceWaveMeter();
     const recognition = recognitionRef.current;
     if (!recognition) return;
     setVoiceStatus("processing");
@@ -1878,7 +2169,7 @@ export function SciencePet() {
                       {message.role === "assistant" && message.pending && !message.text ? (
                         <span className="thinking-copy">
                           <ThinkingGhost />
-                          <span>正在思考</span>
+                          <span>{message.statusText ?? (message.attachment?.status === "uploaded" ? "正在识别图片" : "正在思考")}</span>
                         </span>
                       ) : message.role === "assistant" ? (
                         <div className="pet-message__markdown">
@@ -2026,6 +2317,67 @@ export function SciencePet() {
                     </button>
                   ))}
                 </div>
+                {voiceStatus === "starting" || voiceStatus === "listening" || voiceStatus === "processing" ? (
+                  <div
+                    className="pet-voice-hold-overlay"
+                    role="status"
+                    aria-live="polite"
+                    style={{ "--pet-voice-overlay-bottom": `${voiceOverlayBottom}px` } as CSSProperties}
+                  >
+                    <div
+                      className={`pet-voice-hold-overlay__bubble${
+                        voiceReleaseAction === "cancel"
+                          ? " is-cancel-pending"
+                          : voiceReleaseAction === "edit"
+                            ? " is-edit-pending"
+                            : ""
+                      }`}
+                    >
+                      <span className="pet-voice-hold-overlay__wave" aria-hidden="true">
+                        {[0, 1, 2, 3, 4].map((bar) => (
+                          <span
+                            key={bar}
+                            ref={(node) => {
+                              voiceWaveBarsRef.current[bar] = node;
+                            }}
+                          />
+                        ))}
+                      </span>
+                      <span>
+                        {voiceStatus === "processing"
+                          ? "正在转写"
+                          : voiceReleaseAction === "cancel"
+                            ? "松手取消"
+                            : voiceReleaseAction === "edit"
+                              ? "松手转文字"
+                              : "松手发送"}
+                      </span>
+                    </div>
+                    <p className="pet-voice-hold-overlay__hint">
+                      {voiceStatus === "processing"
+                        ? "正在整理语音内容"
+                        : voiceReleaseAction === "cancel"
+                          ? "松手取消录音"
+                          : voiceReleaseAction === "edit"
+                            ? "松手后进入输入框修改"
+                            : "松手直接发送"}
+                    </p>
+                    <div className="pet-voice-hold-overlay__targets">
+                      <span
+                        ref={voiceCancelTargetRef}
+                        className={`pet-voice-hold-overlay__target pet-voice-hold-overlay__target--cancel${voiceReleaseAction === "cancel" ? " is-cancel-pending" : ""}`}
+                      >
+                        取消录音
+                      </span>
+                      <span
+                        ref={voiceEditTargetRef}
+                        className={`pet-voice-hold-overlay__target pet-voice-hold-overlay__target--edit${voiceReleaseAction === "edit" ? " is-edit-pending" : ""}`}
+                      >
+                        松手转文字
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
               </>
             )}
 
@@ -2138,19 +2490,21 @@ export function SciencePet() {
                   </button>
                   {composerMode === "voice" ? (
                     <button
+                      ref={voiceButtonRef}
                       type="button"
                       className={`pet-chat__voice-button${voiceStatus === "listening" || voiceStatus === "starting" ? " is-listening" : ""}`}
                       disabled={busy || callPhase !== "idle" || voiceStatus === "processing"}
                       onContextMenu={(event) => event.preventDefault()}
-                      onPointerCancel={stopVoiceInput}
+                      onPointerCancel={cancelVoiceInput}
                       onPointerDown={startVoiceInput}
+                      onPointerMove={handleVoicePointerMove}
                       onPointerUp={stopVoiceInput}
                       aria-label="按住说话"
                       aria-pressed={voiceStatus === "listening"}
-                      title="按住说话，松开完成"
+                      title="按住说话，松手发送；向右滑可转文字编辑"
                     >
                       <Mic size={17} />
-                      <span>{voiceStatus === "listening" ? "松开完成" : "按住说话"}</span>
+                      <span>{voiceStatus === "listening" ? "松手发送" : "按住说话"}</span>
                     </button>
                   ) : (
                     <textarea

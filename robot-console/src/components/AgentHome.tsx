@@ -120,6 +120,9 @@ export function AgentHome({ data }: AgentHomeProps) {
           </Link>
 
           <nav className="flex items-center gap-2 text-sm font-medium">
+            <Link className="hidden h-10 items-center rounded-[6px] border border-[#c8ddd5] px-3.5 text-[#176b5d] transition hover:bg-[#e6f2ec] sm:inline-flex" href="/works">
+              科学作品
+            </Link>
             <Link className="inline-flex h-10 items-center gap-2 rounded-[6px] bg-[#176b5d] px-3.5 text-white transition hover:bg-[#12594d]" href="/lab">
               进入实验室
               <ArrowRight aria-hidden="true" size={16} />

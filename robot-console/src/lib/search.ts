@@ -162,19 +162,12 @@ function searchPackagedScience(query: string, keywords: string[]) {
     .sort((a, b) => b.score - a.score)
     .slice(0, 12);
 
+  // Use the same structured record for both broad topic searches and explicit
+  // catalogue searches. This keeps the category, age, topic and public media
+  // links available to the assistant instead of handing it an unlabelled text
+  // fragment that can be mistaken for an unrelated Dify knowledge-base result.
   const chunks = candidates.map(({ item, score }) => ({
-    id: `science-${item.id}`,
-    documentId: item.id,
-    title: item.title,
-    content: `${item.excerpt}
-${item.body.slice(0, 1800)}`,
-    keywords: item.tags.join(" "),
-    createdAt: new Date(0),
-    document: {
-      title: `科小贝实验室：${item.title}`,
-      category: "COURSE" as const,
-      summary: item.excerpt,
-    },
+    ...scienceItemToSearchChunk(item),
     score,
   }));
 
@@ -202,13 +195,53 @@ ${item.body.slice(0, 1800)}`,
   return { chunks, photos };
 }
 
+function withCanonicalScienceCategory(query: string) {
+  // Keep common classroom vocabulary on the same search path as the source
+  // folder's canonical topic. Otherwise a prompt such as “磁极有什么特点”
+  // has no literal overlap with records filed under “磁力”.
+  const topicNormalized = /磁性|磁极|吸铁|铁钉/u.test(query) && !/磁力/u.test(query)
+    ? `${query} 磁力`
+    : query;
+  if (/科学诗|科学故事|科学实验/u.test(topicNormalized)) return topicNormalized;
+  if (/科学童谣|童谣|诗歌|(?:^|[的与和相关])诗(?:歌)?$/u.test(topicNormalized)) return `${topicNormalized} 科学诗`;
+  if (/(?:^|[的与和相关])故事$/u.test(topicNormalized)) return `${topicNormalized} 科学故事`;
+  if (/(?:^|[的与和相关])实验$/u.test(topicNormalized)) return `${topicNormalized} 科学实验`;
+  return topicNormalized;
+}
+
+function packagedScienceResourceSearch(query: string) {
+  const matches = searchScienceSummaries(scienceItems, query, 8);
+  const chunks = matches.map((item) => scienceItemToSearchChunk(item));
+  const photos = matches
+    .flatMap((item) => item.resources
+      .filter((resource) => resource.type === "图片资源" && resource.isPublic && Boolean(resource.publicPath))
+      .map((resource) => ({
+        id: resource.id,
+        title: resource.title,
+        description: `${item.ageLabel} · ${item.title}`,
+        url: resource.publicPath,
+        kind: "DOCUMENT" as const,
+        score: 1000,
+      })))
+    .slice(0, 10);
+
+  return { chunks, photos };
+}
+
 export function isStructuredScienceResourceQuery(query: string) {
-  const normalized = query.replace(/[\s，。！？、；：,.!?;]/g, "");
+  const normalized = withCanonicalScienceCategory(query).replace(/[\s，。！？、；：,.!?;]/g, "");
   const hasCategory = /科学诗|科学故事|科学实验/.test(normalized);
   const hasAge = /托班|小班|中班|大班/.test(normalized);
   const hasResourceIntent = /推荐|查找|搜索|检索|资源|内容|正文|介绍|查看|看看|适合/.test(normalized);
+  // Chinese queries rarely contain word boundaries. Once a teacher has named
+  // a catalog category, a remaining meaningful phrase is normally the topic
+  // (for example “磁铁的科学诗”), and should use the strict catalog matcher
+  // instead of the broad full-text fallback.
+  const topicCandidate = normalized
+    .replace(/科学诗|科学故事|科学实验|推荐|查找|搜索|检索|资源|内容|正文|介绍|查看|看看|适合|关于|有关|帮我|请|给我|想要|里面|哪些|有没有|一首|一个/g, "")
+    .length >= 2;
 
-  return (hasCategory && (hasAge || hasResourceIntent)) ||
+  return (hasCategory && (hasAge || hasResourceIntent || topicCandidate)) ||
     (hasAge && /实验|诗|故事/.test(normalized));
 }
 
@@ -231,8 +264,11 @@ function scienceItemToSearchChunk(item: ScienceKnowledgeItem | ScienceKnowledgeS
     `主题：${item.topic}`,
     item.author ? `作者：${item.author}` : "",
     item.excerpt ? `摘要：${item.excerpt}` : "",
-    body ? `正文：\n${body.slice(0, 6000)}` : "",
     resourceLines.length ? `媒体资源：\n${resourceLines.join("\n")}` : "",
+    // Media links belong ahead of the long article body. The conversational
+    // context is deliberately capped for speed, so links must not be pushed
+    // beyond the truncation boundary.
+    body ? `正文：\n${body.slice(0, 6000)}` : "",
   ].filter(Boolean).join("\n");
 
   return {
@@ -252,6 +288,18 @@ function scienceItemToSearchChunk(item: ScienceKnowledgeItem | ScienceKnowledgeS
 }
 
 async function searchStructuredScienceResources(query: string) {
+  // The packaged catalogue ships with the site and is the authoritative
+  // fallback for public science content. It avoids a database round-trip and
+  // N+1 resource reads for the normal teacher lookup path.
+  const compactQuery = query.replace(/[\s，。！？、；：,.!?;:()[\]{}《》〈〉「」“”‘’"']/gu, "");
+  const concreteTopic = compactQuery
+    .replace(/科学诗|科学故事|科学实验|托班|小班|中班|大班|推荐|查找|搜索|检索|资源|内容|正文|介绍|查看|看看|适合|关于|有关|帮我|请|给我|想要|里面|哪些|有没有|一首|一个/gu, "")
+    .length >= 2;
+  if (concreteTopic) {
+    const packaged = packagedScienceResourceSearch(query);
+    if (packaged.chunks.length) return packaged;
+  }
+
   const summaries = await getScienceKnowledgeSummaries();
   const matches = searchScienceSummaries(summaries, query, 8);
   const items = await Promise.all(matches.map((match) => getScienceKnowledgeItem(match.id)));
@@ -275,23 +323,38 @@ async function searchStructuredScienceResources(query: string) {
   return { chunks, photos };
 }
 
+function isPackagedScienceConceptQuery(query: string) {
+  return /磁铁|磁力|磁性|磁极|吸铁|铁钉|光影|影子|彩虹|空气|气流|风|水滴|水循环|泡泡|植物|动物|昆虫|浮力|重力|温度|蒸发|溶解|雷电|太阳|月亮|星星|季节|骨头|身体|纸片|火山|密度|表面张力|虹吸/u.test(query);
+}
+
 export function wantsPhotoResults(query: string) {
   return /照片|图片|影像|图|看看|看一看|参观|环境|空间|功能室|有没有/.test(query);
 }
 
 export async function searchKnowledge(query: string) {
-  const keywords = expandKeywords(query);
-  const databaseKeywords = getDatabaseSearchKeywords(query);
+  const scienceQuery = withCanonicalScienceCategory(query);
+  const keywords = expandKeywords(scienceQuery);
+  const databaseKeywords = getDatabaseSearchKeywords(scienceQuery);
 
   if (!keywords.length) {
     return { chunks: [], photos: [] };
   }
 
-  if (isStructuredScienceResourceQuery(query)) {
-    return searchStructuredScienceResources(query);
+  if (isStructuredScienceResourceQuery(scienceQuery)) {
+    return searchStructuredScienceResources(scienceQuery);
   }
 
-  const science = searchPackagedScience(query, keywords);
+  const science = searchPackagedScience(scienceQuery, keywords);
+
+  // A concrete science topic already has a strong local hit. Querying every
+  // database table afterwards delays the assistant but cannot improve the
+  // public laboratory record that will be shown to the teacher.
+  if (science.chunks.length && isPackagedScienceConceptQuery(scienceQuery)) {
+    return {
+      chunks: science.chunks.slice(0, 8),
+      photos: wantsPhotoResults(query) ? science.photos : [],
+    };
+  }
 
   try {
     const documentWhere = {

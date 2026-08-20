@@ -15,6 +15,13 @@ export type AiChatAttachmentStatus = {
   message?: string;
 };
 
+/** A durable science-poem cover update completed by the chat server. */
+export type AiChatCoverSync = {
+  itemId: string;
+  title: string;
+  coverUrl: string;
+};
+
 const RESPONSE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isResponseId(value: unknown): value is string {
@@ -31,6 +38,14 @@ function isAttachmentStatus(value: unknown): value is AiChatAttachmentStatus {
   );
 }
 
+function isCoverSync(value: unknown): value is AiChatCoverSync {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<AiChatCoverSync>;
+  return typeof candidate.itemId === "string" && candidate.itemId.length > 0 && candidate.itemId.length <= 160 &&
+    typeof candidate.title === "string" && candidate.title.length > 0 && candidate.title.length <= 120 &&
+    typeof candidate.coverUrl === "string" && candidate.coverUrl.length > 0 && candidate.coverUrl.length <= 2048;
+}
+
 export type AiChatStreamEvent =
   | {
       type: "meta";
@@ -39,9 +54,11 @@ export type AiChatStreamEvent =
       labLinks?: ScienceLabLink[];
       attachment?: AiChatAttachmentStatus;
       agentResult?: AgentResult;
+      coverSync?: AiChatCoverSync;
       files?: AiChatOutputFile[];
     }
   | { type: "delta"; delta: string }
+  | { type: "status"; message: string }
   | {
       type: "done";
       provider: "dify" | "fallback";
@@ -53,6 +70,7 @@ export type AiChatStreamEvent =
       labLinks?: ScienceLabLink[];
       attachment?: AiChatAttachmentStatus;
       agentResult?: AgentResult;
+      coverSync?: AiChatCoverSync;
       files?: AiChatOutputFile[];
     }
   | { type: "error"; message?: string };
@@ -67,6 +85,7 @@ export type AiChatResponse = {
   labLinks?: ScienceLabLink[];
   attachment?: AiChatAttachmentStatus;
   agentResult?: AgentResult;
+  coverSync?: AiChatCoverSync;
   files?: AiChatOutputFile[];
 };
 
@@ -97,7 +116,7 @@ function parseFrame(frame: string): AiChatStreamEvent | null {
     const type = (value as { type?: unknown }).type;
     if (type === "meta") {
       const payload = value as Record<string, unknown>;
-      const { attachment, agentResult, files, ...rest } = payload;
+      const { attachment, agentResult, coverSync, files, ...rest } = payload;
       const result = parsedAgentResult(undefined, agentResult);
       const outputFiles = normalizeDifyOutputFiles(files, { sameOrigin: currentSameOrigin() });
       return {
@@ -105,15 +124,19 @@ function parseFrame(frame: string): AiChatStreamEvent | null {
         type: "meta",
         ...(isAttachmentStatus(attachment) ? { attachment } : {}),
         ...(result ? { agentResult: result } : {}),
+        ...(isCoverSync(coverSync) ? { coverSync } : {}),
         ...(outputFiles.length ? { files: outputFiles } : {}),
       } as AiChatStreamEvent;
     }
     if (type === "delta" && typeof (value as { delta?: unknown }).delta === "string") {
       return value as AiChatStreamEvent;
     }
+    if (type === "status" && typeof (value as { message?: unknown }).message === "string") {
+      return value as AiChatStreamEvent;
+    }
     if (type === "done" && typeof (value as { reply?: unknown }).reply === "string") {
       const payload = value as Record<string, unknown>;
-      const { attachment, agentResult, responseId, files, ...rest } = payload;
+      const { attachment, agentResult, responseId, coverSync, files, ...rest } = payload;
       const result = parsedAgentResult(payload.reply, agentResult);
       const outputFiles = normalizeDifyOutputFiles(files, { sameOrigin: currentSameOrigin() });
       return {
@@ -122,6 +145,7 @@ function parseFrame(frame: string): AiChatStreamEvent | null {
         ...(isResponseId(responseId) ? { responseId } : {}),
         ...(isAttachmentStatus(attachment) ? { attachment } : {}),
         ...(result ? { agentResult: result } : {}),
+        ...(isCoverSync(coverSync) ? { coverSync } : {}),
         ...(outputFiles.length ? { files: outputFiles } : {}),
       } as AiChatStreamEvent;
     }
@@ -178,6 +202,7 @@ export async function readAiChatResponse(
       labLinks?: unknown;
       attachment?: unknown;
       agentResult?: unknown;
+      coverSync?: unknown;
       files?: unknown;
     };
     const agentResult = parsedAgentResult(payload.reply, payload.agentResult);
@@ -192,6 +217,7 @@ export async function readAiChatResponse(
       ...(Array.isArray(payload.labLinks) ? { labLinks: payload.labLinks as ScienceLabLink[] } : {}),
       ...(isAttachmentStatus(payload.attachment) ? { attachment: payload.attachment } : {}),
       ...(agentResult ? { agentResult } : {}),
+      ...(isCoverSync(payload.coverSync) ? { coverSync: payload.coverSync } : {}),
       ...(outputFiles.length ? { files: outputFiles } : {}),
     };
   }
@@ -207,6 +233,7 @@ export async function readAiChatResponse(
         ...(event.labLinks ? { labLinks: event.labLinks } : {}),
         ...(event.attachment ? { attachment: event.attachment } : {}),
         ...(event.agentResult ? { agentResult: event.agentResult } : {}),
+        ...(event.coverSync ? { coverSync: event.coverSync } : {}),
         ...(event.files ? { files: event.files } : {}),
       };
     } else if (event.type === "delta") {
@@ -223,6 +250,7 @@ export async function readAiChatResponse(
         ...(event.labLinks ? { labLinks: event.labLinks } : {}),
         ...(event.attachment ? { attachment: event.attachment } : {}),
         ...(event.agentResult ? { agentResult: event.agentResult } : {}),
+        ...(event.coverSync ? { coverSync: event.coverSync } : {}),
         ...(event.files ? { files: event.files } : {}),
       };
     }

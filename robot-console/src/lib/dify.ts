@@ -12,6 +12,8 @@ export type DifyStreamEvent = {
   error?: string;
   metadata?: unknown;
   files?: unknown;
+  /** Nested payload used by Chatflow workflow/node events. */
+  data?: unknown;
 };
 
 export type DifyFileReference = {
@@ -28,6 +30,8 @@ type GenerateDifyReplyArgs = {
   conversationId?: string;
   files?: DifyFileReference[];
   signal?: AbortSignal;
+  /** Maximum time to wait for Dify to accept a request or start its stream. */
+  timeoutMs?: number;
   fetchImpl?: typeof fetch;
 };
 
@@ -50,6 +54,11 @@ type DifyChatResponse = {
 
 const DEFAULT_DIFY_API_URL = "https://api.dify.ai/v1/chat-messages";
 const DIFY_REQUEST_TIMEOUT_MS = 120_000;
+
+function requestTimeout(timeoutMs?: number) {
+  if (!Number.isFinite(timeoutMs)) return DIFY_REQUEST_TIMEOUT_MS;
+  return Math.max(1_000, Math.min(Math.round(timeoutMs as number), DIFY_REQUEST_TIMEOUT_MS));
+}
 
 function difyUploadUrl(apiUrl: string) {
   try {
@@ -149,12 +158,13 @@ export async function generateDifyReply({
   conversationId,
   files,
   signal,
+  timeoutMs,
   fetchImpl = fetch,
 }: GenerateDifyReplyArgs): Promise<DifyReply | null> {
   if (!apiKey) return null;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), DIFY_REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), requestTimeout(timeoutMs));
   const abortFromCaller = () => controller.abort();
   if (signal?.aborted) controller.abort();
   else signal?.addEventListener("abort", abortFromCaller, { once: true });
@@ -201,12 +211,13 @@ export async function openDifyStream({
   conversationId,
   files,
   signal,
+  timeoutMs,
   fetchImpl = fetch,
 }: GenerateDifyReplyArgs): Promise<Response | null> {
   if (!apiKey) return null;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), DIFY_REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), requestTimeout(timeoutMs));
   const abortFromCaller = () => controller.abort();
   if (signal?.aborted) controller.abort();
   else signal?.addEventListener("abort", abortFromCaller, { once: true });
@@ -222,7 +233,11 @@ export async function openDifyStream({
       body: JSON.stringify(buildChatPayload({ message, user, conversationId, responseMode: "streaming", files })),
     });
 
-    if (!response.ok || !response.body) return null;
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    if (!response.ok || !response.body || !contentType.includes("text/event-stream")) {
+      void response.body?.cancel().catch(() => undefined);
+      return null;
+    }
     return response;
   } catch {
     return null;
@@ -268,6 +283,10 @@ function parseDifyEvent(frame: string): DifyStreamEvent | null {
     }
     if (payload.metadata !== undefined) event.metadata = payload.metadata;
     if (payload.files !== undefined) event.files = payload.files;
+    // Chatflow events keep node/workflow outputs under `data`. Preserve this
+    // payload so the caller can use a completed visual node result when the
+    // final message is only a structured-output placeholder.
+    if (payload.data !== undefined) event.data = payload.data;
 
     // Dify's streaming image output is a standalone `message_file` event,
     // rather than a `files` array. Normalize it to the file shape consumed by
@@ -304,28 +323,44 @@ function parseDifyEvent(frame: string): DifyStreamEvent | null {
 
 export async function* parseDifyStream(
   body: ReadableStream<Uint8Array>,
+  signal?: AbortSignal,
 ): AsyncGenerator<DifyStreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let completed = false;
+  const cancelReader = () => {
+    void reader.cancel().catch(() => undefined);
+  };
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done }).replace(/\r\n?/g, "\n");
+  if (signal?.aborted) cancelReader();
+  else signal?.addEventListener("abort", cancelReader, { once: true });
 
-    let separatorIndex = buffer.indexOf("\n\n");
-    while (separatorIndex >= 0) {
-      const frame = buffer.slice(0, separatorIndex);
-      buffer = buffer.slice(separatorIndex + 2);
-      const event = parseDifyEvent(frame);
-      if (event) yield event;
-      separatorIndex = buffer.indexOf("\n\n");
+  try {
+    for (;;) {
+      if (signal?.aborted) return;
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done }).replace(/\r\n?/g, "\n");
+
+      let separatorIndex = buffer.indexOf("\n\n");
+      while (separatorIndex >= 0) {
+        const frame = buffer.slice(0, separatorIndex);
+        buffer = buffer.slice(separatorIndex + 2);
+        const event = parseDifyEvent(frame);
+        if (event) yield event;
+        separatorIndex = buffer.indexOf("\n\n");
+      }
+
+      if (done) {
+        completed = true;
+        const event = parseDifyEvent(buffer.trim());
+        if (event) yield event;
+        return;
+      }
     }
-
-    if (done) {
-      const event = parseDifyEvent(buffer.trim());
-      if (event) yield event;
-      return;
-    }
+  } finally {
+    signal?.removeEventListener("abort", cancelReader);
+    if (!completed) cancelReader();
+    reader.releaseLock();
   }
 }

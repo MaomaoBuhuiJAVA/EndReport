@@ -209,8 +209,68 @@ test("uses a large voice-mode hold button with the existing pointer lifecycle", 
   assert.match(voiceButton, /onPointerUp=\{stopVoiceInput\}/);
 
   const voiceButtonRule = styles.match(/\.pet-chat__composer \.pet-chat__voice-button\s*\{([\s\S]*?)\n\}/)?.[1] ?? "";
-  assert.match(voiceButtonRule, /min-height:\s*40px/);
+  assert.match(voiceButtonRule, /min-height:\s*48px/);
   assert.match(voiceButtonRule, /flex:\s*1/);
+});
+
+test("shows a hold-to-talk overlay with cancel and text-edit release targets", () => {
+  assert.match(component, /type VoiceReleaseAction = "send" \| "cancel" \| "edit"/);
+  assert.match(component, /const \[voiceReleaseAction, setVoiceReleaseAction\] = useState<VoiceReleaseAction>\("send"\)/);
+  assert.match(component, /function updateVoiceReleaseTarget\(clientX: number, clientY: number\)/);
+  assert.match(component, /onPointerMove=\{handleVoicePointerMove\}/);
+  assert.match(component, /clientX > voiceStartXRef\.current \+ 72/);
+  assert.match(component, /voiceCancelTargetRef/);
+  assert.match(component, /voiceEditTargetRef/);
+  assert.match(component, /getBoundingClientRect\(\)/);
+  assert.match(component, /horizontalHitSlop = 18/);
+  assert.match(component, /verticalHitSlop = 20/);
+  assert.match(component, /hasVisibleReleaseTargets/);
+  assert.match(component, /ref=\{voiceButtonRef\}[\s\S]*?className=\{`pet-chat__voice-button/);
+  assert.doesNotMatch(component, /ref=\{voiceButtonRef\}[\s\S]*?className="pet-chat__attachment-remove"/);
+  assert.match(component, /recognition\.abort\(\)/);
+  assert.match(component, /setInput\(voiceBaseInputRef\.current\)/);
+  assert.match(component, /className="pet-voice-hold-overlay"/);
+  assert.match(component, /松手发送/);
+  assert.match(component, /松手转文字/);
+  assert.match(component, /pet-voice-hold-overlay__target--cancel/);
+  assert.match(component, /pet-voice-hold-overlay__target--edit/);
+  assert.match(component, /navigator\.mediaDevices\??\.getUserMedia\(\{ audio: true \}\)/);
+  assert.match(component, /analyser\.getByteTimeDomainData\(samples\)/);
+});
+
+test("sends on a normal release and opens an editable composer after a rightward slide", () => {
+  const voiceInput = component.match(
+    /function startVoiceInput\(event: ReactPointerEvent<HTMLButtonElement>\) \{[\s\S]*?(?=function updateVoiceReleaseTarget)/,
+  )?.[0] ?? "";
+
+  assert.match(voiceInput, /setInput\(`\$\{base\}\$\{base \? " " : ""\}\$\{spokenText\}`\)/);
+  assert.match(voiceInput, /const releasedByUser = voiceReleasedRef\.current/);
+  assert.match(voiceInput, /if \(releaseAction === "edit"\)/);
+  assert.match(voiceInput, /setComposerMode\("text"\)/);
+  assert.match(voiceInput, /语音已转成文字，可以修改后再发送。/);
+  assert.match(voiceInput, /void sendMessage\(voiceText\)/);
+  assert.match(voiceInput, /"not-allowed"/);
+  assert.match(voiceInput, /"no-speech"/);
+  assert.match(voiceInput, /network:/);
+});
+
+test("keeps voice hold targets above mobile safe areas and disables motion when requested", () => {
+  assert.match(styles, /\.pet-voice-hold-overlay\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?inset:\s*0;[\s\S]*?z-index:\s*\d+/);
+  assert.match(styles, /\.pet-voice-hold-overlay\s*\{[\s\S]*?--pet-voice-overlay-bottom:\s*calc\(150px \+ env\(safe-area-inset-bottom\)\);/);
+  assert.match(styles, /\.pet-voice-hold-overlay\s*\{[\s\S]*?padding:\s*24px 18px var\(--pet-voice-overlay-bottom\);/);
+  assert.match(styles, /\.pet-voice-hold-overlay__target\s*\{[\s\S]*?min-height:\s*56px;/);
+  assert.match(styles, /\.pet-voice-hold-overlay__wave span\s*\{[\s\S]*?transform:\s*scaleY\(var\(--pet-voice-level/);
+  assert.match(styles, /\.pet-voice-hold-overlay__target\.is-edit-pending/);
+  assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.pet-voice-hold-overlay__wave span[\s\S]*?transition:\s*none;/);
+});
+
+test("places the release choices and waveform above the mobile press-to-talk bar", () => {
+  assert.match(styles, /@media \(max-width: 1023px\) \{[\s\S]*?\.pet-chat\s*\{[\s\S]*?bottom:\s*calc\(82px \+ env\(safe-area-inset-bottom\)\);/);
+  assert.match(styles, /@media \(max-width: 1023px\) \{[\s\S]*?\.pet-chat__form\s*\{[\s\S]*?min-height:\s*56px;/);
+  assert.match(component, /const measureVoiceOverlayBottom = useCallback/);
+  assert.match(component, /button\.getBoundingClientRect\(\)/);
+  assert.match(component, /setVoiceOverlayBottom\(/);
+  assert.match(component, /"--pet-voice-overlay-bottom": `\$\{voiceOverlayBottom\}px`/);
 });
 
 test("places the up-chevron more action before the mode toggle and text input", () => {

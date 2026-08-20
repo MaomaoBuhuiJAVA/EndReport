@@ -9,8 +9,10 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { getScienceKnowledgeSummaries, mergeScienceKnowledgeSummaries } from "./science-data";
+import { searchScienceSummaries } from "./science-data";
 import { prisma } from "./prisma";
 import type { ScienceKnowledgeSummary, ScienceResource } from "./science-types";
+import sciencePayload from "@/data/science-knowledge.json";
 
 function summary(id: string, title = id): ScienceKnowledgeSummary {
   return {
@@ -173,6 +175,31 @@ describe("mergeScienceKnowledgeSummaries", () => {
       },
     ]);
   });
+
+  it("keeps a packaged story cover when the database row predates cover resources", () => {
+    const cover = resource("图片资源", "猴子捞月 · 视频首帧封面", {
+      externalUrl: "https://cdn.example/story-cover.webp",
+      publicPath: "https://cdn.example/story-cover.webp",
+    });
+    const packaged = [{
+      ...summary("STORY-cover", "猴子捞月"),
+      category: "科学故事" as const,
+      coverUrl: cover.externalUrl,
+      resources: [cover],
+      resourceTypes: ["图片资源" as const],
+    }];
+    const database = [{
+      ...summary("STORY-cover", "猴子捞月"),
+      category: "科学故事" as const,
+      resources: [resource("视频资源", "猴子捞月视频", { externalUrl: "https://cdn.example/story.mp4" })],
+      resourceTypes: ["视频资源" as const],
+    }];
+
+    expect(mergeScienceKnowledgeSummaries(packaged, database)[0]).toMatchObject({
+      coverUrl: "https://cdn.example/story-cover.webp",
+      resources: expect.arrayContaining([cover]),
+    });
+  });
 });
 
 describe("getScienceKnowledgeSummaries", () => {
@@ -188,4 +215,36 @@ describe("getScienceKnowledgeSummaries", () => {
       tags: expect.arrayContaining(["水科学与气象自然"]),
     });
   });
+});
+
+describe("science catalogue topic matching", () => {
+  it("treats 磁铁 as the canonical 磁力 topic and keeps the science-poem filter", () => {
+    const matches = searchScienceSummaries(
+      sciencePayload as unknown as ScienceKnowledgeSummary[],
+      "请查找科学诗里和磁铁有关的内容",
+      10,
+    );
+
+    expect(matches).toHaveLength(7);
+    expect(matches.every((item) => item.category === "科学诗" && item.topic === "磁力")).toBe(true);
+    expect(matches.map((item) => item.title)).toEqual(expect.arrayContaining([
+      "磁铁的秘密",
+      "磁铁小精灵",
+      "磁铁小侦探",
+    ]));
+  });
+
+  it.each(["磁力", "磁铁", "磁性", "磁极", "吸铁", "铁钉"])(
+    "maps the classroom term %s to the magnetic science-poem catalogue",
+    (term) => {
+      const matches = searchScienceSummaries(
+        sciencePayload as unknown as ScienceKnowledgeSummary[],
+        `查找${term}相关的科学诗`,
+        10,
+      );
+
+      expect(matches).toHaveLength(7);
+      expect(matches.every((item) => item.category === "科学诗" && item.topic === "磁力")).toBe(true);
+    },
+  );
 });

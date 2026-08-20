@@ -130,11 +130,13 @@ test("uses each science story video cover with an illustrated fallback", () => {
 
   assert.match(component, /function scienceStoryCoverPath\(item: ScienceKnowledgeSummary\)/);
   assert.match(component, /science-story-covers\/\$\{item\.id\}\.webp/);
-  assert.match(component, /const \[storyCoverFailed, setStoryCoverFailed\] = useState\(false\)/);
+  assert.match(component, /const \[failedStoryCover, setFailedStoryCover\] = useState\(""\)/);
+  assert.match(component, /const storyCoverFailed = Boolean\(storyCover && failedStoryCover === storyCover\)/);
   assert.match(
     component,
-    /onError=\{isStory \? \(\) => setStoryCoverFailed\(true\) : isPoem \? \(\) => setPoemCoverFailed\(true\) : undefined\}/,
+    /setFailedStoryCover\(storyCover\)/,
   );
+  assert.match(component, /setFailedPoemCover\(poemCover\)/);
   assert.match(component, /storyCoverFailed \? categoryVisual\.image : storyCover/);
 });
 

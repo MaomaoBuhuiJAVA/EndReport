@@ -9,6 +9,38 @@ export type SessionUser = {
   role: "USER" | "ADMIN";
 };
 
+/** Public interactions intentionally do not require an account. The hidden
+ * technical actor keeps the existing relational schema intact while the UI
+ * remains anonymous and open to every visitor. */
+export const PUBLIC_ACTOR: SessionUser = {
+  id: "public-participant",
+  email: "public-participant@local.invalid",
+  name: "参与者",
+  role: "USER",
+};
+
+export async function getPublicActor(): Promise<SessionUser> {
+  try {
+    const actor = await prisma.user.upsert({
+      where: { email: PUBLIC_ACTOR.email },
+      update: { name: PUBLIC_ACTOR.name, role: PUBLIC_ACTOR.role },
+      create: {
+        id: PUBLIC_ACTOR.id,
+        email: PUBLIC_ACTOR.email,
+        name: PUBLIC_ACTOR.name,
+        role: PUBLIC_ACTOR.role,
+        passwordHash: "public-interaction-disabled",
+      },
+    });
+    return actor;
+  } catch {
+    // The caller will return a service-unavailable response if the database
+    // itself is unavailable; keeping this helper non-throwing preserves that
+    // route-level error handling.
+  }
+  return PUBLIC_ACTOR;
+}
+
 const cookieName = "gk_session";
 const secret = new TextEncoder().encode(
   process.env.AUTH_SECRET ?? "dev-secret-change-before-production",

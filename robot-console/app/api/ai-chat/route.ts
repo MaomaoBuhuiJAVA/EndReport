@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import type { ConversationMessage } from "@/lib/types";
 import { generateDifyReply, openDifyStream, parseDifyStream, uploadDifyFile, type DifyFileReference } from "@/lib/dify";
-import { parseAgentResult, type AgentResult } from "@/lib/agent-result";
+import { parseAgentResult, type AgentFailureResult, type AgentResult } from "@/lib/agent-result";
 import {
   mergeDifyOutputFileSources,
   normalizeDifyOutputFiles,
@@ -10,7 +10,9 @@ import {
   type AiChatOutputFile,
 } from "@/lib/ai-chat-files";
 import { signAiChatOutputFiles } from "@/lib/ai-chat-download-server";
+import type { AiChatCoverSync } from "@/lib/ai-chat-stream";
 import { buildScienceLabLinks } from "@/lib/science-lab-links";
+import { synchronizeSciencePoetryCover } from "@/lib/science-cover-sync";
 import { searchKnowledge, wantsPhotoResults } from "@/lib/search";
 
 // Image-generation branches can take longer than a normal text response.
@@ -41,9 +43,19 @@ const ATTACHMENT_MIME_BY_EXTENSION = new Map([
   [".xls", "application/vnd.ms-excel"],
   [".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
 ]);
+const IMAGE_ATTACHMENT_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic", ".heif"]);
 const VIDEO_ATTACHMENT_EXTENSIONS = new Set([".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"]);
 const DIRECT_VIDEO_ATTACHMENT_MESSAGE = "暂不支持直接上传视频，请先提取关键帧或整理文字记录后再上传。";
 const ATTACHMENT_TYPE_MISMATCH_MESSAGE = "附件类型与文件扩展名不一致，请重新选择原始文件。";
+// Dify's normal Chatflow can take much longer than a teacher should wait for
+// a short text reply. Vision workflows commonly spend over 45 seconds on
+// upload/analysis before their first answer, so attachments get a longer
+// budget and periodic SSE progress frames keep the browser connection alive.
+const FAST_DIFY_STREAM_TIMEOUT_MS = 6_000;
+const COMPLEX_DIFY_STREAM_TIMEOUT_MS = 45_000;
+const ATTACHMENT_DIFY_STREAM_TIMEOUT_MS = 90_000;
+const SCIENCE_TOPIC_PATTERN = /(?:水|空气|气流|光影|光|影子|彩虹|植物|动物|昆虫|磁铁|磁力|磁性|磁极|吸铁|铁钉|重力|浮力|液体|溶解|蒸发|温度|热|电|能源|太阳|月亮|星星|天气|雨|雪|泡泡|身体|骨头|舌头|化学|密度|表面张力|虹吸|纸片|纸鱼|火山|流体)/u;
+const SCIENCE_CATALOG_FILTER_PATTERN = /科学诗|科学故事|科学实验|科学童谣|童谣|诗歌|托班|小班|中班|大班/u;
 
 type AttachmentStatus = {
   name: string;
@@ -56,6 +68,8 @@ type ChatRequestBody = {
   history?: ConversationMessage[];
   userId?: string;
   conversationId?: string;
+  /** Set only by a science-poem card action; never inferred from a title. */
+  targetResourceId?: string;
 };
 
 type ParsedChatRequest = {
@@ -114,6 +128,153 @@ function attachmentExtension(name: string) {
   return index >= 0 ? normalized.slice(index) : "";
 }
 
+function isImageAttachment(file?: File) {
+  if (!file) return false;
+  return file.type.trim().toLowerCase().startsWith("image/") ||
+    IMAGE_ATTACHMENT_EXTENSIONS.has(attachmentExtension(file.name));
+}
+
+function hasMeaningfulDifyAnswer(answer: string) {
+  if (/```agent-result/iu.test(answer)) {
+    // A structured vision response is not displayable until its closing
+    // fence arrives. In particular, ` ```agent-result\n` alone must not stop
+    // the timeout or be forwarded as a chat bubble.
+    return /```agent-result\s*[\s\S]*?```/iu.test(answer);
+  }
+  const visible = answer
+    .replace(/<think>[\s\S]*?<\/think>/giu, "")
+    .replace(/```agent-result\s*/iu, "")
+    .replace(/```\s*$/u, "")
+    .replace(/\s+/gu, "")
+    .trim();
+  return visible.length >= 2;
+}
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function stripResultFence(value: string) {
+  return value
+    .replace(/^\s*```(?:agent-result|json)?\s*/iu, "")
+    .replace(/\s*```\s*$/u, "")
+    .trim();
+}
+
+function isVisionPlaceholderAnswer(answer: string) {
+  const candidate = stripResultFence(answer);
+  if (!candidate) return true;
+
+  const hasStructuredFence = /```agent-result/iu.test(answer);
+
+  try {
+    const parsed = JSON.parse(candidate) as unknown;
+    if (!isRecordValue(parsed)) return false;
+    const keys = Object.keys(parsed).filter((key) => parsed[key] !== undefined);
+    if (keys.length === 1 && parsed.type === "boolean") return true;
+    const completeVision = parsed.kind === "vision_observation" &&
+      typeof parsed.image_type === "string" &&
+      typeof parsed.confidence === "number" &&
+      (Array.isArray(parsed.facts) || Array.isArray(parsed.visible_materials)) &&
+      "privacy_risk" in parsed;
+    // A complete but unrecognised/malformed agent-result object is unusable;
+    // let a qvq node output repair it when available. Plain prose/JSON that
+    // is not marked as an agent result remains a normal answer.
+    return (hasStructuredFence || "kind" in parsed) && !completeVision;
+  } catch {
+    // Both an opening fence without a close and invalid JSON inside a closed
+    // fence are malformed visual results.
+    return hasStructuredFence;
+  }
+}
+
+const VISUAL_NODE_PATTERN = /qvq|视觉|图像|图片|识别|观察|vision|image/iu;
+const VISUAL_NODE_EXCLUDE_PATTERN = /建议|推荐|检索|知识|advice|recommend|retrieval|structured|结构化|格式化/iu;
+const VISUAL_OUTPUT_KEYS = [
+  "facts",
+  "visible_materials",
+  "visible_equipment",
+  "observable_steps",
+  "observable_phenomena",
+  "judgements",
+  "missing_evidence",
+  "evidence_gaps",
+  "safety",
+  "safety_risks",
+] as const;
+
+function looksLikeVisualOutput(value: unknown) {
+  if (!isRecordValue(value)) return false;
+  return value.kind === "vision_observation" || VISUAL_OUTPUT_KEYS.some((key) => key in value);
+}
+
+function visualOutputText(value: unknown): string | null {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text.length < 2 || isVisionPlaceholderAnswer(text)) return null;
+    try {
+      const parsed = JSON.parse(stripResultFence(text)) as unknown;
+      if (looksLikeVisualOutput(parsed)) {
+        return `\`\`\`agent-result\n${JSON.stringify(parsed)}\n\`\`\``;
+      }
+    } catch {
+      // qvq-max commonly returns ordinary Chinese prose; keep that as-is.
+    }
+    return text;
+  }
+  if (!isRecordValue(value)) return null;
+  if (looksLikeVisualOutput(value)) {
+    return `\`\`\`agent-result\n${JSON.stringify(value)}\n\`\`\``;
+  }
+
+  for (const key of [
+    "text",
+    "answer",
+    "result",
+    "output",
+    "content",
+    "observation",
+    "description",
+    "response",
+    "structured_output",
+    "structuredOutput",
+  ]) {
+    const nested = value[key];
+    const text = visualOutputText(nested);
+    if (text) return text;
+  }
+  return null;
+}
+
+/**
+ * Chatflow node/workflow events put outputs under `data.outputs`. Dify's
+ * final structured-output node can return only `{type: boolean}` even though
+ * the preceding qvq-max node has a usable observation. Keep that observation
+ * as a last-resort answer for image requests.
+ */
+function directVisionOutputFromEvent(event: { event?: string; data?: unknown }) {
+  if (event.event !== "node_finished" && event.event !== "workflow_finished") return null;
+  if (!isRecordValue(event.data)) return null;
+
+  const data = event.data;
+  const nodeLabel = [data.node_type, data.node_id, data.title, data.model, data.model_name]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+  const outputs = data.outputs;
+  if (outputs === undefined) return null;
+
+  // `workflow_finished` is the only event guaranteed to include the app's
+  // published outputs. If the chat reply is a placeholder, any meaningful
+  // output here is preferable to rendering an empty structured-result card.
+  if (event.event === "workflow_finished") return visualOutputText(outputs);
+
+  // Only a visual observation node is safe to return early. The later visual
+  // advice node can also mention vision in its title, but it is the slow
+  // step that can emit the `{\"type\":\"boolean\"}` placeholder.
+  if (!VISUAL_NODE_PATTERN.test(nodeLabel) || VISUAL_NODE_EXCLUDE_PATTERN.test(nodeLabel)) return null;
+  return visualOutputText(outputs);
+}
+
 function validateAttachment(file: File) {
   if (!file.name.trim()) return "附件文件名无效";
   const mimeType = file.type.trim().toLowerCase();
@@ -154,6 +315,7 @@ async function parseChatRequest(request: Request): Promise<ParsedChatRequest> {
       history: parseHistory(formData.get("history")),
       userId: typeof formData.get("userId") === "string" ? String(formData.get("userId")) : undefined,
       conversationId: typeof formData.get("conversationId") === "string" ? String(formData.get("conversationId")) : undefined,
+      targetResourceId: typeof formData.get("targetResourceId") === "string" ? String(formData.get("targetResourceId")) : undefined,
     },
     attachment: attachmentValue ?? undefined,
   };
@@ -195,6 +357,12 @@ function lessonPlanTitle(message: string) {
   return naturalTitle && naturalTitle !== "完整" ? naturalTitle : null;
 }
 
+function isContentCreationOrAnalysisRequest(message: string) {
+  const creation = /(?:生成|创作|编写|撰写|设计|制定|制作|输出|导出|策划)[^。！？!?\n]{0,32}(?:教案|活动方案|教学设计|课件|文档)/u.test(message);
+  const analysis = /(?:分析|评估|审阅|诊断|复盘|修改|优化)[^。！？!?\n]{0,24}(?:教案|活动方案|教学设计|课件|文档)|(?:教案|活动方案|教学设计|课件|文档)[^。！？!?\n]{0,24}(?:分析|评估|审阅|诊断|复盘|修改|优化)/u.test(message);
+  return creation || analysis;
+}
+
 function normalizeLessonTitle(value: string) {
   return value.replace(/[\s《》〈〉「」“”"'`]/gu, "").trim();
 }
@@ -210,7 +378,7 @@ function lessonTitlesMatch(left: string, right: string) {
 }
 
 function isScienceLabChunk(chunk: SearchChunk) {
-  return chunk.id.startsWith("science-") || chunk.document.title.startsWith("科小贝实验室：");
+  return chunk.id?.startsWith("science-") === true || chunk.document?.title?.startsWith("科小贝实验室：") === true;
 }
 
 function lessonPlanChunk(title: string, chunks: SearchChunk[]) {
@@ -346,96 +514,6 @@ function buildLessonPlanReply(chunk: SearchChunk | null, message = "", modelRepl
   ].join("\n");
 }
 
-function hasMeaningfulActivity(reply: string) {
-  let active = false;
-  let content = "";
-
-  for (const rawLine of reply.replace(/\r/g, "").split("\n")) {
-    const line = rawLine
-      .trim()
-      .replace(/^#{1,6}\s*/u, "")
-      .replace(/^[一二三四五六七八九十\d]+\s*[、.．:：]\s*/u, "")
-      .replace(/\*+/g, "")
-      .trim();
-
-    if (/^(?:活动过程|活动玩法|活动步骤|实验步骤)(?:\s*[:：]\s*(.*))?$/u.test(line)) {
-      active = true;
-      content += line.replace(/^(?:活动过程|活动玩法|活动步骤|实验步骤)\s*[:：]?\s*/u, "");
-      continue;
-    }
-
-    if (active && /^(?:活动目标|活动准备|观察与表达|观察表达|观察与小结|小结与延伸|活动小结|小结|活动提示|延伸与安全提示|安全提示)/u.test(line)) {
-      break;
-    }
-
-    if (active) content += line;
-  }
-
-  return content.replace(/[\s#*_`>\-—:：、，。！？!?()[\]{}]/gu, "").length >= 12;
-}
-
-function lessonPlanSectionLabel(rawLine: string) {
-  if (/^\s*\d+\s*[.、．]\s+\*\*/u.test(rawLine)) return null;
-  const line = rawLine
-    .trim()
-    .replace(/^#{1,6}\s*/u, "")
-    .replace(/\*+/g, "")
-    .replace(/^[一二三四五六七八九十\d]+\s*[、.．:：]\s*/u, "")
-    .trim();
-  return line.match(/^(活动目标|活动准备|活动过程|活动玩法|活动步骤|实验步骤|观察与表达|观察表达|观察与小结|小结与延伸|活动小结|小结|活动提示|延伸与安全提示|安全提示)(?:\s*[:：]|$)/u)?.[1] ?? null;
-}
-
-function sourceActivitySection(chunk: SearchChunk) {
-  return buildLessonPlanReply(chunk).match(/### 三、活动过程[\s\S]*?(?=\n### 四、活动提示)/u)?.[0] ?? "";
-}
-
-function replaceIncompleteLessonPlanActivity(chunk: SearchChunk, modelReply: string) {
-  if (hasMeaningfulActivity(modelReply)) return modelReply;
-
-  const sourceActivity = sourceActivitySection(chunk);
-  if (!sourceActivity) return modelReply;
-
-  const lines = modelReply.replace(/\r/g, "").split("\n");
-  let activityStart = -1;
-  let activityEnd = lines.length;
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const label = lessonPlanSectionLabel(lines[index] ?? "");
-    const isActivity = label === "活动过程" || label === "活动玩法" || label === "活动步骤" || label === "实验步骤";
-    if (activityStart < 0) {
-      if (isActivity) activityStart = index;
-      continue;
-    }
-    if (label) {
-      activityEnd = index;
-      break;
-    }
-  }
-
-  if (activityStart < 0) return `${modelReply.trim()}\n\n${sourceActivity}`.trim();
-
-  lines.splice(activityStart, activityEnd - activityStart, ...sourceActivity.split("\n"));
-  return lines.join("\n").trim();
-}
-
-function buildLessonPlanSupplement(modelReply: string) {
-  const sections = lessonPlanSections(modelReply);
-  const meaningfulLength = (value: string | undefined) =>
-    (value ?? "").replace(/[\s#*_`>\-—:：、，。！？!?()[\]{}]/gu, "").length;
-
-  return [
-    meaningfulLength(sections.get("observation")) < 4
-      ? "### 观察与小结\n观察要点：关注幼儿是否愿意先猜想、按步骤操作，并能用自己的话描述看到的变化；教师根据幼儿的记录追问“你发现了什么”。"
-      : "",
-    meaningfulLength(sections.get("summary")) < 4
-      ? "### 活动小结\n引导幼儿把猜想、操作结果和生活经验联系起来，说明本次活动中观察到的核心现象。"
-      : "",
-    meaningfulLength(sections.get("tips")) < 4
-      ? "### 延伸与安全提示\n将材料投放到科学区继续探索；教师活动前检查材料，幼儿操作时保持适当距离，不接触尖锐、细小或需要加热的物品。"
-      : "",
-  ].filter(Boolean).join("\n");
-}
-
 function lessonPlanSections(reply: string) {
   const sections = new Map<string, string>();
   let currentSection = "";
@@ -569,8 +647,9 @@ function isCasualMessage(message: string) {
   const hasExplicitConversationIntent = /(?:介绍(?:一下|下)?(?:你自己|自己)(?:好吗|吗)?|你能介绍(?:一下|下)?(?:你自己|自己)(?:好吗|吗)?|你是谁|你喜欢什么|(?:我们)?随便聊聊|我想(?:和你)?聊聊|陪我聊聊|陪我聊天|(?:讲|说)个笑话(?:吧|呀|啊|吗)?)/.test(conversationalText);
   // Keep natural small talk in conversation mode, but route substantive science
   // questions through retrieval even when the user omits words such as“实验”or“资料”.
+  const hasScienceTopic = SCIENCE_TOPIC_PATTERN.test(compact);
   const hasScienceQuestionIntent =
-    /(?:水|空气|气流|光影|光|影子|彩虹|植物|动物|昆虫|磁铁|磁力|重力|浮力|液体|溶解|蒸发|温度|热|电|能源|太阳|月亮|星星|天气|雨|雪|泡泡|身体|骨头|舌头|化学|密度|表面张力|虹吸|纸片|纸鱼|火山|流体)/.test(compact) &&
+    hasScienceTopic &&
     /(?:为什么|为何|什么(?:是|原因)|怎么(?:会|做|回事)?|如何|怎样|吗|原理|原因|作用|能否|是否|可以吗|解释)/.test(compact);
 
   if (hasExplicitConversationIntent && !hasResourceIntent) {
@@ -578,6 +657,19 @@ function isCasualMessage(message: string) {
   }
 
   if (hasScienceQuestionIntent) {
+    return false;
+  }
+
+  // Keep the existing friendly weather small talk in conversation mode. A
+  // weather question (for example “为什么下雨”) is already covered above.
+  if (/天气/.test(compact) && !hasResourceIntent) {
+    return true;
+  }
+
+  // A teacher will often enter just a topic, such as “磁铁”. Treat it as a
+  // knowledge lookup rather than casual chat so the local catalogue is always
+  // available to the response pipeline.
+  if (hasScienceTopic) {
     return false;
   }
 
@@ -643,6 +735,11 @@ function difyConversationId(value: unknown) {
   return candidate && candidate.length <= 255 ? candidate : undefined;
 }
 
+function poetryCoverTargetId(value: unknown) {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  return /^[A-Za-z0-9_-]{1,160}$/u.test(candidate) ? candidate : undefined;
+}
+
 type ChatEnrichment = {
   requestedLessonTitle: string | null;
   requestedLessonPlan: SearchChunk | null;
@@ -652,6 +749,7 @@ type ChatEnrichment = {
   photos: Awaited<ReturnType<typeof searchKnowledge>>["photos"];
   uniqueSources: string[];
   labLinks: ReturnType<typeof buildScienceLabLinks>;
+  scienceChunks: SearchChunk[];
 };
 
 type ChatResult = {
@@ -661,6 +759,7 @@ type ChatResult = {
   conversationId?: string;
   attachment?: AttachmentStatus;
   agentResult?: AgentResult;
+  coverSync?: AiChatCoverSync;
   files?: AiChatOutputFile[];
   photos: ChatEnrichment["photos"];
   sources: string[];
@@ -685,6 +784,30 @@ function parseDifyAgentResult(
   }) ?? undefined;
 }
 
+async function synchronizeGeneratedPoetryCover(
+  targetResourceId: string | undefined,
+  agentResult: AgentResult | undefined,
+  difyApiUrl?: string,
+  difyApiKey?: string,
+): Promise<AiChatCoverSync | undefined> {
+  if (!targetResourceId || agentResult?.kind !== "poetry_cover") return undefined;
+
+  try {
+    return (await synchronizeSciencePoetryCover(targetResourceId, agentResult.cover_url, {
+      difyApiUrl,
+      difyApiKey,
+    })) ?? undefined;
+  } catch {
+    // The chat result remains useful even when a storage or database write
+    // fails.  Only return a coverSync marker after the durable update succeeds.
+    return undefined;
+  }
+}
+
+function hasFocusedScienceCatalogQuery(message: string) {
+  return SCIENCE_TOPIC_PATTERN.test(message) || SCIENCE_CATALOG_FILTER_PATTERN.test(message);
+}
+
 function buildChatEnrichment(
   search: Awaited<ReturnType<typeof searchKnowledge>> | null,
   message: string,
@@ -693,6 +816,7 @@ function buildChatEnrichment(
   const chunks = search?.chunks ?? [];
   const requestedLessonTitle = lessonPlanTitle(message);
   const requestedLessonPlan = requestedLessonTitle ? lessonPlanChunk(requestedLessonTitle, chunks) : null;
+  const scienceChunks = chunks.filter(isScienceLabChunk);
   const unrelatedResourceTitles = requestedLessonTitle
     ? Array.from(new Set(
       chunks
@@ -704,8 +828,23 @@ function buildChatEnrichment(
   // Form-generated requests use a `主题：...` field instead of book-title
   // marks. If that named resource is not available, do not attach unrelated
   // search results to the newly generated lesson plan.
-  const selectedChunks = requestedLessonTitle ? (requestedLessonPlan ? [requestedLessonPlan] : []) : chunks;
-  const context = selectedChunks.map((chunk) => `《${chunk.document.title}》${chunk.content}`).join("\n");
+  const focusedScienceQuery =
+    hasFocusedScienceCatalogQuery(message) &&
+    !isContentCreationOrAnalysisRequest(message);
+  const selectedChunks = requestedLessonTitle
+    ? (requestedLessonPlan ? [requestedLessonPlan] : [])
+    : focusedScienceQuery && scienceChunks.length
+      ? scienceChunks.slice(0, 2)
+      : chunks.filter((chunk) => !isScienceLabChunk(chunk)).slice(0, 3);
+  // Keep the evidence supplied to Dify concise. The full catalogue remains in
+  // the local result/links, while a small, labelled evidence pack avoids
+  // repeatedly injecting a long list into a remembered Dify conversation.
+  const contextPerChunkLimit = requestedLessonTitle ? 2_200 : 900;
+  const contextLimit = requestedLessonTitle ? 2_400 : 2_000;
+  const context = selectedChunks
+    .map((chunk) => `《${chunk.document.title}》${chunk.content.slice(0, contextPerChunkLimit)}`)
+    .join("\n")
+    .slice(0, contextLimit);
   const sources = selectedChunks.map((chunk) => chunk.document.title);
   const photos = !casualMessage && wantsPhotoResults(message)
     ? (requestedLessonTitle
@@ -724,6 +863,7 @@ function buildChatEnrichment(
     photos,
     uniqueSources,
     labLinks,
+    scienceChunks,
   };
 }
 
@@ -736,8 +876,204 @@ function buildDifyMessage(message: string, context: string) {
     "【网页数据库检索上下文】",
     context,
     "【网页数据库检索上下文结束】",
-    "请优先依据以上网页数据库上下文回答；只引用其中出现的资源名称、LAB 标识和媒体链接，不要补充未检索到的资源。",
+    "以上上下文是网页已经命中的园本权威资料，不是让你再次检索的请求。存在匹配条目时，必须先依据这些条目回答，不能说“没有资料”“未收录”或“上下文未出现”；若正文带有“科学原理”，应据此解释。只引用其中出现的资源名称、LAB 标识和媒体链接，不要补充未检索到的资源。",
   ].join("\n");
+}
+
+function isDirectScienceCatalogLookup(message: string, enrichment: ChatEnrichment) {
+  if (!enrichment.scienceChunks.length) return false;
+  if (isContentCreationOrAnalysisRequest(message)) return false;
+  const compact = message.replace(/[\s，,。！？!?、；：,.!?;:()[\]{}《》〈〉「」“”‘’"']/gu, "");
+  const asksForGenerationOrExplanation = /生成|创作|编写|写一|设计|教案|为什么|为何|原理|怎么|如何|解释|区别|作用/u.test(compact);
+  if (asksForGenerationOrExplanation) return false;
+
+  const hasCategory = SCIENCE_CATALOG_FILTER_PATTERN.test(compact);
+  const hasLookupIntent = /找|查|搜|检索|资源|资料|内容|目录|列表|查看|看看|展示|列出|哪些|有哪|有没有|想要|给我/u.test(compact);
+  const hasScienceTopic = SCIENCE_TOPIC_PATTERN.test(compact);
+
+  return (hasCategory && (hasLookupIntent || hasScienceTopic)) ||
+    // A short classroom prompt such as “磁极有什么特点” is normally a
+    // request to inspect the current topic, even when it omits “查找”.
+    (hasScienceTopic && (hasLookupIntent || compact.length <= 12));
+}
+
+function searchChunkField(chunk: SearchChunk, label: string) {
+  return chunk.content.match(new RegExp(`^${label}：([^\\n]+)`, "mu"))?.[1]?.trim() ?? "";
+}
+
+function localScienceCatalogReply(enrichment: ChatEnrichment) {
+  const matches = enrichment.scienceChunks.slice(0, 6);
+  if (!matches.length) return null;
+
+  const entries = matches.map((chunk) => {
+    const age = searchChunkField(chunk, "适用年龄") || "适用年龄待确认";
+    const topic = searchChunkField(chunk, "主题") || "科学主题待确认";
+    const excerpt = searchChunkField(chunk, "摘要").replace(/\s+/gu, " ").slice(0, 96);
+    return `- 《${chunk.title}》｜${age}｜${topic}${excerpt ? `\n  ${excerpt}` : ""}`;
+  });
+  return [
+    `已从园本资料库中匹配到 ${enrichment.scienceChunks.length} 条相关资料${enrichment.scienceChunks.length > matches.length ? "，以下展示前 6 条" : ""}：`,
+    ...entries,
+  ].join("\n");
+}
+
+function localScienceCatalogResult(enrichment: ChatEnrichment, message: string): ChatResult | null {
+  if (!isDirectScienceCatalogLookup(message, enrichment)) return null;
+  const reply = localScienceCatalogReply(enrichment);
+  if (!reply) return null;
+  const matches = enrichment.scienceChunks.slice(0, 6);
+  return {
+    responseId: randomUUID(),
+    reply,
+    provider: "fallback",
+    photos: enrichment.photos,
+    sources: Array.from(new Set(matches.map((chunk) => chunk.document.title))).slice(0, 6),
+    labLinks: buildScienceLabLinks(matches, message, 6),
+  };
+}
+
+function sciencePrincipleFromChunk(chunk: SearchChunk) {
+  const content = chunk.content.replace(/\r/gu, "");
+  const match = content.match(/(?:^|\n)(?:科学原理|原理|科学知识|知识点)[：:]\s*([\s\S]{1,900})/u);
+  if (!match?.[1]) return "";
+
+  return match[1]
+    .split(/\n(?:活动(?:目标|准备|过程)?|实验(?:材料|步骤|过程)?|操作(?:步骤|过程)?|媒体资源|安全提示|参考资料)[：:]/u)[0]
+    ?.replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 420) ?? "";
+}
+
+function isScienceExplanationQuestion(message: string) {
+  return /为什么|为何|原理|怎么(?:会|回事)?|如何|是什么|什么是|作用|区别|能否|是否|为什么会/u.test(message);
+}
+
+function localScienceExplanationResult(enrichment: ChatEnrichment, message: string): ChatResult | null {
+  if (!isScienceExplanationQuestion(message)) return null;
+
+  const matches = enrichment.scienceChunks
+    .map((chunk) => ({ chunk, principle: sciencePrincipleFromChunk(chunk) }))
+    .filter((candidate) => candidate.principle.length >= 16)
+    .slice(0, 2);
+  if (!matches.length) return null;
+
+  const reply = [
+    "根据园本资料中的科学原理：",
+    ...matches.map(({ chunk, principle }) => `《${chunk.title}》：${principle}`),
+  ].join("\n\n");
+  const sourceChunks = matches.map(({ chunk }) => chunk);
+
+  return {
+    responseId: randomUUID(),
+    reply,
+    provider: "fallback",
+    photos: enrichment.photos,
+    sources: Array.from(new Set(sourceChunks.map((chunk) => chunk.document.title))).slice(0, 5),
+    labLinks: buildScienceLabLinks(sourceChunks, message),
+  };
+}
+
+function fallbackChatResult(
+  enrichment: ChatEnrichment,
+  message: string,
+  casualMessage: boolean,
+  attachment?: AttachmentStatus,
+  visionRequest = false,
+): ChatResult {
+  const scienceMatches = enrichment.scienceChunks.slice(0, 6);
+  const useScienceCatalogue =
+    scienceMatches.length > 0 &&
+    hasFocusedScienceCatalogQuery(message) &&
+    !isContentCreationOrAnalysisRequest(message);
+  const catalogReply = useScienceCatalogue ? localScienceCatalogReply(enrichment) : null;
+  const timeoutResult = visionRequest ? visionTimeoutResult() : undefined;
+  const lessonPlanReply = enrichment.requestedLessonTitle
+    ? buildLessonPlanReply(enrichment.requestedLessonPlan, message)
+    : null;
+  const attachmentReply = timeoutResult
+    ? ["本次图片分析暂未完成。", timeoutResult.message, timeoutResult.retry_reason].join("\n\n")
+    : attachment
+      ? "附件分析等待时间过长，暂未返回完整结果。请稍后重新发送，或补充文字描述。"
+      : null;
+  return {
+    responseId: randomUUID(),
+    reply: attachmentReply ?? lessonPlanReply ?? (catalogReply
+      ? `我先为你整理已检索到的园本资料：\n\n${catalogReply}`
+      : fallbackReply(enrichment.context, enrichment.uniqueSources, message, casualMessage)),
+    provider: "fallback",
+    ...(attachment ? { attachment } : {}),
+    ...(timeoutResult ? { agentResult: timeoutResult } : {}),
+    photos: enrichment.photos,
+    sources: lessonPlanReply
+      ? enrichment.uniqueSources
+      : useScienceCatalogue
+      ? Array.from(new Set(scienceMatches.map((chunk) => chunk.document.title))).slice(0, 6)
+      : enrichment.uniqueSources,
+    labLinks: lessonPlanReply
+      ? enrichment.labLinks
+      : useScienceCatalogue
+      ? buildScienceLabLinks(scienceMatches, message, 6)
+      : enrichment.labLinks,
+  };
+}
+
+async function buildBlockingDifyResult(
+  difyReply: Awaited<ReturnType<typeof generateDifyReply>>,
+  enrichment: ChatEnrichment,
+  message: string,
+  request: Request,
+  difyApiUrl?: string,
+  difyApiKey?: string,
+  attachment?: AttachmentStatus,
+  targetResourceId?: string,
+) {
+  const outputFileSources = mergeDifyOutputFileSources(
+    { answer: difyReply?.answer, files: difyReply?.files, metadata: difyReply?.metadata },
+    { sameOrigin: request.url, difyApiUrl },
+  );
+  const agentResult = difyReply && !enrichment.requestedLessonTitle
+    ? parseDifyAgentResult(difyReply.answer, message, difyReply.metadata, outputFileSources, request, difyApiUrl)
+    : undefined;
+  const normalizedOutputFiles = normalizeDifyOutputFiles(outputFileSources, { sameOrigin: request.url, difyApiUrl });
+  const outputFiles = signAiChatOutputFiles(normalizedOutputFiles, {
+    apiKey: difyApiKey,
+    difyApiUrl,
+    requestUrl: request.url,
+  });
+  const coverSync = await synchronizeGeneratedPoetryCover(
+    targetResourceId,
+    agentResult,
+    difyApiUrl,
+    difyApiKey,
+  );
+  const safeReply = sanitizeDifyOutputDocumentLinks(difyReply?.answer ?? "", outputFileSources, {
+    sameOrigin: request.url,
+    difyApiUrl,
+  });
+
+  return buildChatResult(
+    enrichment,
+    message,
+    isCasualMessage(message),
+    stripLessonPlanCatalogLinks(
+      safeReply,
+      enrichment.requestedLessonTitle,
+      enrichment.unrelatedResourceTitles,
+    ) || null,
+    difyReply?.conversationId,
+    attachment,
+    agentResult,
+    outputFiles,
+    coverSync,
+  );
+}
+
+function difyStreamTimeout(message: string, attachment?: AttachmentStatus) {
+  return attachment
+    ? ATTACHMENT_DIFY_STREAM_TIMEOUT_MS
+    : /(?:生成|创作|绘制|封面|图片|图像|导出|下载|文件|完整教案|分析(?:附件|图片))/u.test(message)
+    ? COMPLEX_DIFY_STREAM_TIMEOUT_MS
+    : FAST_DIFY_STREAM_TIMEOUT_MS;
 }
 
 function stripLessonPlanCatalogLinks(
@@ -782,6 +1118,7 @@ function buildChatResult(
   attachment?: AttachmentStatus,
   agentResult?: AgentResult,
   files: AiChatOutputFile[] = [],
+  coverSync?: AiChatCoverSync,
 ): ChatResult {
   const { requestedLessonPlan } = enrichment;
   let reply = modelReply;
@@ -804,11 +1141,46 @@ function buildChatResult(
     conversationId,
     ...(attachment ? { attachment } : {}),
     ...(agentResult ? { agentResult } : {}),
+    ...(coverSync ? { coverSync } : {}),
     ...(files.length ? { files } : {}),
     photos: enrichment.photos,
     sources: enrichment.uniqueSources,
     labLinks: enrichment.labLinks,
   };
+}
+
+function structuredResultReply(agentResult?: AgentResult) {
+  switch (agentResult?.kind) {
+    case "vision_observation":
+      return "图片识别已完成，详细的可见内容、证据缺口和安全提醒见下方。";
+    case "experiment_recap":
+      return "实验复盘已完成，详细结果见下方。";
+    case "document_diagnosis":
+      return "教研材料分析已完成，详细诊断和修订建议见下方。";
+    case "poetry_cover":
+      return "科学诗封面已生成，详情见下方。";
+    case "work_feedback":
+      return "作品反馈已完成，详细建议见下方。";
+    case "degraded":
+    case "error":
+      return [agentResult.message, agentResult.retry_reason].filter(Boolean).join("\n\n");
+    default:
+      return "";
+  }
+}
+
+function visionTimeoutResult(): AgentFailureResult {
+  return {
+    kind: "degraded",
+    code: "model_unavailable",
+    message: "图片识别等待时间过长，本次未能完成分析。",
+    retry: true,
+    retry_reason: "请重新发送清晰的静态图片后重试；图片会自动压缩后直接交给视觉模型。",
+  };
+}
+
+function answerWithoutStructuredFence(answer: string) {
+  return answer.replace(/```agent-result\s*[\s\S]*?\n```/giu, "").trim();
 }
 
 function acceptsEventStream(request: Request) {
@@ -831,10 +1203,14 @@ function streamChatResponse(
   difyApiUrl?: string,
   difyApiKey?: string,
   attachment?: AttachmentStatus,
+  firstAnswerTimeoutMs = FAST_DIFY_STREAM_TIMEOUT_MS,
+  targetResourceId?: string,
+  isVisionRequest = false,
 ) {
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
       const encoder = new TextEncoder();
+      let streamClosed = false;
       try {
         const search = await searchPromise;
         const enrichment = buildChatEnrichment(search, message, casualMessage);
@@ -854,6 +1230,7 @@ function streamChatResponse(
         if (!difyStream.body) {
           const result = buildChatResult(enrichment, message, casualMessage, null, undefined, attachment);
           controller.enqueue(eventFrame({ type: "done", ...result }, encoder));
+          streamClosed = true;
           controller.close();
           return;
         }
@@ -863,32 +1240,148 @@ function streamChatResponse(
         let metadata: unknown;
         const metadataSources: unknown[] = [];
         const files: unknown[] = [];
+        let directVisionAnswer: string | null = null;
         let streamError: string | undefined;
-        for await (const event of parseDifyStream(difyStream.body)) {
-          if (request.signal.aborted) return;
-          if (event.answer) {
-            answer += event.answer;
-            if (!enrichment.requestedLessonTitle) {
-              controller.enqueue(eventFrame({ type: "delta", delta: event.answer }, encoder));
+        let receivedAnswer = false;
+        let streamTimedOut = false;
+        let progressTimer: ReturnType<typeof setInterval> | null = null;
+        const upstreamAbortController = new AbortController();
+        const closeController = () => {
+          if (streamClosed) return;
+          streamClosed = true;
+          controller.close();
+        };
+        const abortFromRequest = () => upstreamAbortController.abort();
+        request.signal.addEventListener("abort", abortFromRequest, { once: true });
+        const firstAnswerTimeout = setTimeout(() => {
+          if (receivedAnswer || streamClosed || request.signal.aborted) return;
+          streamTimedOut = true;
+          upstreamAbortController.abort();
+          if (progressTimer) {
+            clearInterval(progressTimer);
+            progressTimer = null;
+          }
+          const fallback = fallbackChatResult(enrichment, message, casualMessage, attachment, isVisionRequest);
+          controller.enqueue(eventFrame({ type: "done", ...fallback }, encoder));
+          closeController();
+        }, firstAnswerTimeoutMs);
+
+        // qvq-max emits a usable observation in a `node_finished` event before
+        // the optional knowledge-retrieval and DeepSeek advice nodes complete.
+        // Finish the image request here so the user sees the observation as
+        // soon as the visual model is done.
+        const finishDirectVision = (directAnswer: string) => {
+          if (streamClosed || request.signal.aborted) return;
+          clearTimeout(firstAnswerTimeout);
+          if (progressTimer) {
+            clearInterval(progressTimer);
+            progressTimer = null;
+          }
+          receivedAnswer = true;
+          const parsedResult = parseDifyAgentResult(
+            directAnswer,
+            message,
+            undefined,
+            [],
+            request,
+            difyApiUrl,
+          );
+          const safeAnswer = sanitizeDifyOutputDocumentLinks(directAnswer, [], {
+            sameOrigin: request.url,
+            difyApiUrl,
+          });
+          const visibleAnswer = answerWithoutStructuredFence(safeAnswer) || structuredResultReply(parsedResult) || "图片识别已完成。";
+          const result = buildChatResult(
+            enrichment,
+            message,
+            casualMessage,
+            visibleAnswer,
+            conversationId,
+            attachment,
+            parsedResult ?? undefined,
+          );
+          controller.enqueue(eventFrame({
+            type: "done",
+            responseId: result.responseId,
+            provider: result.provider,
+            reply: result.reply,
+            ...(result.conversationId ? { conversationId: result.conversationId } : {}),
+            ...(result.attachment ? { attachment: result.attachment } : {}),
+            ...(result.agentResult ? { agentResult: result.agentResult } : {}),
+          }, encoder));
+          upstreamAbortController.abort();
+          closeController();
+        };
+
+        if (attachment) {
+          const progress = isVisionRequest
+            ? "图片正在识别，模型分析可能需要几十秒，请保持页面打开。"
+            : "文档正在解析，模型分析可能需要几十秒，请保持页面打开。";
+          controller.enqueue(eventFrame({ type: "status", message: progress }, encoder));
+          progressTimer = setInterval(() => {
+            if (!streamClosed && !streamTimedOut && !request.signal.aborted && !receivedAnswer) {
+              controller.enqueue(eventFrame({ type: "status", message: progress }, encoder));
             }
-          }
-          if (event.conversationId) conversationId = event.conversationId;
-          if (event.metadata !== undefined) {
-            metadata = event.metadata;
-            metadataSources.push(event.metadata);
-          }
-          if (event.files !== undefined) {
-            files.push(...(Array.isArray(event.files) ? event.files : [event.files]));
-          }
-          if (event.error) {
-            streamError = event.error;
-            controller.enqueue(eventFrame({ type: "error", message: event.error }, encoder));
-            break;
-          }
+          }, 8_000);
         }
 
+        try {
+          for await (const event of parseDifyStream(difyStream.body, upstreamAbortController.signal)) {
+            if (request.signal.aborted || streamTimedOut) return;
+            if (event.answer) {
+              answer += event.answer;
+              // Vision workflows stream the opening `agent-result` fence before
+              // the JSON body. Treating that marker as a completed answer makes
+              // the client render an empty bubble and disables the real timeout.
+              const meaningfulAnswer = hasMeaningfulDifyAnswer(answer);
+              // The classifier node also emits a short `answer` event (often
+              // just “视觉实验分析”). It is not the image result and must not
+              // stop the attachment timeout. Only a complete vision result can
+              // do that; qvq node output is handled below and returns directly.
+              const completeVisionAnswer = isVisionRequest &&
+                parseDifyAgentResult(answer, message, metadata, [], request, difyApiUrl)?.kind === "vision_observation";
+              if (((!isVisionRequest && meaningfulAnswer) || completeVisionAnswer) && !receivedAnswer) {
+                receivedAnswer = true;
+                clearTimeout(firstAnswerTimeout);
+              }
+              if (!enrichment.requestedLessonTitle && !isVisionRequest) {
+                controller.enqueue(eventFrame({ type: "delta", delta: event.answer }, encoder));
+              }
+            }
+            if (event.conversationId) conversationId = event.conversationId;
+            if (event.metadata !== undefined) {
+              metadata = event.metadata;
+              metadataSources.push(event.metadata);
+            }
+            if (event.files !== undefined) {
+              files.push(...(Array.isArray(event.files) ? event.files : [event.files]));
+            }
+            if (isVisionRequest && event.data !== undefined) {
+              const visualOutput = directVisionOutputFromEvent(event);
+              if (visualOutput && !directVisionAnswer) {
+                directVisionAnswer = visualOutput;
+                finishDirectVision(visualOutput);
+                return;
+              }
+            }
+            if (event.error) {
+              streamError = event.error;
+              controller.enqueue(eventFrame({ type: "error", message: event.error }, encoder));
+              break;
+            }
+          }
+        } finally {
+          clearTimeout(firstAnswerTimeout);
+          if (progressTimer) {
+            clearInterval(progressTimer);
+            progressTimer = null;
+          }
+          request.signal.removeEventListener("abort", abortFromRequest);
+        }
+
+        if (streamTimedOut || streamClosed) return;
         if (streamError) {
-          controller.close();
+          closeController();
           return;
         }
 
@@ -896,32 +1389,47 @@ function streamChatResponse(
           { answer, files, metadata: metadataSources },
           { sameOrigin: request.url, difyApiUrl },
         );
-        const agentResult = enrichment.requestedLessonTitle
-          ? undefined
-          : parseDifyAgentResult(answer || null, message, metadata, outputFileSources, request, difyApiUrl);
         const normalizedOutputFiles = normalizeDifyOutputFiles(outputFileSources, { sameOrigin: request.url, difyApiUrl });
         const outputFiles = signAiChatOutputFiles(normalizedOutputFiles, {
           apiKey: difyApiKey,
           difyApiUrl,
           requestUrl: request.url,
         });
-        const safeAnswer = sanitizeDifyOutputDocumentLinks(answer, outputFileSources, {
+        // Prefer the completed qvq-max node output when the downstream
+        // structured-output node returned only `{type: boolean}` or an
+        // incomplete fence. This keeps the image evidence visible without
+        // changing ordinary text-chat responses.
+        const answerForVision = isVisionRequest && directVisionAnswer && isVisionPlaceholderAnswer(answer)
+          ? directVisionAnswer
+          : answer;
+        const parsedResult = enrichment.requestedLessonTitle
+          ? undefined
+          : parseDifyAgentResult(answerForVision || null, message, metadata, outputFileSources, request, difyApiUrl);
+        const coverSync = await synchronizeGeneratedPoetryCover(
+          targetResourceId,
+          parsedResult,
+          difyApiUrl,
+          difyApiKey,
+        );
+        const safeAnswer = sanitizeDifyOutputDocumentLinks(answerForVision, outputFileSources, {
           sameOrigin: request.url,
           difyApiUrl,
         });
+        const visibleAnswer = stripLessonPlanCatalogLinks(
+          answerWithoutStructuredFence(safeAnswer),
+          enrichment.requestedLessonTitle,
+          enrichment.unrelatedResourceTitles,
+        ) || structuredResultReply(parsedResult) || null;
         const result = buildChatResult(
           enrichment,
           message,
           casualMessage,
-          stripLessonPlanCatalogLinks(
-            safeAnswer,
-            enrichment.requestedLessonTitle,
-            enrichment.unrelatedResourceTitles,
-          ) || null,
+          visibleAnswer,
           conversationId,
           attachment,
-          agentResult,
+          parsedResult,
           outputFiles,
+          coverSync,
         );
         const done = {
           type: "done" as const,
@@ -931,13 +1439,15 @@ function streamChatResponse(
           ...(result.conversationId ? { conversationId: result.conversationId } : {}),
           ...(result.attachment ? { attachment: result.attachment } : {}),
           ...(result.agentResult ? { agentResult: result.agentResult } : {}),
+          ...(result.coverSync ? { coverSync: result.coverSync } : {}),
           ...(result.files ? { files: result.files } : {}),
         };
         controller.enqueue(eventFrame(done, encoder));
-        controller.close();
+        closeController();
       } catch {
-        if (!request.signal.aborted) {
+        if (!request.signal.aborted && !streamClosed) {
           controller.enqueue(eventFrame({ type: "error", message: "对话服务暂时不可用" }, encoder));
+          streamClosed = true;
           controller.close();
         }
       }
@@ -970,11 +1480,19 @@ export async function POST(request: Request) {
   }
 
   const casualMessage = isCasualMessage(message);
-  const searchPromise = casualMessage ? Promise.resolve(null) : searchKnowledge(message);
+  const hasImageAttachment = isImageAttachment(attachment);
+  // An uploaded image/document already provides the evidence for the model.
+  // Avoid an unrelated catalogue search before opening Dify's stream; that
+  // extra wait is especially noticeable on the mobile chat surface.
+  const searchPromise = casualMessage || attachment ? Promise.resolve(null) : searchKnowledge(message);
   const apiKey = process.env.DIFY_API_KEY;
   const apiUrl = process.env.DIFY_API_URL;
   const user = difyUserId(body.userId);
-  const conversationId = difyConversationId(body.conversationId);
+  // Do not carry a previous text conversation into visual analysis. A stale
+  // conversation can send the Dify classifier back through the regular chat
+  // branch before it reaches qvq-max.
+  const conversationId = hasImageAttachment ? undefined : difyConversationId(body.conversationId);
+  const targetResourceId = poetryCoverTargetId(body.targetResourceId);
   let attachmentStatus: AttachmentStatus | undefined;
   let files: DifyFileReference[] | undefined;
 
@@ -1004,7 +1522,23 @@ export async function POST(request: Request) {
     : message;
   const search = await searchPromise;
   const enrichment = buildChatEnrichment(search, message, casualMessage);
-  const difyMessage = buildDifyMessage(baseDifyMessage, enrichment.context);
+  const localCatalogResult = attachment ? null : localScienceCatalogResult(enrichment, message);
+  if (localCatalogResult) {
+    return NextResponse.json(localCatalogResult);
+  }
+  const localExplanationResult = attachment ? null : localScienceExplanationResult(enrichment, message);
+  if (localExplanationResult) {
+    return NextResponse.json(localExplanationResult);
+  }
+  const difyMessage = buildDifyMessage(
+    hasImageAttachment && files?.length
+      ? [
+        "[系统路由指令：检测到图片附件，请直接进入“视觉实验分析”分支。将用户输入和图片交给 qvq-max 读取；不要进入普通文本聊天、不要等待用户补充文字、不要生成文件。请尽快返回简洁的可见事实、证据不足和安全提醒。]",
+        baseDifyMessage,
+      ].join("\n\n")
+      : baseDifyMessage,
+    enrichment.context,
+  );
   const difyArgs = {
     apiKey,
     apiUrl,
@@ -1015,7 +1549,13 @@ export async function POST(request: Request) {
   };
 
   if (acceptsEventStream(request)) {
-    const difyStream = await openDifyStream({ ...difyArgs, signal: request.signal });
+    const streamTimeoutMs = difyStreamTimeout(message, attachmentStatus);
+    const streamStartedAt = Date.now();
+    const difyStream = await openDifyStream({
+      ...difyArgs,
+      signal: request.signal,
+      timeoutMs: streamTimeoutMs,
+    });
     if (difyStream) {
       return streamChatResponse(
         Promise.resolve(search),
@@ -1026,8 +1566,17 @@ export async function POST(request: Request) {
         apiUrl,
         apiKey,
         attachmentStatus,
+        Math.max(250, streamTimeoutMs - (Date.now() - streamStartedAt)),
+        targetResourceId,
+        hasImageAttachment && Boolean(files?.length),
       );
     }
+    // Do not make a second blocking Dify request after the streaming provider
+    // has already missed the fast-response deadline. It doubles the wait and
+    // can leave the teacher staring at a spinner with no usable answer.
+    return NextResponse.json(
+      fallbackChatResult(enrichment, message, casualMessage, attachmentStatus, hasImageAttachment && Boolean(files?.length)),
+    );
   }
 
   const difyReply = await generateDifyReply(difyArgs);
@@ -1044,6 +1593,12 @@ export async function POST(request: Request) {
     difyApiUrl: apiUrl,
     requestUrl: request.url,
   });
+  const coverSync = await synchronizeGeneratedPoetryCover(
+    targetResourceId,
+    agentResult,
+    apiUrl,
+    apiKey,
+  );
   const safeReply = sanitizeDifyOutputDocumentLinks(difyReply?.answer ?? "", outputFileSources, {
     sameOrigin: request.url,
     difyApiUrl: apiUrl,
@@ -1061,6 +1616,7 @@ export async function POST(request: Request) {
     attachmentStatus,
     agentResult,
     outputFiles,
+    coverSync,
   );
 
   return NextResponse.json(result);

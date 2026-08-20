@@ -1,4 +1,5 @@
 import fallbackPayload from "@/data/science-knowledge.json";
+import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import type {
   ScienceKnowledgeItem,
@@ -49,6 +50,14 @@ const scienceResourceQueryAliases: Array<[string, ScienceResource["type"]]> = [
   ["文档", "文档资源"],
 ];
 
+// The source folders use the canonical topic "磁力", while teachers often
+// search with the classroom wording "磁铁". Keep this small synonym map at
+// the catalog boundary so both the laboratory and the chat retrieval use the
+// same matching rule.
+const scienceTopicQueryAliases: Record<string, readonly string[]> = {
+  磁力: ["磁铁", "磁性", "磁极", "吸铁", "吸附铁", "铁钉"],
+};
+
 function compactScienceSearchText(value: string) {
   return value.replace(/[\s，。！？、；：,.!?;:()[\]{}《》〈〉「」“”‘’"'的]/g, "").toLocaleLowerCase("zh-CN");
 }
@@ -68,6 +77,14 @@ function scienceQueryTitle(query: string) {
 function scienceQueryMatches(value: string, query: string) {
   const compactValue = compactScienceSearchText(value);
   return compactValue.length > 0 && compactScienceSearchText(query).includes(compactValue);
+}
+
+function scienceTopicMatchesQuery(topic: string, query: string) {
+  if (scienceQueryMatches(topic, query)) return true;
+  const compactQuery = compactScienceSearchText(query);
+  return (scienceTopicQueryAliases[topic] ?? []).some((alias) =>
+    compactQuery.includes(compactScienceSearchText(alias)),
+  );
 }
 
 /**
@@ -98,8 +115,9 @@ export function searchScienceSummaries(
   const requestedTopics = Array.from(new Set(
     items
       .map((item) => item.topic.trim())
-      .filter((topic) => topic.length > 0 && scienceQueryMatches(topic, normalizedQuery)),
+      .filter((topic) => topic.length > 0 && scienceTopicMatchesQuery(topic, normalizedQuery)),
   ));
+  for (const topic of requestedTopics) terms.push(topic);
 
   return items
     .map((item, index) => {
@@ -159,6 +177,18 @@ function normalizeResources(
   return resources.filter((resource) => resource.isPublic);
 }
 
+function scienceCoverUrl(resources: ScienceResource[], category: string) {
+  if (category !== "科学诗" && category !== "科学故事") return "";
+
+  const cover = resources.find(
+    (resource) =>
+      resource.type === "图片资源" &&
+      /(?:封面|cover)/iu.test(resource.title) &&
+      Boolean(resource.externalUrl || resource.publicPath),
+  );
+  return cover?.externalUrl || cover?.publicPath || "";
+}
+
 function applyScienceTopicCorrection<T extends ScienceKnowledgeSummary>(item: T): T {
   const topic = correctedScienceTopics.get(`${item.category}\u0000${item.title}`);
   if (!topic || topic === item.topic) return item;
@@ -190,6 +220,10 @@ function toSummary(item: ScienceKnowledgeItem): ScienceKnowledgeSummary {
     tags: item.tags,
     resourceTypes: Array.from(new Set(resources.map((resource) => resource.type))),
     resources,
+    videoUrl: item.videoUrl,
+    ...(scienceCoverUrl(resources, item.category)
+      ? { coverUrl: scienceCoverUrl(resources, item.category) }
+      : {}),
   };
 }
 
@@ -234,6 +268,9 @@ function mapItem(
     category: item.category as ScienceKnowledgeItem["category"],
     resources: normalizedResources,
     resourceTypes: Array.from(new Set(normalizedResources.map((resource) => resource.type))),
+    ...(scienceCoverUrl(normalizedResources, item.category)
+      ? { coverUrl: scienceCoverUrl(normalizedResources, item.category) }
+      : {}),
   };
 }
 
@@ -328,6 +365,12 @@ function mergeScienceKnowledgeRecord<T extends ScienceKnowledgeSummary>(
     ...databaseItem,
     resources,
     resourceTypes: Array.from(new Set(resources.map((resource) => resource.type))),
+    // Older database rows predate persisted literature covers. Keep the
+    // packaged cover while the database is being refreshed instead of
+    // replacing it with an empty value during the merge.
+    ...(databaseItem.coverUrl || packagedItem.coverUrl
+      ? { coverUrl: databaseItem.coverUrl || packagedItem.coverUrl }
+      : {}),
   };
 }
 
@@ -341,14 +384,16 @@ function groupResources(resources: ScienceResource[]) {
   return groups;
 }
 
-export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSummary[]> {
-  const packagedSummaries = fallbackItems.map(toSummary);
+const SCIENCE_DATA_CACHE_SECONDS = 60;
+const SCIENCE_DATA_CACHE_TAG = "science-knowledge";
 
-  try {
+/** Cache the catalogue between dynamic page requests without adding Redis. */
+const getCachedDatabaseSummaries = unstable_cache(
+  async () => {
     const items = await prisma.scienceKnowledgeItem.findMany({
       orderBy: { sortOrder: "asc" },
     });
-    if (!items.length) return packagedSummaries;
+    if (!items.length) return [];
 
     const resources = await prisma.scienceKnowledgeResource.findMany({
       where: { isPublic: true },
@@ -356,7 +401,7 @@ export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSu
     });
     const groups = groupResources(resources.map(mapResource));
 
-    const databaseSummaries = items.map((item) =>
+    return items.map((item) =>
       toSummary(
         mapItem(
           {
@@ -383,28 +428,22 @@ export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSu
         ),
       ),
     );
+  },
+  ["science-knowledge-summaries-v2"],
+  { revalidate: SCIENCE_DATA_CACHE_SECONDS, tags: [SCIENCE_DATA_CACHE_TAG] },
+);
 
-    return mergeScienceKnowledgeSummaries(packagedSummaries, databaseSummaries);
-  } catch {
-    return packagedSummaries;
-  }
-}
-
-export async function getScienceKnowledgeItem(id: string): Promise<ScienceKnowledgeItem | null> {
-  const fallback = fallbackItems.find((entry) => entry.id === id);
-
-  try {
+const getCachedDatabaseItem = unstable_cache(
+  async (id: string): Promise<ScienceKnowledgeItem | null> => {
     const item = await prisma.scienceKnowledgeItem.findUnique({ where: { id } });
-    if (!item) {
-      return fallback ? normalizeFallbackItem(fallback) : null;
-    }
+    if (!item) return null;
 
     const resources = await prisma.scienceKnowledgeResource.findMany({
       where: { knowledgeBaseId: item.baseId, isPublic: true },
       orderBy: { sortOrder: "asc" },
     });
 
-    const databaseItem = mapItem(
+    return mapItem(
       {
         id: item.id,
         baseId: item.baseId,
@@ -427,6 +466,32 @@ export async function getScienceKnowledgeItem(id: string): Promise<ScienceKnowle
       },
       resources.map(mapResource),
     );
+  },
+  ["science-knowledge-item-v2"],
+  { revalidate: SCIENCE_DATA_CACHE_SECONDS, tags: [SCIENCE_DATA_CACHE_TAG] },
+);
+
+export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSummary[]> {
+  const packagedSummaries = fallbackItems.map(toSummary);
+
+  try {
+    const databaseSummaries = await getCachedDatabaseSummaries();
+    if (!databaseSummaries.length) return packagedSummaries;
+
+    return mergeScienceKnowledgeSummaries(packagedSummaries, databaseSummaries);
+  } catch {
+    return packagedSummaries;
+  }
+}
+
+export async function getScienceKnowledgeItem(id: string): Promise<ScienceKnowledgeItem | null> {
+  const fallback = fallbackItems.find((entry) => entry.id === id);
+
+  try {
+    const databaseItem = await getCachedDatabaseItem(id);
+    if (!databaseItem) {
+      return fallback ? normalizeFallbackItem(fallback) : null;
+    }
 
     if (!fallback) return applyScienceTopicCorrection(databaseItem);
 

@@ -60,6 +60,33 @@ describe("parseAgentResult", () => {
     });
   });
 
+  it("accepts Dify's string boolean privacy-risk in a visual result", () => {
+    const result = parseAgentResult({
+      text: [
+        "```agent-result",
+        JSON.stringify({
+          kind: "vision_observation",
+          image_type: "界面截图",
+          facts: ["画面中有下载图标"],
+          judgements: ["这是一张界面截图"],
+          missing_evidence: ["未看到真实实验材料"],
+          actions: ["补充实验现场照片"],
+          safety: ["画面中未见明显危险物品"],
+          confidence: 0.8,
+          privacy_visibility: "public_after_review",
+          privacy_risk: "false",
+        }),
+        "```",
+      ].join("\n"),
+    });
+
+    expect(result).toMatchObject({
+      kind: "vision_observation",
+      image_type: "界面截图",
+      privacy_risk: false,
+    });
+  });
+
   it("parses a vision observation result from a dedicated model-text fence", () => {
     const result = parseAgentResult({
       text: [

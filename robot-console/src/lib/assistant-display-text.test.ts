@@ -50,4 +50,12 @@ describe("assistantDisplayText", () => {
       "引导幼儿观察纸片变化。",
     ].join("\n"));
   });
+
+  it("keeps a visible status when the response only contains a structured result fence", () => {
+    expect(assistantDisplayText([
+      "```agent-result",
+      '{"kind":"vision_observation"}',
+      "```",
+    ].join("\n"), "vision_observation")).toBe("图片识别已完成，详细的可见内容、证据缺口和安全提醒见下方。");
+  });
 });

@@ -225,6 +225,23 @@ describe("Dify streaming chat", () => {
     });
   });
 
+  it("rejects a successful non-SSE upstream response instead of treating it as an empty stream", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ answer: "this is not an SSE response" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(openDifyStream({
+      apiKey: "test-key",
+      apiUrl: "https://dify.example/v1/chat-messages",
+      message: "你好",
+      user: "web-test-user",
+      fetchImpl: fetchImpl as typeof fetch,
+    })).resolves.toBeNull();
+  });
+
   it("times out when the streaming request never returns headers", async () => {
     vi.useFakeTimers();
     const fetchImpl = vi.fn((_url: string, init: RequestInit) =>
@@ -238,15 +255,16 @@ describe("Dify streaming chat", () => {
         apiKey: "test-key",
         message: "你好",
         user: "web-test-user",
+        timeoutMs: 9_000,
         fetchImpl: fetchImpl as typeof fetch,
       });
       let settled = false;
       void pending.then(() => {
         settled = true;
       });
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(8_000);
       expect(settled).toBe(false);
-      await vi.advanceTimersByTimeAsync(120_000);
+      await vi.advanceTimersByTimeAsync(1_000);
       await expect(pending).resolves.toBeNull();
     } finally {
       vi.useRealTimers();
@@ -287,6 +305,32 @@ describe("Dify streaming chat", () => {
 
     expect(events).toEqual([
       { event: "message_end", metadata: { agent_result: { kind: "experiment_recap" } } },
+    ]);
+  });
+
+  it("preserves Chatflow node outputs for visual fallback handling", async () => {
+    const streamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(
+          'data: {"event":"node_finished","conversation_id":"vision-conversation","data":{"node_type":"llm","title":"qvq-max","outputs":{"text":"图片中可见透明杯"}}}\n\n',
+        ));
+        controller.close();
+      },
+    });
+
+    const events = [];
+    for await (const event of parseDifyStream(streamBody)) events.push(event);
+
+    expect(events).toEqual([
+      {
+        event: "node_finished",
+        conversationId: "vision-conversation",
+        data: {
+          node_type: "llm",
+          title: "qvq-max",
+          outputs: { text: "图片中可见透明杯" },
+        },
+      },
     ]);
   });
 

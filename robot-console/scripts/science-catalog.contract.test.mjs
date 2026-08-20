@@ -333,7 +333,7 @@ test("the four decorative bubble-liquid frames are omitted and the remaining ste
       `${title} must not retain decorative transition frames`,
     );
     assert.deepEqual(
-      operationImages.map((resource, index) => resource.title),
+      operationImages.map((resource) => resource.title),
       operationImages.map((_, index) => `${title} · 操作步骤 ${index + 1}`),
       `${title} operation labels should be contiguous after excluded frames`,
     );

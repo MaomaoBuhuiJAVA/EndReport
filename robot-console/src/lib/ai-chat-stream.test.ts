@@ -48,6 +48,23 @@ describe("parseAiChatStream", () => {
     expect(updates.map((event) => event.type)).toEqual(["meta", "delta", "done"]);
   });
 
+  it("forwards long-running attachment progress frames without treating them as a reply", async () => {
+    const response = new Response(
+      'data: {"type":"meta","attachment":{"name":"experiment.png","status":"uploaded"}}\n\n' +
+        'data: {"type":"status","message":"图片正在识别，请保持页面打开。"}\n\n' +
+        'data: {"type":"delta","delta":"已识别实验材料。"}\n\n' +
+        'data: {"type":"done","provider":"dify","reply":"已识别实验材料。"}\n\n',
+      { headers: { "Content-Type": "text/event-stream" } },
+    );
+    const updates: AiChatStreamEvent[] = [];
+
+    await expect(readAiChatResponse(response, (event) => updates.push(event))).resolves.toMatchObject({
+      reply: "已识别实验材料。",
+      attachment: { status: "uploaded" },
+    });
+    expect(updates.map((event) => event.type)).toEqual(["meta", "status", "delta", "done"]);
+  });
+
   it("normalizes the JSON fallback response", async () => {
     await expect(
       readAiChatResponse(
@@ -56,6 +73,43 @@ describe("parseAiChatStream", () => {
         }),
       ),
     ).resolves.toEqual({ reply: "旧协议", provider: "fallback", sources: ["资料"] });
+  });
+
+  it("keeps a validated persisted science-poem cover from a JSON response", async () => {
+    await expect(
+      readAiChatResponse(
+        new Response(JSON.stringify({
+          reply: "科学诗封面已同步到资源库。",
+          provider: "dify",
+          coverSync: {
+            itemId: "POEM-wind-trip",
+            title: "风的旅行",
+            coverUrl: "https://blob.vercel-storage.com/science-resource-covers/wind-trip.png",
+          },
+        }), { headers: { "Content-Type": "application/json" } }),
+      ),
+    ).resolves.toMatchObject({
+      coverSync: {
+        itemId: "POEM-wind-trip",
+        title: "风的旅行",
+        coverUrl: "https://blob.vercel-storage.com/science-resource-covers/wind-trip.png",
+      },
+    });
+  });
+
+  it("keeps a validated persisted science-poem cover from a streaming done event", async () => {
+    const response = new Response(
+      'data: {"type":"done","provider":"dify","reply":"科学诗封面已同步到资源库。","coverSync":{"itemId":"POEM-wind-trip","title":"风的旅行","coverUrl":"https://blob.vercel-storage.com/science-resource-covers/wind-trip.png"}}\n\n',
+      { headers: { "Content-Type": "text/event-stream" } },
+    );
+
+    await expect(readAiChatResponse(response)).resolves.toMatchObject({
+      coverSync: {
+        itemId: "POEM-wind-trip",
+        title: "风的旅行",
+        coverUrl: "https://blob.vercel-storage.com/science-resource-covers/wind-trip.png",
+      },
+    });
   });
 
   it("preserves safe Dify document downloads from JSON responses", async () => {

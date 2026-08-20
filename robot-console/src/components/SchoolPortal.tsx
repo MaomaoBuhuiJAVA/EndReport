@@ -58,6 +58,7 @@ const navItems: GooeyNavItem[] = [
   { key: "rooms", label: "功能室", href: "#rooms" },
   { key: "docs", label: "园所资料", href: "#docs" },
   { key: "lab", label: "科小贝实验室", href: "/lab" },
+  { key: "works", label: "作品展示", href: "/works" },
 ];
 
 const mobileNavItems: MobileAppNavItem[] = [
@@ -66,6 +67,7 @@ const mobileNavItems: MobileAppNavItem[] = [
   { key: "rooms", label: "功能室", href: "#rooms" },
   { key: "docs", label: "资料", href: "#docs" },
   { key: "lab", label: "实验室", href: "/lab" },
+  { key: "works", label: "作品", href: "/works" },
 ];
 
 const categoryCopy: Record<string, string> = {

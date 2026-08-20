@@ -15,6 +15,7 @@
     "seed": "node scripts/prepare-assets.mjs && node prisma/seed.mjs",
     "seed:science": "node scripts/seed-science-knowledge.mjs",
     "upload:science-stories": "node scripts/upload-science-story-videos.mjs",
+    "generate:science-story-covers": "node scripts/generate-science-story-covers.mjs",
     "import:science": "node scripts/import-local-science-materials.mjs",
     "export:dify": "node scripts/export-dify-teaching-knowledge.mjs",
     "attach:science-step-images": "node scripts/attach-local-experiment-step-images.mjs",

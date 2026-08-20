@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
@@ -60,6 +60,17 @@ enum TaskType {
   CAMPUS_QA
 }
 
+enum StudentWorkStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum StudentWorkVisibility {
+  TEACHER_ONLY
+  PUBLIC
+}
+
 model User {
   id           String   @id @default(cuid())
   name         String
@@ -69,9 +80,14 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  commands  Command[]
-  documents KnowledgeDocument[] @relation("DocumentUploader")
-  assets    MediaAsset[]        @relation("AssetUploader")
+  commands             Command[]
+  documents            KnowledgeDocument[]   @relation("DocumentUploader")
+  assets               MediaAsset[]          @relation("AssetUploader")
+  studentWorks         StudentWork[]         @relation("StudentWorkOwner")
+  reviewedStudentWorks StudentWork[]         @relation("StudentWorkReviewer")
+  studentWorkComments  StudentWorkComment[]
+  studentWorkLikes     StudentWorkLike[]
+  growthRecords        StudentGrowthRecord[]
 }
 
 model SchoolProfile {
@@ -108,7 +124,7 @@ model MediaAsset {
   description String?   @db.Text
   kind        AssetKind
   url         String    @unique
-  sourcePath  String?  @unique
+  sourcePath  String?   @unique
   mimeType    String?
   width       Int?
   height      Int?
@@ -125,18 +141,18 @@ model MediaAsset {
 }
 
 model KnowledgeDocument {
-  id          String           @id @default(cuid())
-  title       String
-  category    DocumentCategory @default(ARCHIVE)
-  summary     String           @db.Text
-  content     String           @db.Text
-  sourcePath  String?
-  fileType    String?
-  uploadedBy  String?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id         String           @id @default(cuid())
+  title      String
+  category   DocumentCategory @default(ARCHIVE)
+  summary    String           @db.Text
+  content    String           @db.Text
+  sourcePath String?
+  fileType   String?
+  uploadedBy String?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
 
-  uploader User?             @relation("DocumentUploader", fields: [uploadedBy], references: [id], onDelete: SetNull)
+  uploader User?            @relation("DocumentUploader", fields: [uploadedBy], references: [id], onDelete: SetNull)
   chunks   KnowledgeChunk[]
 
   @@index([category])
@@ -156,20 +172,20 @@ model KnowledgeChunk {
 }
 
 model Device {
-  id             String       @id @default(cuid())
-  code           String       @unique
-  name           String
-  classroom      String
-  status         DeviceStatus @default(ONLINE)
-  mode           RobotMode    @default(COMPANION)
-  battery        Int          @default(86)
-  temperature    Float        @default(36.4)
-  streamUrl      String?
-  description    String       @default("云宝小陪伴机器人用于园所问答、活动陪伴、安全提醒与课程互动。") @db.Text
-  lastOnlineAt   DateTime     @default(now())
-  firmware       String       @default("yb-1.0.0")
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id           String       @id @default(cuid())
+  code         String       @unique
+  name         String
+  classroom    String
+  status       DeviceStatus @default(ONLINE)
+  mode         RobotMode    @default(COMPANION)
+  battery      Int          @default(86)
+  temperature  Float        @default(36.4)
+  streamUrl    String?
+  description  String       @default("云宝小陪伴机器人用于园所问答、活动陪伴、安全提醒与课程互动。") @db.Text
+  lastOnlineAt DateTime     @default(now())
+  firmware     String       @default("yb-1.0.0")
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
   commands      Command[]
   logs          DeviceLog[]
@@ -226,6 +242,80 @@ model LearningTask {
 
   device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
 }
+
+model StudentWork {
+  id                String                @id @default(cuid())
+  title             String
+  description       String?               @db.Text
+  studentLabel      String?
+  ownerId           String
+  fileName          String
+  mimeType          String
+  fileSize          Int?
+  mediaUrl          String                @db.Text
+  thumbnailUrl      String?               @db.Text
+  status            StudentWorkStatus     @default(PENDING)
+  visibility        StudentWorkVisibility @default(TEACHER_ONLY)
+  reviewNote        String?               @db.Text
+  reviewedBy        String?
+  reviewedAt        DateTime?
+  libraryDocumentId String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  owner         User                  @relation("StudentWorkOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  reviewer      User?                 @relation("StudentWorkReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  comments      StudentWorkComment[]
+  likes         StudentWorkLike[]
+  growthRecords StudentGrowthRecord[]
+
+  @@index([ownerId, createdAt])
+  @@index([status, visibility, createdAt])
+  @@index([reviewedBy])
+}
+
+model StudentWorkComment {
+  id        String   @id @default(cuid())
+  workId    String
+  authorId  String
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  work   StudentWork @relation(fields: [workId], references: [id], onDelete: Cascade)
+  author User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([workId, createdAt])
+}
+
+model StudentWorkLike {
+  id        String   @id @default(cuid())
+  workId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  work StudentWork @relation(fields: [workId], references: [id], onDelete: Cascade)
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workId, userId])
+  @@index([workId])
+}
+
+model StudentGrowthRecord {
+  id        String   @id @default(cuid())
+  workId    String
+  authorId  String
+  stage     String
+  note      String   @db.Text
+  createdAt DateTime @default(now())
+
+  work   StudentWork @relation(fields: [workId], references: [id], onDelete: Cascade)
+  author User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([workId, createdAt])
+  @@index([authorId, createdAt])
+}
+
 model ScienceKnowledgeItem {
   id              String   @id
   baseId          String   @map("base_id")

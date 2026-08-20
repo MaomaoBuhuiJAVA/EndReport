@@ -2,3 +2,10 @@
 /robot-console/robot-console
 /robot-console/.next/
 /robot-console/node_modules/
+/.worktrees/
+/.superpowers/
+/docs/
+/tmp-live-home.html
+/robot-console/tmp/
+/robot-console/tmp-production-*.json
+/robot-console/tsconfig.tsbuildinfo

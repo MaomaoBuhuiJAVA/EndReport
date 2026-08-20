@@ -85,5 +85,15 @@ describe("science resource retrieval for agent queries", () => {
     expect(result.chunks[0]?.content).toContain("幼儿吹泡泡、观察并交流");
     expect(result.chunks[0]?.content).toContain("RESOURCE-small-bubbles-video");
     expect(result.chunks[0]?.content).toContain("小班");
+    const content = result.chunks[0]?.content ?? "";
+    expect(content.indexOf("RESOURCE-small-bubbles-video")).toBeLessThan(content.indexOf("幼儿吹泡泡、观察并交流"));
+  });
+
+  it("normalizes magnetic-pole wording before the broad packaged search", async () => {
+    const result = await searchKnowledge("磁极有什么特点？");
+
+    expect(result.chunks.length).toBeGreaterThan(0);
+    expect(result.chunks.every((chunk) => chunk.document.title.startsWith("科小贝实验室："))).toBe(true);
+    expect(result.chunks.some((chunk) => chunk.content.includes("主题：磁力"))).toBe(true);
   });
 });

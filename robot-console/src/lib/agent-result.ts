@@ -159,7 +159,11 @@ function optionalStringArray(value: Record<string, unknown>, key: string): strin
 }
 
 function parseVisionPrivacyRisk(value: unknown): boolean | VisionPrivacyRisk | null {
-  if (typeof value === "boolean") return value;
+  // Dify's structured-output renderer may serialize booleans as the strings
+  // "true" or "false" inside a code fence. Normalize only those exact
+  // values so an otherwise complete visual observation is still usable.
+  const booleanValue = parseBoolean(value);
+  if (booleanValue !== null) return booleanValue;
   if (!isRecord(value)) return null;
 
   const containsFaceOrChild = value.contains_face_or_child;

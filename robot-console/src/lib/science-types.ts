@@ -42,6 +42,10 @@ export interface ScienceKnowledgeSummary {
   tags: string[];
   resourceTypes: ScienceResource["type"][];
   resources: ScienceResource[];
+  /** Direct story video URL, when the catalogue has one. */
+  videoUrl?: string;
+  /** A generated or uploaded public cover URL, when a cover resource exists. */
+  coverUrl?: string;
 }
 
 export interface ScienceKnowledgeItem extends ScienceKnowledgeSummary {
