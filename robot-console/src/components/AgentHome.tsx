@@ -10,7 +10,6 @@ import {
   BookOpen,
   BookOpenText,
   Clapperboard,
-  FileText,
   FlaskConical,
   Sparkles,
 } from "lucide-react";
@@ -41,13 +40,8 @@ const capabilities = [
   },
   {
     icon: FlaskConical,
-    title: "匹配实验资源",
+    title: "匹配科学资源库",
     description: "按年龄段查找实验、故事和科学诗，并进入对应详情。",
-  },
-  {
-    icon: FileText,
-    title: "检索园所资料",
-    description: "快速定位园所基本信息、资质与课程建设材料。",
   },
 ];
 
@@ -124,7 +118,7 @@ export function AgentHome({ data }: AgentHomeProps) {
               科学作品
             </Link>
             <Link className="inline-flex h-10 items-center gap-2 rounded-[6px] bg-[#176b5d] px-3.5 text-white transition hover:bg-[#12594d]" href="/lab">
-              进入实验室
+              进入资源库
               <ArrowRight aria-hidden="true" size={16} />
             </Link>
           </nav>
@@ -235,7 +229,7 @@ export function AgentHome({ data }: AgentHomeProps) {
               <p className="text-sm font-semibold text-[#176b5d]">智能体能力</p>
               <h2 className="mt-3 text-3xl font-bold text-[#173b42] sm:text-4xl">从问题到可用的活动支持</h2>
             </div>
-            <div className="mt-9 grid gap-4 md:grid-cols-3">
+            <div className="mt-9 grid gap-4 md:grid-cols-2">
               {capabilities.map(({ icon: Icon, title, description }, index) => (
                 <article className="rounded-[8px] border border-[#dce9e4] bg-[#fbfdfc] p-5" key={title}>
                   <span className={["grid size-11 place-items-center rounded-[6px]", index === 1 ? "bg-[#fff5d7] text-[#a46f00]" : index === 2 ? "bg-[#fff0ea] text-[#b45137]" : "bg-[#e6f4ef] text-[#176b5d]"].join(" ")}>

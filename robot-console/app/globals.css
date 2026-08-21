@@ -5239,7 +5239,7 @@ img {
 
 /* Literature covers use the existing transparent category illustrations as artwork over a stable palette. */
 .knowledge-grid--literature {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -5722,6 +5722,12 @@ img {
 
   .knowledge-card__media {
     min-width: 104px;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1023px) {
+  .knowledge-grid--literature {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 

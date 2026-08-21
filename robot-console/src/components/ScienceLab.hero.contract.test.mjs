@@ -11,7 +11,7 @@ test("keeps the original lab hero and limits the redesign to the option bar", ()
 
   assert.match(component, /className="lab-hero"/);
   assert.match(component, /lab-hero__photos/);
-  assert.match(component, /className="rotating-text">实验室<\/span>/);
+  assert.match(component, /className="rotating-text">资源库<\/span>/);
   assert.doesNotMatch(component, /className="lab-shell lab-intro"/);
   assert.match(component, /label="类型"/);
   assert.match(component, /label="年龄段"/);
@@ -122,7 +122,7 @@ test("adds a compact mobile return-home control beside the lab search", () => {
   assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.lab-search__home[\s\S]*?display:\s*grid/);
 });
 
-test("uses two-column illustrated cover cards for science poems and stories", () => {
+test("uses responsive illustrated cover cards for science poems and stories", () => {
   const component = fs.readFileSync(componentPath, "utf8");
   const styles = fs.readFileSync(stylesPath, "utf8");
 
@@ -130,6 +130,8 @@ test("uses two-column illustrated cover cards for science poems and stories", ()
   assert.match(component, /knowledge-card__cover-title/);
   assert.match(component, /categoryVisual\.image/);
   assert.match(styles, /\.knowledge-card--literature/);
+  assert.match(styles, /\.knowledge-grid--literature\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4/);
+  assert.match(styles, /@media \(min-width: 721px\) and \(max-width: 1023px\)[\s\S]*?\.knowledge-grid--literature[\s\S]*?grid-template-columns:\s*repeat\(3/);
   assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.knowledge-grid--literature[\s\S]*?grid-template-columns:\s*repeat\(2/);
   assert.match(styles, /\.knowledge-card--literature[\s\S]*?background:\s*linear-gradient/);
   assert.match(styles, /\.knowledge-card--literature[\s\S]*?box-shadow:/);

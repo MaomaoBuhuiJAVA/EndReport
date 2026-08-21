@@ -58,7 +58,7 @@ import {
 
 const labNavItems: GooeyNavItem[] = [
   { key: "overview", label: "科小贝首页", href: "/" },
-  { key: "lab", label: "科小贝实验室", href: "/lab" },
+  { key: "lab", label: "科小贝资源库", href: "/lab" },
   { key: "works", label: "作品展示", href: "/works" },
 ];
 
@@ -1599,7 +1599,7 @@ export function ScienceLab({
               <p className="lab-eyebrow">国科二幼园本资源中心</p>
               <h1>
                 科小贝
-                <span className="rotating-text">实验室</span>
+                <span className="rotating-text">资源库</span>
               </h1>
               <p>汇集园本科学诗、教师实验与家庭实验资料。</p>
               <div className="lab-hero__progress" aria-hidden="true">

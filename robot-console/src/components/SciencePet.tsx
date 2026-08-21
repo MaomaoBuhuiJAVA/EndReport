@@ -460,7 +460,7 @@ export function SciencePet() {
     {
       id: 1,
       role: "assistant",
-      text: "你好，我是科小贝。想找科学诗、科学故事、实验教案或园所资料，都可以问我。",
+      text: "你好，我是科小贝。想找科学诗、科学故事或实验教案，都可以问我。",
     },
   ]);
   const messagesRef = useRef<PetMessage[]>(messages);

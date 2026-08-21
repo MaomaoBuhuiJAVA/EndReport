@@ -23,7 +23,7 @@ test("keeps resource-library navigation focused on 科小贝 instead of unrelate
   assert.doesNotMatch(component, /label: "园所资料"/);
 });
 
-test("keeps the laboratory title visible instead of leaving an animation gap", () => {
-  assert.match(component, /<span className="rotating-text">实验室<\/span>/);
+test("keeps the resource-library title visible instead of leaving an animation gap", () => {
+  assert.match(component, /<span className="rotating-text">资源库<\/span>/);
   assert.doesNotMatch(component, /<RotatingText/);
 });
