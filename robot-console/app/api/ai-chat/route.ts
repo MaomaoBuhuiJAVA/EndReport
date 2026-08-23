@@ -13,6 +13,7 @@ import { signAiChatOutputFiles } from "@/lib/ai-chat-download-server";
 import type { AiChatCoverSync } from "@/lib/ai-chat-stream";
 import { buildScienceLabLinks } from "@/lib/science-lab-links";
 import { synchronizeSciencePoetryCover } from "@/lib/science-cover-sync";
+import { normalizeVoiceCallReply, VOICE_CALL_PROMPT } from "@/lib/voice-call";
 import { searchKnowledge, wantsPhotoResults } from "@/lib/search";
 
 // Image-generation branches can take longer than a normal text response.
@@ -52,6 +53,7 @@ const ATTACHMENT_TYPE_MISMATCH_MESSAGE = "附件类型与文件扩展名不一�
 // upload/analysis before their first answer, so attachments get a longer
 // budget and periodic SSE progress frames keep the browser connection alive.
 const FAST_DIFY_STREAM_TIMEOUT_MS = 4_500;
+const VOICE_CALL_DIFY_STREAM_TIMEOUT_MS = 12_000;
 // A lesson-plan Chatflow usually waits for the document-generation node before
 // emitting its first SSE message.  In production that first message has taken
 // 48-105 seconds, so the old 45-second budget often fell through to the local
@@ -76,6 +78,7 @@ type ChatRequestBody = {
   conversationId?: string;
   /** Set only by a science-poem card action; never inferred from a title. */
   targetResourceId?: string;
+  voiceCall?: boolean;
 };
 
 type ParsedChatRequest = {
@@ -338,6 +341,7 @@ async function parseChatRequest(request: Request): Promise<ParsedChatRequest> {
       userId: typeof formData.get("userId") === "string" ? String(formData.get("userId")) : undefined,
       conversationId: typeof formData.get("conversationId") === "string" ? String(formData.get("conversationId")) : undefined,
       targetResourceId: typeof formData.get("targetResourceId") === "string" ? String(formData.get("targetResourceId")) : undefined,
+      voiceCall: formData.get("voiceCall") === "true",
     },
     attachment: attachmentValue ?? undefined,
   };
@@ -1411,6 +1415,12 @@ function buildChatResult(
   };
 }
 
+function compactVoiceCallResult<T extends { reply: string }>(result: T, voiceCall: boolean): T {
+  if (!voiceCall) return result;
+  const { conversationId: _conversationId, ...callResult } = result as T & { conversationId?: unknown };
+  return { ...callResult, reply: normalizeVoiceCallReply(result.reply) } as T;
+}
+
 function structuredResultReply(agentResult?: AgentResult) {
   switch (agentResult?.kind) {
     case "vision_observation":
@@ -1484,6 +1494,7 @@ function streamChatResponse(
   firstAnswerTimeoutMs = FAST_DIFY_STREAM_TIMEOUT_MS,
   targetResourceId?: string,
   isVisionRequest = false,
+  voiceCall = false,
 ) {
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -1510,7 +1521,7 @@ function streamChatResponse(
         const difyStream = await difyStreamPromise;
         if (!difyStream?.body) {
           const result = fallbackChatResult(enrichment, message, casualMessage, attachment, isVisionRequest);
-          controller.enqueue(eventFrame({ type: "done", ...result }, encoder));
+          controller.enqueue(eventFrame({ type: "done", ...compactVoiceCallResult(result, voiceCall) }, encoder));
           streamClosed = true;
           controller.close();
           return;
@@ -1554,7 +1565,7 @@ function streamChatResponse(
             return;
           }
           const fallback = fallbackChatResult(enrichment, message, casualMessage, attachment, isVisionRequest);
-          controller.enqueue(eventFrame({ type: "done", ...fallback }, encoder));
+          controller.enqueue(eventFrame({ type: "done", ...compactVoiceCallResult(fallback, voiceCall) }, encoder));
           closeController();
         }, firstAnswerTimeoutMs);
 
@@ -1643,7 +1654,7 @@ function streamChatResponse(
                 receivedAnswer = true;
                 clearTimeout(firstAnswerTimeout);
               }
-              if (!enrichment.requestedLessonTitle && !isVisionRequest) {
+              if (!enrichment.requestedLessonTitle && !isVisionRequest && !voiceCall) {
                 controller.enqueue(eventFrame({ type: "delta", delta: event.answer }, encoder));
               }
             }
@@ -1763,7 +1774,7 @@ function streamChatResponse(
           outputFiles,
           coverSync,
         );
-        const done = {
+        const done = compactVoiceCallResult({
           type: "done" as const,
           responseId: result.responseId,
           provider: result.provider,
@@ -1773,14 +1784,14 @@ function streamChatResponse(
           ...(result.agentResult ? { agentResult: result.agentResult } : {}),
           ...(result.coverSync ? { coverSync: result.coverSync } : {}),
           ...(result.files ? { files: result.files } : {}),
-        };
+        }, voiceCall);
         controller.enqueue(eventFrame(done, encoder));
         closeController();
       } catch {
         if (!request.signal.aborted && !streamClosed) {
           if (isVisionRequest && streamEnrichment) {
             const fallback = fallbackChatResult(streamEnrichment, message, casualMessage, attachment, true);
-            controller.enqueue(eventFrame({ type: "done", ...fallback }, encoder));
+            controller.enqueue(eventFrame({ type: "done", ...compactVoiceCallResult(fallback, voiceCall) }, encoder));
           } else {
             controller.enqueue(eventFrame({ type: "error", message: "对话服务暂时不可用" }, encoder));
           }
@@ -1816,6 +1827,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "message is required" }, { status: 400 });
   }
 
+  const voiceCall = body.voiceCall === true;
+
   const casualMessage = isCasualMessage(message);
   const hasImageAttachment = isImageAttachment(attachment);
   // An uploaded image/document already provides the evidence for the model.
@@ -1834,7 +1847,7 @@ export async function POST(request: Request) {
   // Treat each uploaded file as a standalone evidence package. Reusing an
   // older text conversation makes Dify re-read unrelated history and can
   // send document analysis through the slower general-chat branch.
-  const conversationId = attachment || hasImageAttachment || lessonPlanTitle(message)
+  const conversationId = voiceCall || attachment || hasImageAttachment || lessonPlanTitle(message)
     ? undefined
     : difyConversationId(body.conversationId);
   const targetResourceId = poetryCoverTargetId(body.targetResourceId);
@@ -1879,11 +1892,11 @@ export async function POST(request: Request) {
   const enrichment = buildChatEnrichment(search, message, casualMessage);
   const localExplanationResult = attachment ? null : localScienceExplanationResult(enrichment, message);
   if (localExplanationResult) {
-    return NextResponse.json(localExplanationResult);
+    return NextResponse.json(compactVoiceCallResult(localExplanationResult, voiceCall));
   }
   const localCatalogResult = attachment ? null : localScienceCatalogResult(enrichment, message);
   if (localCatalogResult) {
-    return NextResponse.json(localCatalogResult);
+    return NextResponse.json(compactVoiceCallResult(localCatalogResult, voiceCall));
   }
   const documentRouteInstruction = attachment && !hasImageAttachment
     ? [
@@ -1895,14 +1908,15 @@ export async function POST(request: Request) {
       baseDifyMessage,
     ].join("\n\n")
     : baseDifyMessage;
-  const difyMessage = buildDifyMessage(
-    hasImageAttachment && files?.length
+  const routedMessage = hasImageAttachment && files?.length
       ? [
         "[系统路由指令：检测到图片附件，请直接进入“视觉实验分析”分支。将用户输入和图片交给 qvq-max 读取；不要进入普通文本聊天、不要等待用户补充文字、不要生成文件。请尽快返回简洁的可见事实、证据不足和安全提醒。]",
         baseDifyMessage,
       ].join("\n\n")
-      : [creationRouteInstruction(message), documentRouteInstruction].filter(Boolean).join("\n\n"),
-    enrichment.context,
+      : [creationRouteInstruction(message), documentRouteInstruction].filter(Boolean).join("\n\n");
+  const difyMessage = buildDifyMessage(
+    [voiceCall ? VOICE_CALL_PROMPT : "", routedMessage].filter(Boolean).join("\n\n"),
+    voiceCall ? enrichment.context.slice(0, 3600) : enrichment.context,
   );
   const difyArgs = {
     apiKey,
@@ -1914,7 +1928,9 @@ export async function POST(request: Request) {
   };
 
   if (acceptsEventStream(request)) {
-    const streamTimeoutMs = difyStreamTimeout(message, attachmentStatus);
+    const streamTimeoutMs = voiceCall
+      ? VOICE_CALL_DIFY_STREAM_TIMEOUT_MS
+      : difyStreamTimeout(message, attachmentStatus);
     const streamStartedAt = Date.now();
     const difyStreamPromise = openDifyStream({
       ...difyArgs,
@@ -1933,6 +1949,7 @@ export async function POST(request: Request) {
       Math.max(250, streamTimeoutMs - (Date.now() - streamStartedAt)),
       targetResourceId,
       hasImageAttachment && Boolean(files?.length),
+      voiceCall,
     );
   }
 
@@ -1962,7 +1979,7 @@ export async function POST(request: Request) {
     sameOrigin: request.url,
     difyApiUrl: apiUrl,
   });
-  const result = buildChatResult(
+  const result = compactVoiceCallResult(buildChatResult(
     enrichment,
     message,
     casualMessage,
@@ -1976,7 +1993,7 @@ export async function POST(request: Request) {
     agentResult,
     outputFiles,
     coverSync,
-  );
+  ), voiceCall);
 
   return NextResponse.json(result);
 }

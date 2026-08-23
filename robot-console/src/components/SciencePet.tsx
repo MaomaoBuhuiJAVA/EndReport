@@ -40,6 +40,7 @@ import { buildLessonPlanDocx } from "@/lib/lesson-plan-docx";
 import type { AgentResult } from "@/lib/agent-result";
 import { assistantDisplayText, assistantFallbackText } from "@/lib/assistant-display-text";
 import { createDifyWebUserId } from "@/lib/dify-session";
+import { normalizeVoiceCallReply } from "@/lib/voice-call";
 import type { ScienceLabLink } from "@/lib/science-lab-links";
 import {
   beginVoiceSession,
@@ -966,6 +967,7 @@ export function SciencePet() {
     onEvent?: (event: AiChatStreamEvent) => void,
     attachment?: File | null,
     targetResourceId?: string,
+    voiceCall = false,
   ): Promise<AssistantReply> {
     const formData = attachment ? new FormData() : null;
     if (formData && attachment) {
@@ -976,6 +978,7 @@ export function SciencePet() {
         formData.append("conversationId", difyConversationIdRef.current);
       }
       if (targetResourceId) formData.append("targetResourceId", targetResourceId);
+      if (voiceCall) formData.append("voiceCall", "true");
       formData.append("attachment", attachment);
     }
 
@@ -991,6 +994,7 @@ export function SciencePet() {
         userId: difyUserId,
         conversationId: difyConversationIdRef.current,
         ...(targetResourceId ? { targetResourceId } : {}),
+        ...(voiceCall ? { voiceCall: true } : {}),
       }),
     });
     if (!response.ok) {
@@ -1014,7 +1018,9 @@ export function SciencePet() {
     if (data.provider === "fallback") difyConversationIdRef.current = undefined;
     else if (data.conversationId) difyConversationIdRef.current = data.conversationId;
     return {
-      text: data.reply?.trim() || assistantFallbackText(data.agentResult?.kind) || "资料库暂时没有返回内容，请换个问法试试。",
+      text: voiceCall
+        ? normalizeVoiceCallReply(data.reply?.trim() || assistantFallbackText(data.agentResult?.kind) || "资料库暂时没有返回内容，请换个问法试试。")
+        : data.reply?.trim() || assistantFallbackText(data.agentResult?.kind) || "资料库暂时没有返回内容，请换个问法试试。",
       provider: data.provider,
       responseId: data.responseId,
       photos: data.photos,
@@ -1243,18 +1249,21 @@ export function SciencePet() {
         transcript,
         history,
         thinking.abortController.signal,
-        (event) =>
-          applyAssistantStreamEvent(assistantMessageId, event, (text, mode) => {
-            setCallReply((current) => (mode === "complete" ? text : `${current}${text}`));
-          }),
+        (event) => applyAssistantStreamEvent(assistantMessageId, event),
+        undefined,
+        undefined,
+        true,
       );
       if (!isCurrentVoiceCall(sessionId)) return;
 
-      setCallReply(reply.text);
+      // Hold the short call reply until it is complete so the text appears at
+      // the same moment that the existing 豆豆 TTS request starts playing.
+      const callText = normalizeVoiceCallReply(reply.text);
+      setCallReply(callText);
       updatePetMessage(assistantMessageId, (message) => ({
         ...message,
         pending: false,
-        text: reply.text,
+        text: callText,
         responseId: reply.responseId,
         photos: reply.photos,
         labLinks: reply.labLinks,
@@ -1270,7 +1279,7 @@ export function SciencePet() {
       callSessionRef.current = speaking;
       setCallPhase("speaking");
       setCallNotice("科小贝正在播报。");
-      const started = await playSpeech(reply.text, {
+      const started = await playSpeech(callText, {
         callSessionId: sessionId,
         onEnded: () => resumeVoiceCallListening(sessionId),
       });
@@ -1619,6 +1628,7 @@ export function SciencePet() {
         (event) => applyAssistantStreamEvent(assistantMessageId, event),
         attachment,
         targetResourceId,
+        true,
       );
       let outputFiles = reply.files;
       const canPackageLessonPlan =

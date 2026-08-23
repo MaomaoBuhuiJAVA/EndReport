@@ -704,6 +704,42 @@ describe("POST /api/ai-chat", () => {
     expect(payload.reply).not.toContain("延伸与安全提示");
   });
 
+  it("电话模式只返回短答，不把长文本增量刷到通话窗口", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(openDifyStream).mockImplementation(async (args) => {
+      expect(args.message).toContain("【电话对话模式】");
+      expect(args.message).toContain("最多两句");
+      expect(args.conversationId).toBeUndefined();
+      return new Response(
+        [
+          `data: ${JSON.stringify({ event: "message", answer: "这是一段很长的回答，包含很多不适合电话播报的背景说明。请在通话中只保留最重要的操作建议。" })}`,
+          "",
+          `data: ${JSON.stringify({ event: "message_end", conversation_id: "call-conversation" })}`,
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      );
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: JSON.stringify({ message: "怎么做一个光影实验？", voiceCall: true, userId: "call-user" }),
+      }),
+    );
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+    expect(events.filter((event) => event.type === "delta")).toEqual([]);
+    const done = events.find((event) => event.type === "done");
+    expect(done).toBeDefined();
+    expect(Array.from(done!.reply).length).toBeLessThanOrEqual(72);
+    expect(done!.conversationId).toBeUndefined();
+  });
+
   it("保留 Dify 返回的无表格完整教案，不用通用兜底内容覆盖", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({
       chunks: [{
