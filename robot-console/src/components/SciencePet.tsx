@@ -380,6 +380,9 @@ function toSpeechText(value: string) {
     .trim();
 }
 
+const SILENT_AUDIO_UNLOCK_URL =
+  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+
 function attachmentExtension(name: string) {
   const normalized = name.trim().toLowerCase();
   const index = normalized.lastIndexOf(".");
@@ -498,6 +501,7 @@ export function SciencePet() {
   const voiceMeterSessionRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioObjectUrlRef = useRef<string | null>(null);
+  const callAudioElementRef = useRef<HTMLAudioElement | null>(null);
   const ttsAbortRef = useRef<AbortController | null>(null);
   const copyTimeoutRef = useRef<number | null>(null);
   const callRecognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -911,6 +915,7 @@ export function SciencePet() {
       if (session) callSessionRef.current = invalidateVoiceSession(session, "ended");
       callActiveRef.current = false;
       callMutedRef.current = false;
+      callAudioElementRef.current = null;
       stopActiveAudio(resetUi);
       if (!resetUi) return;
       setVoiceStatus("idle");
@@ -1098,11 +1103,20 @@ export function SciencePet() {
     startCallRecognition(sessionId);
   }
 
+  function scheduleCallRecognitionRestart(sessionId: number, delay = 420) {
+    if (callRestartTimerRef.current || !isCurrentVoiceCallListening(sessionId)) return;
+    callRestartTimerRef.current = window.setTimeout(() => {
+      callRestartTimerRef.current = null;
+      if (isCurrentVoiceCallListening(sessionId)) startCallRecognition(sessionId);
+    }, delay);
+  }
+
   async function playSpeech(
     sourceText: string,
     options: {
       messageId?: number;
       callSessionId?: number;
+      onStarted?: () => void;
       onEnded?: () => void;
     } = {},
   ) {
@@ -1129,7 +1143,12 @@ export function SciencePet() {
       }
 
       const objectUrl = URL.createObjectURL(blob);
-      audio = new Audio(objectUrl);
+      audio = options.callSessionId !== undefined
+        ? callAudioElementRef.current ?? new Audio()
+        : new Audio();
+      if (options.callSessionId !== undefined) callAudioElementRef.current = audio;
+      audio.preload = "auto";
+      audio.src = objectUrl;
       audio.muted = options.callSessionId !== undefined && !speakerEnabledRef.current;
       audioRef.current = audio;
       audioObjectUrlRef.current = objectUrl;
@@ -1149,6 +1168,7 @@ export function SciencePet() {
         }
       };
       await audio.play();
+      options.onStarted?.();
       return true;
     } catch {
       const shouldReportPlayFailure = !controller.signal.aborted;
@@ -1259,7 +1279,6 @@ export function SciencePet() {
       // Hold the short call reply until it is complete so the text appears at
       // the same moment that the existing 豆豆 TTS request starts playing.
       const callText = normalizeVoiceCallReply(reply.text);
-      setCallReply(callText);
       updatePetMessage(assistantMessageId, (message) => ({
         ...message,
         pending: false,
@@ -1281,8 +1300,10 @@ export function SciencePet() {
       setCallNotice("科小贝正在播报。");
       const started = await playSpeech(callText, {
         callSessionId: sessionId,
+        onStarted: () => setCallReply(callText),
         onEnded: () => resumeVoiceCallListening(sessionId),
       });
+      if (!started && isCurrentVoiceCall(sessionId)) setCallReply(callText);
       if (!started && isCurrentVoiceCall(sessionId)) resumeVoiceCallListening(sessionId);
     } catch {
       if (!isCurrentVoiceCall(sessionId)) return;
@@ -1336,6 +1357,12 @@ export function SciencePet() {
         setCallNotice("没有听清，请再说一次。");
         return;
       }
+      if (event.error === "network") {
+        setCallNotice("语音识别网络波动，正在继续监听。");
+        stopCallRecognition();
+        scheduleCallRecognitionRestart(sessionId, 550);
+        return;
+      }
       const errors: Record<string, string> = {
         "not-allowed": "麦克风权限未开启，请在浏览器设置中允许访问。",
         "service-not-allowed": "浏览器已禁用语音识别服务，请使用文字对话。",
@@ -1356,17 +1383,31 @@ export function SciencePet() {
       ) {
         return;
       }
-      callRestartTimerRef.current = window.setTimeout(() => {
-        callRestartTimerRef.current = null;
-        startCallRecognition(sessionId);
-      }, 220);
+      scheduleCallRecognitionRestart(sessionId);
     };
     try {
       recognition.start();
     } catch {
       callRecognitionRef.current = null;
-      setVoiceCallError(sessionId, "麦克风启动失败，请使用文字对话。");
+      if (isCurrentVoiceCallListening(sessionId)) {
+        setCallNotice("麦克风正在重新连接，请继续说话。");
+        scheduleCallRecognitionRestart(sessionId, 700);
+      } else {
+        setVoiceCallError(sessionId, "麦克风启动失败，请使用文字对话。");
+      }
     }
+  }
+
+  function unlockCallAudio() {
+    // Mobile browsers commonly block a media element created after an async
+    // TTS request. Start a muted, zero-length audio element during the user's
+    // call-button gesture so later TTS playback is allowed for this call.
+    const audio = new Audio(SILENT_AUDIO_UNLOCK_URL);
+    audio.muted = true;
+    audio.volume = 0;
+    audio.preload = "auto";
+    callAudioElementRef.current = audio;
+    void audio.play().catch(() => undefined);
   }
 
   function startVoiceCall() {
@@ -1378,6 +1419,7 @@ export function SciencePet() {
     }
     stopPressAndHoldVoice();
     stopActiveAudio();
+    unlockCallAudio();
     clearCallTimers();
     const session = beginVoiceSession(callSessionIdRef.current);
     callSessionRef.current = session;
@@ -1420,10 +1462,24 @@ export function SciencePet() {
   function toggleCallSpeaker() {
     const nextEnabled = !speakerEnabledRef.current;
     speakerEnabledRef.current = nextEnabled;
-    if (audioRef.current && callActiveRef.current) {
-      audioRef.current.muted = !nextEnabled;
-    }
     setSpeakerEnabled(nextEnabled);
+    if (nextEnabled) {
+      setCallNotice("扬声器已开启，下一条回复会播放声音。");
+      return;
+    }
+
+    const session = callSessionRef.current;
+    const wasSpeaking = session?.phase === "speaking";
+    stopActiveAudio(false);
+    setCallNotice("扬声器已关闭，通话会继续监听。");
+    if (wasSpeaking && session && isCurrentVoiceCall(callSessionIdRef.current)) {
+      const listening = transitionCallPhase(session, "listening");
+      if (listening.phase === "listening") {
+        callSessionRef.current = listening;
+        setCallPhase("listening");
+        startCallRecognition(callSessionIdRef.current);
+      }
+    }
   }
 
   function endVoiceCall() {
@@ -2143,11 +2199,11 @@ export function SciencePet() {
                       <p>{callTranscript}</p>
                     </div>
                   ) : null}
-                  {callPhase === "thinking" && !callReply ? (
+                  {(callPhase === "thinking" || (callPhase === "speaking" && !callReply)) ? (
                     <div className="pet-call__bubble pet-call__bubble--assistant">
                       <span className="thinking-copy">
                         <ThinkingGhost />
-                        <span>正在思考</span>
+                        <span>{callPhase === "thinking" ? "正在思考" : "正在准备语音"}</span>
                       </span>
                     </div>
                   ) : null}
