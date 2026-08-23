@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { normalizeVoiceCallReply, VOICE_CALL_PROMPT } from "./voice-call";
+import {
+  normalizeVoiceCallReply,
+  VOICE_CALL_EMPTY_REPLY,
+  VOICE_CALL_PROMPT,
+  VOICE_CALL_SERVICE_ERROR,
+} from "./voice-call";
 
 describe("voice call replies", () => {
   it("keeps a normal short reply unchanged", () => {
@@ -14,9 +19,22 @@ describe("voice call replies", () => {
     expect(reply).toMatch(/[。！？!?…]$/u);
   });
 
+  it("uses child-friendly wording for common formal phrases", () => {
+    expect(normalizeVoiceCallReply("答案：请准备实验材料，按照实验步骤观察并记录科学原理。"))
+      .toBe("请准备要用的东西，按照小步骤看一看、记下来为什么会这样。");
+  });
+
+  it("provides a playful fallback when the model returns no spoken text", () => {
+    expect(normalizeVoiceCallReply("   ")).toBe(VOICE_CALL_EMPTY_REPLY);
+    expect(VOICE_CALL_EMPTY_REPLY).toContain("小朋友");
+    expect(VOICE_CALL_SERVICE_ERROR).toContain("再试一次");
+  });
+
   it("requires a concise spoken answer", () => {
     expect(VOICE_CALL_PROMPT).toContain("最多两句");
     expect(VOICE_CALL_PROMPT).toContain("不要使用Markdown");
+    expect(VOICE_CALL_PROMPT).toContain("3—6岁");
+    expect(VOICE_CALL_PROMPT).toContain("科学小伙伴");
+    expect(VOICE_CALL_PROMPT).toContain("请老师或家长陪同");
   });
 });
-

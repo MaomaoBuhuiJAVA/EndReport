@@ -174,6 +174,19 @@ test("buffers final recognition fragments while listening and sends one debounce
   );
 });
 
+test("does not race recognition restart with the pending final call transcript", () => {
+  assert.match(component, /const callListeningWantedRef = useRef\(false\)/);
+  assert.match(
+    component,
+    /callListeningWantedRef\.current = false;[\s\S]*?if \(callRestartTimerRef\.current !== null\) \{[\s\S]*?window\.clearTimeout\(callRestartTimerRef\.current\)/,
+  );
+  assert.match(
+    component,
+    /current\.phase !== "listening"[\s\S]*?callFinalTimerRef\.current !== null[\s\S]*?callFinalTranscriptRef\.current\.trim\(\)/,
+  );
+  assert.match(component, /if \(!isCurrentVoiceCallListening\(sessionId\) \|\| callRecognitionRef\.current\) return;/);
+});
+
 test("stops active call audio before unmuting into a fresh listening session", () => {
   assert.match(
     component,

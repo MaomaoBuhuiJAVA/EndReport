@@ -13,7 +13,11 @@ import { signAiChatOutputFiles } from "@/lib/ai-chat-download-server";
 import type { AiChatCoverSync } from "@/lib/ai-chat-stream";
 import { buildScienceLabLinks } from "@/lib/science-lab-links";
 import { synchronizeSciencePoetryCover } from "@/lib/science-cover-sync";
-import { normalizeVoiceCallReply, VOICE_CALL_PROMPT } from "@/lib/voice-call";
+import {
+  normalizeVoiceCallReply,
+  VOICE_CALL_PROMPT,
+  VOICE_CALL_SERVICE_ERROR,
+} from "@/lib/voice-call";
 import { searchKnowledge, wantsPhotoResults } from "@/lib/search";
 
 // Image-generation branches can take longer than a normal text response.
@@ -1793,7 +1797,7 @@ function streamChatResponse(
             const fallback = fallbackChatResult(streamEnrichment, message, casualMessage, attachment, true);
             controller.enqueue(eventFrame({ type: "done", ...compactVoiceCallResult(fallback, voiceCall) }, encoder));
           } else {
-            controller.enqueue(eventFrame({ type: "error", message: "对话服务暂时不可用" }, encoder));
+            controller.enqueue(eventFrame({ type: "error", message: voiceCall ? VOICE_CALL_SERVICE_ERROR : "对话服务暂时不可用" }, encoder));
           }
           streamClosed = true;
           controller.close();
