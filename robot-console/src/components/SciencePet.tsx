@@ -1711,7 +1711,7 @@ export function SciencePet() {
         (event) => applyAssistantStreamEvent(assistantMessageId, event),
         attachment,
         targetResourceId,
-        true,
+        false,
       );
       let outputFiles = reply.files;
       const canPackageLessonPlan =

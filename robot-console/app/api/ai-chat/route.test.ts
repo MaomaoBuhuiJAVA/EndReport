@@ -740,6 +740,38 @@ describe("POST /api/ai-chat", () => {
     expect(done!.conversationId).toBeUndefined();
   });
 
+  it("普通教案请求不注入电话提示词，并使用常规长超时", async () => {
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(openDifyStream).mockImplementation(async (args) => {
+      expect(args.message).not.toContain("【电话对话模式】");
+      expect(args.timeoutMs).toBeGreaterThan(12_000);
+      return new Response(
+        [
+          `data: ${JSON.stringify({ event: "message", answer: "活动目标：观察纸片变化。活动准备：纸片。活动过程：先猜想，再操作并交流。" })}`,
+          "",
+          `data: ${JSON.stringify({ event: "message_end", conversation_id: "lesson-conversation" })}`,
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      );
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: JSON.stringify({ message: "生成《玩转纸片》完整教案", userId: "lesson-user" }),
+      }),
+    );
+
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+    expect(events.find((event) => event.type === "done")?.reply).toContain("活动过程");
+  });
+
   it("保留 Dify 返回的无表格完整教案，不用通用兜底内容覆盖", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({
       chunks: [{

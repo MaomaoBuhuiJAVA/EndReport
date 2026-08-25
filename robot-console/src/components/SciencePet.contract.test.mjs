@@ -128,6 +128,19 @@ test("keeps phone calls isolated from press-and-hold recognition and cleans up o
   assert.match(component, /className="pet-call"/);
 });
 
+test("does not mark ordinary chat requests as voice calls", () => {
+  const ordinaryChatCall = component.match(
+    /const reply = await requestAssistantReply\(\s*content,[\s\S]*?targetResourceId,\s*(true|false),\s*\);/,
+  );
+  assert.ok(ordinaryChatCall, "ordinary sendMessage request should be present");
+  assert.equal(ordinaryChatCall[1], "false");
+
+  const voiceCallTranscript = component.match(
+    /const reply = await requestAssistantReply\(\s*transcript,[\s\S]*?undefined,\s*true,\s*\);/,
+  );
+  assert.ok(voiceCallTranscript, "voice-call transcript request should be present");
+});
+
 test("uses a stable voice cleanup callback when the chat component unmounts", () => {
   assert.match(component, /const stopAllVoice = useCallback\(/);
   assert.match(component, /stopAllVoice\(\{ resetUi: false \}\)/);
