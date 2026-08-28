@@ -257,13 +257,6 @@ export function AgentHome({ data }: AgentHomeProps) {
         />
       ) : null}
 
-      <footer className="border-t border-[#dce9e4] bg-white py-6">
-        <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 text-sm text-[#66807a] sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
-          <span>{data.profile.shortName} · 科小贝智能体</span>
-          <Link className="font-semibold text-[#176b5d] hover:text-[#12594d]" href="/lab">浏览科学资源</Link>
-        </div>
-      </footer>
-
       <SciencePet />
       </div>
     </LayoutGroup>
