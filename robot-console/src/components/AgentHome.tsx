@@ -105,7 +105,7 @@ export function AgentHome({ data }: AgentHomeProps) {
       <div className={`home-page min-h-screen bg-[#f7f7f2] text-[#173b42]${pendingCategory ? " home-page--navigating" : ""}${homeFade ? " home-page--fading" : ""}`}>
       <header className="home-site-header sticky top-0 z-30 border-b border-[#dce8e2]/90 bg-[#f7f7f2]/92 backdrop-blur-xl">
         <div className="mx-auto flex min-h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-          <Link className="flex min-w-0 items-center gap-3" href="/" aria-label="科小贝智能体首页">
+          <Link className="flex min-w-0 items-center gap-3" href="/" aria-label={`${data.profile.shortName}科小贝智能体首页`}>
             <GardenSeal glyph="贝" tone="teal" />
             <span className="min-w-0">
               <span className="block truncate text-sm font-bold text-[#173b42]">科小贝智能体</span>
