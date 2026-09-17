@@ -123,7 +123,7 @@ type FeedbackRating = "adopted" | "needs_revision" | "not_helpful";
 
 type AssistantReply = {
   text: string;
-  provider?: "dify" | "fallback";
+  provider?: "dify" | "deepseek" | "fallback";
   responseId?: string;
   photos?: PetPhoto[];
   labLinks?: ScienceLabLink[];
@@ -1031,7 +1031,7 @@ export function SciencePet() {
     // not carry an older remote conversation into the next question, where it
     // can add stale context and make the next response both slower and less
     // accurate.
-    if (data.provider === "fallback") difyConversationIdRef.current = undefined;
+    if (data.provider !== "dify") difyConversationIdRef.current = undefined;
     else if (data.conversationId) difyConversationIdRef.current = data.conversationId;
     return {
       text: voiceCall
@@ -1715,7 +1715,7 @@ export function SciencePet() {
       );
       let outputFiles = reply.files;
       const canPackageLessonPlan =
-        (reply.provider === "dify" || reply.provider === "fallback") &&
+        (reply.provider === "dify" || reply.provider === "deepseek" || reply.provider === "fallback") &&
         reply.text.length >= 80 &&
         /活动目标/u.test(reply.text) &&
         /活动准备/u.test(reply.text) &&

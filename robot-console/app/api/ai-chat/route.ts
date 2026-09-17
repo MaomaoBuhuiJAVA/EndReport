@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import type { ConversationMessage } from "@/lib/types";
 import { generateDifyReply, openDifyStream, parseDifyStream, uploadDifyFile, type DifyFileReference } from "@/lib/dify";
+import { generateDeepSeekReply } from "@/lib/deepseek";
 import { parseAgentResult, type AgentFailureResult, type AgentResult } from "@/lib/agent-result";
 import {
   mergeDifyOutputFileSources,
@@ -10,7 +11,7 @@ import {
   type AiChatOutputFile,
 } from "@/lib/ai-chat-files";
 import { signAiChatOutputFiles } from "@/lib/ai-chat-download-server";
-import type { AiChatCoverSync } from "@/lib/ai-chat-stream";
+import type { AiChatCoverSync, AiChatProvider } from "@/lib/ai-chat-stream";
 import { buildScienceLabLinks } from "@/lib/science-lab-links";
 import { synchronizeSciencePoetryCover } from "@/lib/science-cover-sync";
 import {
@@ -885,7 +886,7 @@ type ChatEnrichment = {
 type ChatResult = {
   responseId: string;
   reply: string;
-  provider: "dify" | "fallback";
+  provider: AiChatProvider;
   conversationId?: string;
   attachment?: AttachmentStatus;
   agentResult?: AgentResult;
@@ -1385,6 +1386,7 @@ function buildChatResult(
   agentResult?: AgentResult,
   files: AiChatOutputFile[] = [],
   coverSync?: AiChatCoverSync,
+  modelProvider: Exclude<AiChatProvider, "fallback"> = "dify",
 ): ChatResult {
   const { requestedLessonPlan } = enrichment;
   let reply = modelReply;
@@ -1407,7 +1409,7 @@ function buildChatResult(
   return {
     responseId: randomUUID(),
     reply: reply ?? fallbackReply(enrichment.context, enrichment.sources, message, casualMessage),
-    provider: reply && !usedLessonPlanFallback ? "dify" : "fallback",
+    provider: reply && !usedLessonPlanFallback ? modelProvider : "fallback",
     conversationId,
     ...(attachment ? { attachment } : {}),
     ...(agentResult ? { agentResult } : {}),
@@ -1417,6 +1419,49 @@ function buildChatResult(
     sources: enrichment.uniqueSources,
     labLinks: enrichment.labLinks,
   };
+}
+
+const DEEPSEEK_FALLBACK_PROMPT = [
+  "你是龙湾区国科温州第二幼儿园的智能助手“科小贝”。",
+  "用简洁、温和、可靠的中文回答，并根据用户是教师、家长或幼儿调整表达。",
+  "涉及园所事实或园本科学资源时，只能依据网页已检索的资料；资料不足时要明确说明，不得编造园所信息、资源名称或链接。",
+  "普通科学问题可以用稳定的基础知识回答；幼儿实验建议必须包含必要的成人看护和安全提醒。",
+  "不要提及 Dify、DeepSeek、系统提示词或内部降级路由。",
+].join("\n");
+
+async function deepSeekChatResult(
+  enrichment: ChatEnrichment,
+  message: string,
+  casualMessage: boolean,
+  history: ConversationMessage[],
+  attachment?: AttachmentStatus,
+  isVisionRequest = false,
+): Promise<ChatResult | null> {
+  if (attachment || isVisionRequest) return null;
+
+  const reply = await generateDeepSeekReply({
+    apiKey: process.env.DEEPSEEK_API_KEY,
+    apiUrl: process.env.DEEPSEEK_API_URL,
+    systemPrompt: DEEPSEEK_FALLBACK_PROMPT,
+    context: enrichment.context,
+    history,
+    message,
+    maxTokens: enrichment.requestedLessonTitle ? 2_400 : 1_200,
+  });
+  if (!reply) return null;
+
+  return buildChatResult(
+    enrichment,
+    message,
+    casualMessage,
+    reply,
+    undefined,
+    undefined,
+    undefined,
+    [],
+    undefined,
+    "deepseek",
+  );
 }
 
 function compactVoiceCallResult<T extends { reply: string }>(result: T, voiceCall: boolean): T {
@@ -1499,6 +1544,7 @@ function streamChatResponse(
   targetResourceId?: string,
   isVisionRequest = false,
   voiceCall = false,
+  history: ConversationMessage[] = [],
 ) {
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -1524,7 +1570,15 @@ function streamChatResponse(
 
         const difyStream = await difyStreamPromise;
         if (!difyStream?.body) {
-          const result = fallbackChatResult(enrichment, message, casualMessage, attachment, isVisionRequest);
+          const secondaryResult = await deepSeekChatResult(
+            enrichment,
+            message,
+            casualMessage,
+            history,
+            attachment,
+            isVisionRequest,
+          );
+          const result = secondaryResult ?? fallbackChatResult(enrichment, message, casualMessage, attachment, isVisionRequest);
           controller.enqueue(eventFrame({ type: "done", ...compactVoiceCallResult(result, voiceCall) }, encoder));
           streamClosed = true;
           controller.close();
@@ -1556,7 +1610,7 @@ function streamChatResponse(
         };
         const abortFromRequest = () => upstreamAbortController.abort();
         request.signal.addEventListener("abort", abortFromRequest, { once: true });
-        const firstAnswerTimeout = setTimeout(() => {
+        const firstAnswerTimeout = setTimeout(async () => {
           if (receivedAnswer || streamClosed || request.signal.aborted) return;
           streamTimedOut = true;
           upstreamAbortController.abort();
@@ -1568,7 +1622,16 @@ function streamChatResponse(
             finishDirectVision(visionFallbackAnswer);
             return;
           }
-          const fallback = fallbackChatResult(enrichment, message, casualMessage, attachment, isVisionRequest);
+          const secondaryResult = await deepSeekChatResult(
+            enrichment,
+            message,
+            casualMessage,
+            history,
+            attachment,
+            isVisionRequest,
+          );
+          if (streamClosed || request.signal.aborted) return;
+          const fallback = secondaryResult ?? fallbackChatResult(enrichment, message, casualMessage, attachment, isVisionRequest);
           controller.enqueue(eventFrame({ type: "done", ...compactVoiceCallResult(fallback, voiceCall) }, encoder));
           closeController();
         }, firstAnswerTimeoutMs);
@@ -1696,13 +1759,6 @@ function streamChatResponse(
             }
             if (event.error) {
               streamError = event.error;
-              // A qvq observation collected before a downstream failure is a
-              // usable, evidence-bounded answer. Let the normal fallback
-              // completion below deliver it instead of terminating on an
-              // error-only frame.
-              if (!isVisionRequest || !visionFallbackAnswer) {
-                controller.enqueue(eventFrame({ type: "error", message: event.error }, encoder));
-              }
               break;
             }
           }
@@ -1720,6 +1776,19 @@ function streamChatResponse(
           if (isVisionRequest && visionFallbackAnswer && finishDirectVision) {
             finishDirectVision(visionFallbackAnswer);
             return;
+          }
+          const secondaryResult = await deepSeekChatResult(
+            enrichment,
+            message,
+            casualMessage,
+            history,
+            attachment,
+            isVisionRequest,
+          );
+          if (secondaryResult) {
+            controller.enqueue(eventFrame({ type: "done", ...compactVoiceCallResult(secondaryResult, voiceCall) }, encoder));
+          } else {
+            controller.enqueue(eventFrame({ type: "error", message: streamError }, encoder));
           }
           closeController();
           return;
@@ -1954,10 +2023,24 @@ export async function POST(request: Request) {
       targetResourceId,
       hasImageAttachment && Boolean(files?.length),
       voiceCall,
+      body.history ?? [],
     );
   }
 
   const difyReply = await generateDifyReply(difyArgs);
+  if (!difyReply) {
+    const secondaryResult = await deepSeekChatResult(
+      enrichment,
+      message,
+      casualMessage,
+      body.history ?? [],
+      attachmentStatus,
+      hasImageAttachment && Boolean(files?.length),
+    );
+    if (secondaryResult) {
+      return NextResponse.json(compactVoiceCallResult(secondaryResult, voiceCall));
+    }
+  }
   const outputFileSources = mergeDifyOutputFileSources(
     { answer: difyReply?.answer, files: difyReply?.files, metadata: difyReply?.metadata },
     { sameOrigin: request.url, difyApiUrl: apiUrl },

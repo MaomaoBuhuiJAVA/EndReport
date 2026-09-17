@@ -75,6 +75,16 @@ describe("parseAiChatStream", () => {
     ).resolves.toEqual({ reply: "旧协议", provider: "fallback", sources: ["资料"] });
   });
 
+  it("preserves the DeepSeek secondary-provider marker", async () => {
+    await expect(
+      readAiChatResponse(
+        new Response(JSON.stringify({ reply: "二级模型回复", provider: "deepseek" }), {
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    ).resolves.toMatchObject({ reply: "二级模型回复", provider: "deepseek" });
+  });
+
   it("keeps a validated persisted science-poem cover from a JSON response", async () => {
     await expect(
       readAiChatResponse(

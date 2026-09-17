@@ -92,7 +92,7 @@ test("carries card lesson-plan metadata into the existing composer send", () => 
 });
 
 test("does not package an error placeholder as a lesson-plan DOCX", () => {
-  assert.match(component, /reply\.provider === "dify" \|\| reply\.provider === "fallback"/);
+  assert.match(component, /reply\.provider === "dify" \|\| reply\.provider === "deepseek" \|\| reply\.provider === "fallback"/);
   assert.match(component, /活动目标/);
   assert.match(component, /活动准备/);
   assert.match(component, /活动内容/);

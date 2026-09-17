@@ -22,6 +22,8 @@ export type AiChatCoverSync = {
   coverUrl: string;
 };
 
+export type AiChatProvider = "dify" | "deepseek" | "fallback";
+
 const RESPONSE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isResponseId(value: unknown): value is string {
@@ -61,7 +63,7 @@ export type AiChatStreamEvent =
   | { type: "status"; message: string }
   | {
       type: "done";
-      provider: "dify" | "fallback";
+      provider: AiChatProvider;
       reply: string;
       responseId?: string;
       conversationId?: string;
@@ -77,7 +79,7 @@ export type AiChatStreamEvent =
 
 export type AiChatResponse = {
   reply: string;
-  provider?: "dify" | "fallback";
+  provider?: AiChatProvider;
   responseId?: string;
   conversationId?: string;
   photos?: AiChatPhoto[];
@@ -209,7 +211,9 @@ export async function readAiChatResponse(
     const outputFiles = normalizeDifyOutputFiles(payload.files, { sameOrigin: currentSameOrigin() });
     return {
       reply: typeof payload.reply === "string" ? payload.reply : "",
-      ...(payload.provider === "dify" || payload.provider === "fallback" ? { provider: payload.provider } : {}),
+      ...(payload.provider === "dify" || payload.provider === "deepseek" || payload.provider === "fallback"
+        ? { provider: payload.provider }
+        : {}),
       ...(isResponseId(payload.responseId) ? { responseId: payload.responseId } : {}),
       ...(typeof payload.conversationId === "string" && payload.conversationId ? { conversationId: payload.conversationId } : {}),
       ...(Array.isArray(payload.photos) ? { photos: payload.photos as AiChatPhoto[] } : {}),

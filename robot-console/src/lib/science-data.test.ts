@@ -200,6 +200,44 @@ describe("mergeScienceKnowledgeSummaries", () => {
       resources: expect.arrayContaining([cover]),
     });
   });
+
+  it("prefers packaged story media after an external store migration", () => {
+    const packagedVideo = resource("视频资源", "猴子捞月视频", {
+      externalUrl: "https://github.example/releases/story.mp4",
+    });
+    const databaseVideo = resource("视频资源", "猴子捞月视频", {
+      externalUrl: "https://blocked.example/story.mp4",
+    });
+    const packaged = [{
+      ...summary("STORY-video", "猴子捞月"),
+      category: "科学故事" as const,
+      videoUrl: packagedVideo.externalUrl,
+      coverUrl: "/science-story-covers/STORY-video.webp",
+      resources: [packagedVideo],
+      resourceTypes: ["视频资源" as const],
+    }];
+    const database = [{
+      ...summary("STORY-video", "猴子捞月"),
+      category: "科学故事" as const,
+      videoUrl: databaseVideo.externalUrl,
+      coverUrl: "https://blocked.example/cover.webp",
+      resources: [databaseVideo],
+      resourceTypes: ["视频资源" as const],
+    }];
+
+    expect(mergeScienceKnowledgeSummaries(packaged, database)[0]).toMatchObject({
+      videoUrl: packagedVideo.externalUrl,
+      coverUrl: "/science-story-covers/STORY-video.webp",
+      resources: [packagedVideo],
+    });
+  });
+
+  it("does not expose temporary database records named 测试", () => {
+    const packaged = [summary("POEM-real", "正式资源")];
+    const database = [summary("STORY-temp", "测试")];
+
+    expect(mergeScienceKnowledgeSummaries(packaged, database)).toEqual(packaged);
+  });
 });
 
 describe("getScienceKnowledgeSummaries", () => {

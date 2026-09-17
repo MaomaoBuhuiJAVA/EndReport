@@ -329,7 +329,8 @@ export function mergeScienceKnowledgeSummaries(
   packagedItems: ScienceKnowledgeSummary[],
   databaseItems: ScienceKnowledgeSummary[],
 ): ScienceKnowledgeSummary[] {
-  const databaseById = new Map(databaseItems.map((item) => [item.id, item]));
+  const publicDatabaseItems = databaseItems.filter((item) => item.title.trim() !== "测试");
+  const databaseById = new Map(publicDatabaseItems.map((item) => [item.id, item]));
   const packagedIds = new Set(packagedItems.map((item) => item.id));
   const packagedExperimentKeys = new Set(
     packagedItems.map(packagedExperimentKey).filter(Boolean),
@@ -340,7 +341,7 @@ export function mergeScienceKnowledgeSummaries(
       const databaseItem = databaseById.get(item.id);
       return databaseItem ? mergeScienceKnowledgeRecord(item, databaseItem) : item;
     }),
-    ...databaseItems.filter(
+    ...publicDatabaseItems.filter(
       (item) =>
         !packagedIds.has(item.id) && !packagedExperimentKeys.has(packagedExperimentKey(item)),
     ),
@@ -354,12 +355,15 @@ function scienceResourceKey(resource: ScienceResource) {
 function mergeScienceResources(
   packagedResources: ScienceResource[],
   databaseResources: ScienceResource[],
-  preferPackagedExperimentMedia = false,
+  preferPackagedMedia = false,
 ) {
-  const effectiveDatabaseResources = preferPackagedExperimentMedia
-    ? databaseResources.filter(
-        (resource) => resource.type !== "图片资源" && resource.type !== "视频资源",
-      )
+  const packagedMediaTypes = new Set(
+    packagedResources
+      .filter((resource) => resource.type === "图片资源" || resource.type === "视频资源")
+      .map((resource) => resource.type),
+  );
+  const effectiveDatabaseResources = preferPackagedMedia
+    ? databaseResources.filter((resource) => !packagedMediaTypes.has(resource.type))
     : databaseResources;
   const packagedByKey = new Map(
     packagedResources.map((resource) => [scienceResourceKey(resource), resource]),
@@ -389,20 +393,24 @@ function mergeScienceKnowledgeRecord<T extends ScienceKnowledgeSummary>(
   const resources = mergeScienceResources(
     packagedItem.resources,
     databaseItem.resources,
-    packagedItem.category === "科学实验",
+    packagedItem.category === "科学实验" || packagedItem.category === "科学故事",
   );
+  const coverUrl = packagedItem.category === "科学故事"
+    ? packagedItem.coverUrl || databaseItem.coverUrl
+    : databaseItem.coverUrl || packagedItem.coverUrl;
 
   return {
     ...packagedItem,
     ...databaseItem,
     resources,
+    ...(packagedItem.category === "科学故事"
+      ? { videoUrl: packagedItem.videoUrl || databaseItem.videoUrl }
+      : {}),
     resourceTypes: Array.from(new Set(resources.map((resource) => resource.type))),
     // Older database rows predate persisted literature covers. Keep the
     // packaged cover while the database is being refreshed instead of
     // replacing it with an empty value during the merge.
-    ...(databaseItem.coverUrl || packagedItem.coverUrl
-      ? { coverUrl: databaseItem.coverUrl || packagedItem.coverUrl }
-      : {}),
+    ...(coverUrl ? { coverUrl } : {}),
   };
 }
 
