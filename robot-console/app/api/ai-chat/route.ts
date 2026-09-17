@@ -1836,7 +1836,17 @@ function streamChatResponse(
           enrichment.requestedLessonTitle,
           enrichment.unrelatedResourceTitles,
         ) || structuredResultReply(parsedResult) || null;
-        const result = buildChatResult(
+        const secondaryResult = !visibleAnswer && !parsedResult && !outputFiles.length && !coverSync
+          ? await deepSeekChatResult(
+              enrichment,
+              message,
+              casualMessage,
+              history,
+              attachment,
+              isVisionRequest,
+            )
+          : null;
+        const result = secondaryResult ?? buildChatResult(
           enrichment,
           message,
           casualMessage,

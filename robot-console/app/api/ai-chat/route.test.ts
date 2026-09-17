@@ -351,6 +351,41 @@ describe("POST /api/ai-chat", () => {
     ]);
   });
 
+  it("Dify stream with a conversation ID but no answer falls back to DeepSeek", async () => {
+    process.env.DEEPSEEK_API_KEY = "route-test-deepseek-key";
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(openDifyStream).mockResolvedValue(
+      new Response(
+        [
+          'data: {"event":"message_end","conversation_id":"empty-dify-conversation"}',
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+    vi.mocked(generateDeepSeekReply).mockResolvedValue("空流已切换到二级模型。");
+
+    const response = await POST(
+      new Request("http://localhost/api/ai-chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: JSON.stringify({ message: "请介绍科小贝" }),
+      }),
+    );
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      provider: "deepseek",
+      reply: "空流已切换到二级模型。",
+    });
+    expect(events.at(-1)).not.toHaveProperty("conversationId");
+  });
+
   it("多条资料命中仍调用 Dify 并返回资料来源", async () => {
     vi.mocked(searchKnowledge).mockResolvedValue({
       chunks: [chunk("园所简介", "省二级"), chunk("课程", "体验学习")],
