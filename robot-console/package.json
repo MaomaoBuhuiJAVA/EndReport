@@ -15,6 +15,7 @@
     "seed": "node scripts/prepare-assets.mjs && node prisma/seed.mjs",
     "seed:science": "node scripts/seed-science-knowledge.mjs",
     "upload:science-stories": "node scripts/upload-science-story-videos.mjs",
+    "migrate:science-story-videos": "node scripts/migrate-science-story-videos-to-release.mjs",
     "generate:science-story-covers": "node scripts/generate-science-story-covers.mjs",
     "import:science": "node scripts/import-local-science-materials.mjs",
     "import:incoming-science": "node scripts/import-incoming-science-experiments.mjs",

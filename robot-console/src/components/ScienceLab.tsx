@@ -8,6 +8,7 @@ import {
   ArrowRight,
   BookOpen,
   CheckCircle2,
+  CircleAlert,
   Clapperboard,
   ExternalLink,
   FileText,
@@ -17,6 +18,7 @@ import {
   LoaderCircle,
   Plus,
   PlayCircle,
+  RotateCcw,
   Search,
   Sparkles,
   Upload,
@@ -207,6 +209,54 @@ function videoMimeType(value: string) {
     // Invalid URLs are filtered by isDirectVideoUrl before this is used.
   }
   return "video/mp4";
+}
+
+function isWechatVideoRedirect(value: string) {
+  try {
+    return new URL(value).hostname.toLowerCase().endsWith("qr105.cn");
+  } catch {
+    return false;
+  }
+}
+
+function InlineVideoPlayer({ source, poster, label }: { source: string; poster?: string; label: string }) {
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
+  if (failed) {
+    return (
+      <div className="video-resource__error" role="alert">
+        <CircleAlert size={22} aria-hidden="true" />
+        <span>视频存储暂时不可用，请稍后重试。</span>
+        <button
+          type="button"
+          onClick={() => {
+            setFailed(false);
+            setAttempt((current) => current + 1);
+          }}
+        >
+          <RotateCcw size={16} aria-hidden="true" />
+          重新加载
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <video
+      key={attempt}
+      className="video-resource__player"
+      controls
+      playsInline
+      preload="metadata"
+      poster={poster || undefined}
+      aria-label={label}
+      onError={() => setFailed(true)}
+    >
+      <source src={source} type={videoMimeType(source)} />
+      您的浏览器不支持视频播放，请使用下方链接打开。
+    </video>
+  );
 }
 
 function StoryVideoCover({ source, fallback, onError }: { source: string; fallback: string; onError: () => void }) {
@@ -592,23 +642,17 @@ function KnowledgeDetail({
                         <span className="video-resource__label">{videoLabel}</span>
                       ) : null}
                       {isPlayableVideo ? (
-                        <video
-                          className="video-resource__player"
-                          controls
-                          playsInline
-                          preload="metadata"
+                        <InlineVideoPlayer
+                          source={videoUrl ?? ""}
                           poster={videoPoster || undefined}
-                          aria-label={`播放${display.title}的${videoLabel}`}
-                        >
-                          <source src={videoUrl ?? ""} type={videoMimeType(videoUrl ?? "")} />
-                          您的浏览器不支持视频播放，请使用下方链接打开。
-                        </video>
+                          label={`播放${display.title}的${videoLabel}`}
+                        />
                       ) : null}
                       <div className="video-resource__actions">
                         {videoUrl ? (
                           <a className="video-link" href={videoUrl} target="_blank" rel="noreferrer">
                             <PlayCircle size={19} />
-                            {isPlayableVideo ? "播放视频" : "打开视频页面"}
+                            {isPlayableVideo ? "播放视频" : isWechatVideoRedirect(videoUrl) ? "在微信中打开" : "打开视频页面"}
                             <ExternalLink size={15} />
                           </a>
                         ) : null}
