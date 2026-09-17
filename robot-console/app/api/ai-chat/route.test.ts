@@ -13,12 +13,16 @@ vi.mock("@/lib/dify", async () => {
     uploadDifyFile: vi.fn(),
   };
 });
+vi.mock("@/lib/deepseek", () => ({
+  generateDeepSeekReply: vi.fn(),
+}));
 vi.mock("@/lib/science-cover-sync", () => ({
   synchronizeSciencePoetryCover: vi.fn(),
 }));
 
 import { maxDuration, POST } from "./route";
 import { generateDifyReply, openDifyStream, uploadDifyFile } from "@/lib/dify";
+import { generateDeepSeekReply } from "@/lib/deepseek";
 import { synchronizeSciencePoetryCover } from "@/lib/science-cover-sync";
 import { searchKnowledge, wantsPhotoResults } from "@/lib/search";
 
@@ -30,15 +34,62 @@ const signedDownloadUrl = () => expect.stringMatching(/^\/api\/ai-chat\/download
 
 describe("POST /api/ai-chat", () => {
   const previousDifyApiKey = process.env.DIFY_API_KEY;
+  const previousDeepSeekApiKey = process.env.DEEPSEEK_API_KEY;
 
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.DIFY_API_KEY = "route-test-dify-key";
+    delete process.env.DEEPSEEK_API_KEY;
+    vi.mocked(generateDeepSeekReply).mockResolvedValue(null);
   });
 
   afterEach(() => {
     if (previousDifyApiKey === undefined) delete process.env.DIFY_API_KEY;
     else process.env.DIFY_API_KEY = previousDifyApiKey;
+    if (previousDeepSeekApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = previousDeepSeekApiKey;
+  });
+
+  it("uses DeepSeek for a normal text reply when Dify is unavailable", async () => {
+    process.env.DEEPSEEK_API_KEY = "route-test-deepseek-key";
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(generateDifyReply).mockResolvedValue(null);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue("这是二级文字模型的回复。");
+
+    const response = await POST(new Request("http://localhost/api/ai-chat", {
+      method: "POST",
+      body: JSON.stringify({ message: "请回答一个科学问题" }),
+    }));
+
+    await expect(response.json()).resolves.toMatchObject({
+      provider: "deepseek",
+      reply: "这是二级文字模型的回复。",
+    });
+  });
+
+  it("uses DeepSeek when Dify cannot open a text event stream", async () => {
+    process.env.DEEPSEEK_API_KEY = "route-test-deepseek-key";
+    vi.mocked(searchKnowledge).mockResolvedValue({ chunks: [], photos: [] } as never);
+    vi.mocked(wantsPhotoResults).mockReturnValue(false);
+    vi.mocked(openDifyStream).mockResolvedValue(null);
+    vi.mocked(generateDeepSeekReply).mockResolvedValue("流式对话已切换到二级模型。");
+
+    const response = await POST(new Request("http://localhost/api/ai-chat", {
+      method: "POST",
+      headers: { Accept: "text/event-stream" },
+      body: JSON.stringify({ message: "请继续回答" }),
+    }));
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()));
+
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      provider: "deepseek",
+      reply: "流式对话已切换到二级模型。",
+    });
   });
 
   it("给通义图片生成保留足够的服务端执行时间", () => {

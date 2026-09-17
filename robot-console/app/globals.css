@@ -2122,6 +2122,38 @@ img {
   box-shadow: 0 12px 28px rgba(26, 75, 65, 0.12);
 }
 
+.video-resource__error {
+  display: flex;
+  width: 100%;
+  min-height: 150px;
+  aspect-ratio: 16 / 9;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid rgba(153, 55, 37, 0.2);
+  border-radius: 8px;
+  background: #fff5f1;
+  padding: 20px;
+  color: #8b3528;
+  font-size: 14px;
+  text-align: center;
+}
+
+.video-resource__error button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(139, 53, 40, 0.24);
+  border-radius: 6px;
+  background: #fff;
+  padding: 0 12px;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .video-qr-code {
   display: grid;
   width: 144px;

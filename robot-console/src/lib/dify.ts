@@ -55,6 +55,11 @@ type DifyChatResponse = {
 const DEFAULT_DIFY_API_URL = "https://api.dify.ai/v1/chat-messages";
 const DIFY_REQUEST_TIMEOUT_MS = 120_000;
 
+function reportDifyFailure(reason: string, details: Record<string, unknown> = {}) {
+  if (process.env.NODE_ENV === "test") return;
+  console.warn("[ai-chat] Dify unavailable", { reason, ...details });
+}
+
 function requestTimeout(timeoutMs?: number) {
   if (!Number.isFinite(timeoutMs)) return DIFY_REQUEST_TIMEOUT_MS;
   return Math.max(1_000, Math.min(Math.round(timeoutMs as number), DIFY_REQUEST_TIMEOUT_MS));
@@ -161,7 +166,10 @@ export async function generateDifyReply({
   timeoutMs,
   fetchImpl = fetch,
 }: GenerateDifyReplyArgs): Promise<DifyReply | null> {
-  if (!apiKey) return null;
+  if (!apiKey || apiKey.trim() === "[SENSITIVE]") {
+    reportDifyFailure("missing_api_key");
+    return null;
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), requestTimeout(timeoutMs));
@@ -180,13 +188,19 @@ export async function generateDifyReply({
       body: JSON.stringify(buildChatPayload({ message, user, conversationId, responseMode: "blocking", files })),
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      reportDifyFailure("upstream_status", { status: response.status });
+      return null;
+    }
 
     const data = (await response.json()) as DifyChatResponse;
     const answer = typeof data.answer === "string" ? data.answer.trim() : "";
     // A Tongyi image branch can finish with only a file payload and no text.
     // Preserve that payload so the result parser can render or explain it.
-    if (!answer && data.files === undefined && data.metadata === undefined) return null;
+    if (!answer && data.files === undefined && data.metadata === undefined) {
+      reportDifyFailure("empty_answer");
+      return null;
+    }
 
     const returnedConversationId = data.conversation_id?.trim();
     return {
@@ -195,7 +209,10 @@ export async function generateDifyReply({
       ...(data.metadata !== undefined ? { metadata: data.metadata } : {}),
       ...(data.files !== undefined ? { files: data.files } : {}),
     };
-  } catch {
+  } catch (error) {
+    reportDifyFailure(controller.signal.aborted ? "timeout_or_abort" : "network_error", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
     return null;
   } finally {
     clearTimeout(timeout);
@@ -214,7 +231,10 @@ export async function openDifyStream({
   timeoutMs,
   fetchImpl = fetch,
 }: GenerateDifyReplyArgs): Promise<Response | null> {
-  if (!apiKey) return null;
+  if (!apiKey || apiKey.trim() === "[SENSITIVE]") {
+    reportDifyFailure("missing_api_key");
+    return null;
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), requestTimeout(timeoutMs));
@@ -235,11 +255,18 @@ export async function openDifyStream({
 
     const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
     if (!response.ok || !response.body || !contentType.includes("text/event-stream")) {
+      reportDifyFailure(!response.ok ? "upstream_status" : "invalid_stream", {
+        status: response.status,
+        contentType: contentType.slice(0, 80),
+      });
       void response.body?.cancel().catch(() => undefined);
       return null;
     }
     return response;
-  } catch {
+  } catch (error) {
+    reportDifyFailure(controller.signal.aborted ? "timeout_or_abort" : "network_error", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
     return null;
   } finally {
     clearTimeout(timeout);
