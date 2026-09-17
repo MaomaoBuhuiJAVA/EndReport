@@ -1,11 +1,15 @@
 import { createHmac } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  XFYUN_HYPER_TTS_ENDPOINT,
   XFYUN_TTS_DEFAULT_VOICE,
   XFYUN_TTS_ENDPOINT,
   buildXfyunAuthUrl,
+  buildXfyunHyperTtsPayload,
   buildXfyunPayload,
   getXfyunTtsConfig,
+  isXfyunHyperTtsVoice,
+  parseXfyunHyperTtsMessage,
   parseXfyunTtsMessage,
   synthesizeXfyunSpeech,
 } from "./xfyun-tts";
@@ -21,6 +25,11 @@ const legacyConfig: XfyunTtsConfig = {
   apiKey: "api-key",
   apiSecret: "api-secret",
   voice: XFYUN_TTS_DEFAULT_VOICE,
+};
+const hyperConfig: XfyunTtsConfig = {
+  appId: "app-id",
+  apiPassword: "api-password",
+  voice: "x6_lingyouyou_pro",
 };
 
 describe("讯飞 TTS configuration and protocol", () => {
@@ -72,6 +81,28 @@ describe("讯飞 TTS configuration and protocol", () => {
     expect(payload.data.status).toBe(2);
   });
 
+  it("builds the 24 kHz hyper-realistic protocol for x5/x6 voices", () => {
+    expect(isXfyunHyperTtsVoice("x4_doudou")).toBe(false);
+    expect(isXfyunHyperTtsVoice("x5_lingfeiyi_flow")).toBe(true);
+    expect(isXfyunHyperTtsVoice(hyperConfig.voice)).toBe(true);
+
+    const payload = buildXfyunHyperTtsPayload("你好", hyperConfig);
+    expect(payload).toMatchObject({
+      header: { app_id: "app-id", status: 2 },
+      parameter: {
+        oral: { oral_level: "mid" },
+        tts: {
+          vcn: "x6_lingyouyou_pro",
+          audio: { encoding: "lame", sample_rate: 24000, channels: 1 },
+        },
+      },
+      payload: {
+        text: { encoding: "utf8", format: "plain", status: 2, seq: 0 },
+      },
+    });
+    expect(Buffer.from(payload.payload.text.text, "base64").toString("utf8")).toBe("你好");
+  });
+
   it("parses ordered base64 audio, completion, and sanitized provider errors", () => {
     expect(parseXfyunTtsMessage(JSON.stringify({ code: 0, data: { audio: Buffer.from([1, 2]).toString("base64"), status: 1 } }))).toEqual({
       kind: "audio",
@@ -83,6 +114,22 @@ describe("讯飞 TTS configuration and protocol", () => {
     });
     const failed = parseXfyunTtsMessage(JSON.stringify({ code: 10106, message: "private provider detail" }));
     expect(failed).toEqual({ kind: "error", code: 10106 });
+    expect(JSON.stringify(failed)).not.toContain("private provider detail");
+  });
+
+  it("parses hyper-realistic audio sequence numbers without exposing provider errors", () => {
+    expect(parseXfyunHyperTtsMessage(JSON.stringify({
+      header: { code: 0, status: 1 },
+      payload: { audio: { audio: Buffer.from([1, 2]).toString("base64"), seq: 7, status: 1 } },
+    }))).toEqual({ kind: "audio", audio: Buffer.from([1, 2]), seq: 7 });
+    expect(parseXfyunHyperTtsMessage(JSON.stringify({
+      header: { code: 0, status: 2 },
+      payload: { audio: { audio: Buffer.from([3]).toString("base64"), seq: 8, status: 2 } },
+    }))).toEqual({ kind: "finished", audio: Buffer.from([3]), seq: 8 });
+    const failed = parseXfyunHyperTtsMessage(JSON.stringify({
+      header: { code: 10163, message: "private provider detail" },
+    }));
+    expect(failed).toEqual({ kind: "error", code: 10163 });
     expect(JSON.stringify(failed)).not.toContain("private provider detail");
   });
 });
@@ -130,6 +177,53 @@ describe("synthesizeXfyunSpeech", () => {
       expect.stringContaining("tts-api.xfyun.cn/v2/tts"),
       { headers: { "X-Api-Key": "api-password" } },
     );
+  });
+
+  it("uses the hyper-realistic endpoint and restores out-of-order audio frames", async () => {
+    const { socket, send, close, factory } = socketHarness();
+    const promise = synthesizeXfyunSpeech("你好", {
+      config: hyperConfig,
+      webSocketFactory: factory,
+      timeoutMs: 500,
+    });
+
+    socket.onopen?.();
+    const request = JSON.parse(send.mock.calls[0][0]);
+    expect(request).toMatchObject({
+      header: { app_id: "app-id", status: 2 },
+      parameter: {
+        tts: {
+          vcn: "x6_lingyouyou_pro",
+          audio: { encoding: "lame", sample_rate: 24000 },
+        },
+      },
+    });
+    expect(factory).toHaveBeenCalledWith(
+      XFYUN_HYPER_TTS_ENDPOINT,
+      { headers: { "X-Api-Key": "api-password" } },
+    );
+    socket.onmessage?.({ data: JSON.stringify({ header: { code: 0, status: 0 } }) });
+    socket.onmessage?.({
+      data: JSON.stringify({
+        header: { code: 0, status: 1 },
+        payload: { audio: { audio: Buffer.from([3]).toString("base64"), seq: 2, status: 1 } },
+      }),
+    });
+    socket.onmessage?.({
+      data: JSON.stringify({
+        header: { code: 0, status: 1 },
+        payload: { audio: { audio: Buffer.from([1, 2]).toString("base64"), seq: 1, status: 1 } },
+      }),
+    });
+    socket.onmessage?.({
+      data: JSON.stringify({
+        header: { code: 0, status: 2 },
+        payload: { audio: { audio: Buffer.from([4]).toString("base64"), seq: 3, status: 2 } },
+      }),
+    });
+
+    await expect(promise).resolves.toEqual(Buffer.from([1, 2, 3, 4]));
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it("closes the upstream socket when the caller aborts", async () => {

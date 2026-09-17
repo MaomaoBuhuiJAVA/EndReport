@@ -1,6 +1,8 @@
 import { createHmac } from "node:crypto";
 
 export const XFYUN_TTS_ENDPOINT = "wss://tts-api.xfyun.cn/v2/tts";
+export const XFYUN_HYPER_TTS_ENDPOINT =
+  "wss://cbm01.cn-huabei-1.xf-yun.com/v1/private/mcd9m97e6";
 export const XFYUN_TTS_DEFAULT_VOICE = "x4_doudou";
 
 const MAX_TTS_TEXT_LENGTH = 6000;
@@ -29,9 +31,49 @@ export type XfyunTtsPayload = {
   data: { status: 2; text: string };
 };
 
+export type XfyunHyperTtsPayload = {
+  header: { app_id: string; status: 2 };
+  parameter: {
+    oral: { oral_level: "mid" };
+    tts: {
+      vcn: string;
+      speed: number;
+      volume: number;
+      pitch: number;
+      bgs: number;
+      reg: number;
+      rdn: number;
+      rhy: number;
+      audio: {
+        encoding: "lame";
+        sample_rate: 24000;
+        channels: 1;
+        bit_depth: 16;
+        frame_size: 0;
+      };
+    };
+  };
+  payload: {
+    text: {
+      encoding: "utf8";
+      compress: "raw";
+      format: "plain";
+      status: 2;
+      seq: 0;
+      text: string;
+    };
+  };
+};
+
 export type XfyunTtsFrame =
   | { kind: "audio"; audio: Buffer }
   | { kind: "finished"; audio: Buffer }
+  | { kind: "event"; status?: number }
+  | { kind: "error"; code: number };
+
+export type XfyunHyperTtsFrame =
+  | { kind: "audio"; audio: Buffer; seq: number }
+  | { kind: "finished"; audio: Buffer; seq: number }
   | { kind: "event"; status?: number }
   | { kind: "error"; code: number };
 
@@ -147,6 +189,49 @@ export function buildXfyunPayload(text: string, config: XfyunTtsConfig): XfyunTt
   };
 }
 
+export function isXfyunHyperTtsVoice(voice: string) {
+  return /^x[56]_/u.test(voice.trim());
+}
+
+export function buildXfyunHyperTtsPayload(
+  text: string,
+  config: XfyunTtsConfig,
+): XfyunHyperTtsPayload {
+  return {
+    header: { app_id: config.appId, status: 2 },
+    parameter: {
+      oral: { oral_level: "mid" },
+      tts: {
+        vcn: config.voice,
+        speed: 50,
+        volume: 60,
+        pitch: 50,
+        bgs: 0,
+        reg: 0,
+        rdn: 0,
+        rhy: 0,
+        audio: {
+          encoding: "lame",
+          sample_rate: 24000,
+          channels: 1,
+          bit_depth: 16,
+          frame_size: 0,
+        },
+      },
+    },
+    payload: {
+      text: {
+        encoding: "utf8",
+        compress: "raw",
+        format: "plain",
+        status: 2,
+        seq: 0,
+        text: Buffer.from(text, "utf8").toString("base64"),
+      },
+    },
+  };
+}
+
 function asBuffer(value: unknown): Buffer {
   if (Buffer.isBuffer(value)) return value;
   if (value instanceof ArrayBuffer) return Buffer.from(value);
@@ -193,6 +278,45 @@ export function parseXfyunTtsMessage(value: unknown): XfyunTtsFrame {
   return { kind: "event", status };
 }
 
+export function parseXfyunHyperTtsMessage(value: unknown): XfyunHyperTtsFrame {
+  const message = asMessageObject(value);
+  const header = message.header;
+  if (!header || typeof header !== "object") throw new XfyunTtsError("protocol");
+  const headerRecord = header as Record<string, unknown>;
+  const code = headerRecord.code;
+  if (typeof code !== "number") throw new XfyunTtsError("protocol");
+  if (code !== 0) return { kind: "error", code };
+
+  const payload = message.payload;
+  const audio = payload && typeof payload === "object"
+    ? (payload as Record<string, unknown>).audio
+    : undefined;
+  if (!audio || typeof audio !== "object") {
+    const status = typeof headerRecord.status === "number" ? headerRecord.status : undefined;
+    return { kind: "event", status };
+  }
+
+  const audioRecord = audio as Record<string, unknown>;
+  const status = audioRecord.status;
+  const seq = audioRecord.seq;
+  if (typeof status !== "number" || typeof seq !== "number") {
+    throw new XfyunTtsError("protocol");
+  }
+  const encodedAudio = typeof audioRecord.audio === "string" ? audioRecord.audio : "";
+  let decodedAudio = Buffer.alloc(0);
+  if (encodedAudio) {
+    try {
+      decodedAudio = Buffer.from(encodedAudio, "base64");
+    } catch {
+      throw new XfyunTtsError("protocol");
+    }
+  }
+
+  if (status === 2) return { kind: "finished", audio: decodedAudio, seq };
+  if (decodedAudio.length) return { kind: "audio", audio: decodedAudio, seq };
+  return { kind: "event", status };
+}
+
 export function concatXfyunAudioChunks(chunks: readonly Uint8Array[]): Buffer {
   const total = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
   if (total > MAX_TTS_AUDIO_BYTES) throw new XfyunTtsError("protocol");
@@ -229,7 +353,9 @@ export async function synthesizeXfyunSpeech(
   const config = options.config ?? getXfyunTtsConfig();
   if (!config) throw new XfyunTtsError("configuration");
 
-  const endpoint = options.endpoint ?? XFYUN_TTS_ENDPOINT;
+  // X5/X6 voices use Xunfei's separate hyper-realistic protocol and payload shape.
+  const hyperTts = isXfyunHyperTtsVoice(config.voice);
+  const endpoint = options.endpoint ?? (hyperTts ? XFYUN_HYPER_TTS_ENDPOINT : XFYUN_TTS_ENDPOINT);
   const factory = options.webSocketFactory ?? defaultWebSocketFactory;
   const authUrl = config.apiPassword
     ? endpoint
@@ -246,6 +372,7 @@ export async function synthesizeXfyunSpeech(
 
   socket.binaryType = "arraybuffer";
   const chunks: Buffer[] = [];
+  const orderedChunks = new Map<number, Buffer>();
   const timeoutMs = options.timeoutMs ?? 15000;
 
   return new Promise<Buffer>((resolve, reject) => {
@@ -274,14 +401,23 @@ export async function synthesizeXfyunSpeech(
       reject(error);
     }
 
-    function succeed(lastAudio: Buffer) {
+    function succeed(lastAudio: Buffer, seq?: number) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       removeAbortListener();
-      if (lastAudio.length) chunks.push(lastAudio);
+      if (hyperTts && seq !== undefined) {
+        if (lastAudio.length) orderedChunks.set(seq, lastAudio);
+      } else if (lastAudio.length) {
+        chunks.push(lastAudio);
+      }
       try {
-        resolve(concatXfyunAudioChunks(chunks));
+        const audioChunks = hyperTts
+          ? [...orderedChunks.entries()]
+              .sort(([leftSeq], [rightSeq]) => leftSeq - rightSeq)
+              .map(([, chunk]) => chunk)
+          : chunks;
+        resolve(concatXfyunAudioChunks(audioChunks));
       } catch (error) {
         reject(error instanceof XfyunTtsError ? error : new XfyunTtsError("protocol"));
       } finally {
@@ -295,6 +431,13 @@ export async function synthesizeXfyunSpeech(
 
     function handleMessage(value: unknown) {
       try {
+        if (hyperTts) {
+          const frame = parseXfyunHyperTtsMessage(value);
+          if (frame.kind === "audio") orderedChunks.set(frame.seq, frame.audio);
+          else if (frame.kind === "finished") succeed(frame.audio, frame.seq);
+          else if (frame.kind === "error") fail(new XfyunTtsError("upstream"));
+          return;
+        }
         const frame = parseXfyunTtsMessage(value);
         if (frame.kind === "audio") chunks.push(frame.audio);
         else if (frame.kind === "finished") succeed(frame.audio);
@@ -307,7 +450,10 @@ export async function synthesizeXfyunSpeech(
     abortSignal?.addEventListener("abort", handleAbort, { once: true });
     socket.onopen = () => {
       try {
-        socket.send(JSON.stringify(buildXfyunPayload(normalizedText, config)));
+        const payload = hyperTts
+          ? buildXfyunHyperTtsPayload(normalizedText, config)
+          : buildXfyunPayload(normalizedText, config);
+        socket.send(JSON.stringify(payload));
       } catch {
         fail(new XfyunTtsError("upstream"));
       }
