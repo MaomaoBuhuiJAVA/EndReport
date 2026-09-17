@@ -57,7 +57,7 @@ const ATTACHMENT_TYPE_MISMATCH_MESSAGE = "附件类型与文件扩展名不一�
 // a short text reply. Vision workflows commonly spend over 45 seconds on
 // upload/analysis before their first answer, so attachments get a longer
 // budget and periodic SSE progress frames keep the browser connection alive.
-const FAST_DIFY_STREAM_TIMEOUT_MS = 4_500;
+const FAST_DIFY_STREAM_TIMEOUT_MS = 30_000;
 const VOICE_CALL_DIFY_STREAM_TIMEOUT_MS = 12_000;
 // A lesson-plan Chatflow usually waits for the document-generation node before
 // emitting its first SSE message.  In production that first message has taken

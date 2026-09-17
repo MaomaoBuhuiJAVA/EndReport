@@ -307,6 +307,9 @@ describe("POST /api/ai-chat", () => {
     );
 
     expect(response.headers.get("content-type")).toContain("text/event-stream");
+    expect(openDifyStream).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 30_000 }),
+    );
     const events = (await response.text())
       .split("\n")
       .filter((line) => line.startsWith("data:"))
