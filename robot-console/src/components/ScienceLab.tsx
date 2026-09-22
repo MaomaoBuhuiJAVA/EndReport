@@ -57,6 +57,7 @@ import {
   experimentImageRole,
   orderedExperimentImages,
 } from "@/lib/science-step-images";
+import { scienceVideoPlaybackUrl } from "@/lib/science-video";
 
 const labNavItems: GooeyNavItem[] = [
   { key: "overview", label: "科小贝首页", href: "/" },
@@ -192,7 +193,7 @@ function dynamicLiteratureCover(item: ScienceKnowledgeSummary) {
 
 function isDirectVideoUrl(value: string) {
   try {
-    const url = new URL(value);
+    const url = new URL(value, "https://local.invalid");
     return /\.(?:mp4|webm|mov|m4v)(?:$|[?#])/iu.test(url.pathname);
   } catch {
     return false;
@@ -201,7 +202,7 @@ function isDirectVideoUrl(value: string) {
 
 function videoMimeType(value: string) {
   try {
-    const pathname = new URL(value).pathname.toLowerCase();
+    const pathname = new URL(value, "https://local.invalid").pathname.toLowerCase();
     if (pathname.endsWith(".webm")) return "video/webm";
     if (pathname.endsWith(".mov")) return "video/quicktime";
     if (pathname.endsWith(".m4v")) return "video/x-m4v";
@@ -318,7 +319,7 @@ function KnowledgeCard({
   const mediaVariant = item.category === "科学诗" ? "poetry" : item.category === "科学故事" ? "story" : "experiment";
   const storyCover = scienceStoryCoverPath(item);
   const poemCover = sciencePoemCoverPath(item);
-  const storyVideoUrl = item.videoUrl ?? "";
+  const storyVideoUrl = scienceVideoPlaybackUrl(item.videoUrl ?? "");
   const storyCoverFailed = Boolean(storyCover && failedStoryCover === storyCover);
   const poemCoverFailed = Boolean(poemCover && failedPoemCover === poemCover);
   const [useStoryVideoCover, setUseStoryVideoCover] = useState(false);
@@ -620,8 +621,9 @@ function KnowledgeDetail({
               <div className="video-resource__items">
                 {videoResources.map((videoResource, index) => {
                   const videoLabel = `视频资源 ${index + 1}`;
-                  const videoUrl =
-                    videoResource.externalUrl || (index === 0 ? item?.videoUrl : "");
+                  const videoUrl = scienceVideoPlaybackUrl(
+                    videoResource.externalUrl || (index === 0 ? item?.videoUrl ?? "" : ""),
+                  );
                   const isPlayableVideo = Boolean(videoUrl && isDirectVideoUrl(videoUrl));
                   const qrContent = videoResource.publicPath ? (
                     <>
