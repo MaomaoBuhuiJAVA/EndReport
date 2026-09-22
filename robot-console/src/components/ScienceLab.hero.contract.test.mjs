@@ -99,7 +99,7 @@ test("embeds public video resources for direct playback in the detail dialog", (
   assert.match(component, /poster=\{videoPoster \|\| undefined\}/);
   assert.match(component, /const videoPoster =\s*[\s\S]*display\.coverUrl/);
   assert.match(component, /function videoMimeType\(value: string\)/);
-  assert.match(component, /<source[\s\S]*src=\{source\}[\s\S]*type=\{videoMimeType\(source\)\}/);
+  assert.match(component, /<source[\s\S]*src=\{playbackSource\}[\s\S]*type=\{videoMimeType\(playbackSource\)\}/);
   assert.match(component, /className="video-resource__player"/);
   assert.match(styles, /\.video-resource__player\s*\{/);
 });
@@ -175,7 +175,9 @@ test("only embeds direct video URLs and keeps QR redirects as links", () => {
   assert.match(component, /const isPlayableVideo = Boolean\(videoUrl && isDirectVideoUrl\(videoUrl\)\)/);
   assert.match(component, /function InlineVideoPlayer\([\s\S]*?<video/);
   assert.match(component, /\{isPlayableVideo \? \([\s\S]*?<InlineVideoPlayer/);
-  assert.match(component, /onError=\{\(\) => setFailed\(true\)\}/);
+  assert.match(component, /const fallbackSource = scienceVideoPlaybackUrl\(source\)/);
+  assert.match(component, /if \(!useFallback && fallbackSource !== source\)[\s\S]*?setUseFallback\(true\)/);
+  assert.match(component, /setFailed\(true\)/);
   assert.match(component, /\{videoUrl \? \([\s\S]*?className="video-link"/);
   assert.match(component, /isWechatVideoRedirect\(videoUrl\) \? "在微信中打开"/);
 });

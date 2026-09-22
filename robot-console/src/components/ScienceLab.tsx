@@ -222,7 +222,10 @@ function isWechatVideoRedirect(value: string) {
 
 function InlineVideoPlayer({ source, poster, label }: { source: string; poster?: string; label: string }) {
   const [failed, setFailed] = useState(false);
+  const [useFallback, setUseFallback] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const fallbackSource = scienceVideoPlaybackUrl(source);
+  const playbackSource = useFallback ? fallbackSource : source;
 
   if (failed) {
     return (
@@ -233,6 +236,7 @@ function InlineVideoPlayer({ source, poster, label }: { source: string; poster?:
           type="button"
           onClick={() => {
             setFailed(false);
+            setUseFallback(false);
             setAttempt((current) => current + 1);
           }}
         >
@@ -245,16 +249,22 @@ function InlineVideoPlayer({ source, poster, label }: { source: string; poster?:
 
   return (
     <video
-      key={attempt}
+      key={`${attempt}:${playbackSource}`}
       className="video-resource__player"
       controls
       playsInline
       preload="metadata"
       poster={poster || undefined}
       aria-label={label}
-      onError={() => setFailed(true)}
+      onError={() => {
+        if (!useFallback && fallbackSource !== source) {
+          setUseFallback(true);
+          return;
+        }
+        setFailed(true);
+      }}
     >
-      <source src={source} type={videoMimeType(source)} />
+      <source src={playbackSource} type={videoMimeType(playbackSource)} />
       您的浏览器不支持视频播放，请使用下方链接打开。
     </video>
   );
@@ -621,9 +631,8 @@ function KnowledgeDetail({
               <div className="video-resource__items">
                 {videoResources.map((videoResource, index) => {
                   const videoLabel = `视频资源 ${index + 1}`;
-                  const videoUrl = scienceVideoPlaybackUrl(
-                    videoResource.externalUrl || (index === 0 ? item?.videoUrl ?? "" : ""),
-                  );
+                  const videoUrl =
+                    videoResource.externalUrl || (index === 0 ? item?.videoUrl : "");
                   const isPlayableVideo = Boolean(videoUrl && isDirectVideoUrl(videoUrl));
                   const qrContent = videoResource.publicPath ? (
                     <>
@@ -652,7 +661,7 @@ function KnowledgeDetail({
                       ) : null}
                       <div className="video-resource__actions">
                         {videoUrl ? (
-                          <a className="video-link" href={videoUrl} target="_blank" rel="noreferrer">
+                          <a className="video-link" href={scienceVideoPlaybackUrl(videoUrl)} target="_blank" rel="noreferrer">
                             <PlayCircle size={19} />
                             {isPlayableVideo ? "播放视频" : isWechatVideoRedirect(videoUrl) ? "在微信中打开" : "打开视频页面"}
                             <ExternalLink size={15} />
