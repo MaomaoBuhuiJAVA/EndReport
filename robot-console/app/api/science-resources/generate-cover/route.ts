@@ -1,14 +1,12 @@
 import { NextResponse } from "next/server";
 import { checkPublicRateLimit } from "@/lib/public-rate-limit";
-import { generateDifyReply } from "@/lib/dify";
-import { mergeDifyOutputFileSources, normalizeDifyOutputFiles } from "@/lib/ai-chat-files";
-import { parseAgentResult } from "@/lib/agent-result";
-import { persistScienceCoverImage, persistSciencePoetryCoverUrl } from "@/lib/science-cover-sync";
+import { persistScienceCoverImage, persistScienceCoverUrl, persistSciencePoetryCoverUrl } from "@/lib/science-cover-sync";
+import { generateTeachingImage } from "@/lib/native-workflow/images";
+import { ModelUnavailableError } from "@/lib/native-workflow/model";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const PUBLIC_COVER_USER = "science-resource-public-cover";
 
 function fallbackCover(category: string) {
   return category === "科学故事" ? "/lab-category-buttons/story.png" : "/lab-category-buttons/poetry.png";
@@ -27,6 +25,7 @@ export async function POST(request: Request) {
   };
   try {
     body = (await request.json()) as typeof body;
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Invalid request body");
   } catch {
     return NextResponse.json({ error: "请求格式无效" }, { status: 400 });
   }
@@ -48,57 +47,29 @@ export async function POST(request: Request) {
     "请让最终回复包含生成的图片文件，不要只给文字描述。",
   ].filter(Boolean).join("\n");
 
-  const apiKey = process.env.DIFY_API_KEY?.trim();
-  if (!apiKey) {
-    return NextResponse.json({ error: "封面生成服务尚未配置", fallbackUrl: fallbackCover(category) }, { status: 503 });
+  let sourceUrl: string;
+  try {
+    sourceUrl = (await generateTeachingImage({prompt, ratio: "1:1", signal: request.signal})).url;
+  } catch (error) {
+    if (request.signal.aborted) throw error;
+    return NextResponse.json({error: error instanceof ModelUnavailableError ? error.message : "封面生成暂时失败，请稍后重试", fallbackUrl: fallbackCover(category)}, {status: 503});
   }
 
-  const reply = await generateDifyReply({
-    apiKey,
-    apiUrl: process.env.DIFY_API_URL,
-    message: prompt,
-    user: PUBLIC_COVER_USER,
-  });
-  if (!reply) {
-    return NextResponse.json({ error: "封面生成暂时失败，请稍后重试", fallbackUrl: fallbackCover(category) }, { status: 503 });
-  }
-
-  const sources = mergeDifyOutputFileSources(
-    { answer: reply.answer, files: reply.files, metadata: reply.metadata },
-    { sameOrigin: request.url, difyApiUrl: process.env.DIFY_API_URL },
-  );
-  const file = normalizeDifyOutputFiles(sources, {
-    sameOrigin: request.url,
-    difyApiUrl: process.env.DIFY_API_URL,
-  }).find((candidate) => candidate.type === "image");
-  const parsedResult = parseAgentResult({
-    text: reply.answer,
-    query: prompt,
-    metadata: reply.metadata,
-    files: sources,
-    sameOrigin: request.url,
-    difyApiUrl: process.env.DIFY_API_URL,
-  });
-  const parsedCoverUrl = parsedResult?.kind === "poetry_cover" ? parsedResult.cover_url : "";
-  const sourceUrl = file?.url || parsedCoverUrl;
-  if (!sourceUrl) {
-    return NextResponse.json({ error: "封面生成完成但没有返回图片", fallbackUrl: fallbackCover(category) }, { status: 502 });
-  }
-
-  const persistedCoverUrl = await persistScienceCoverImage(sourceUrl, title, {
-    difyApiUrl: process.env.DIFY_API_URL,
-    difyApiKey: apiKey,
-  });
-  const generatedCoverUrl = persistedCoverUrl || sourceUrl;
-  const synced = itemId
-    ? await persistSciencePoetryCoverUrl(itemId, generatedCoverUrl).catch(() => null)
+  const persistedCoverUrl = itemId ? await persistScienceCoverImage(sourceUrl, title) : null;
+  const synced = itemId && persistedCoverUrl
+    ? await (category === "科学诗"
+      ? persistSciencePoetryCoverUrl(itemId, persistedCoverUrl)
+      : persistScienceCoverUrl(itemId, persistedCoverUrl, category)).catch(() => null)
     : null;
+  // Private OSS paths need a durable database reference before the media route
+  // can serve them. Preserve the actual provider image if that write fails.
+  const usableStoredUrl = synced ? persistedCoverUrl : null;
   return NextResponse.json({
-    coverUrl: synced?.coverUrl || generatedCoverUrl,
-    persisted: Boolean(persistedCoverUrl),
+    coverUrl: synced?.coverUrl || usableStoredUrl || sourceUrl,
+    persisted: Boolean(usableStoredUrl),
     synced: Boolean(synced),
     ...(synced ? { itemId: synced.itemId } : {}),
     title,
     category,
-  });
+  }, {headers: {"Cache-Control": "no-store"}});
 }

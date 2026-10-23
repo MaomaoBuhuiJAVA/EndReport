@@ -1,3 +1,5 @@
+import { isGeneratedImageUrl } from "./generated-image-url";
+
 export type AiChatOutputFileType = "image" | "document";
 
 export type AiChatOutputFile = {
@@ -7,9 +9,8 @@ export type AiChatOutputFile = {
   url: string;
 };
 
-export type NormalizeDifyOutputFilesOptions = {
+export type NormalizeAiChatOutputFilesOptions = {
   sameOrigin?: string;
-  difyApiUrl?: string;
 };
 
 type OutputFileFormat = {
@@ -58,11 +59,7 @@ function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function isDifyHost(hostname: string) {
-  return hostname === "dify.ai" || hostname.endsWith(".dify.ai") || hostname === "udify.app" || hostname.endsWith(".udify.app");
-}
-
-function trustedUrl(value: unknown, { sameOrigin, difyApiUrl }: NormalizeDifyOutputFilesOptions): string | null {
+function trustedUrl(value: unknown, { sameOrigin }: NormalizeAiChatOutputFilesOptions): string | null {
   const raw = stringValue(value);
   if (!raw) return null;
 
@@ -83,16 +80,9 @@ function trustedUrl(value: unknown, { sameOrigin, difyApiUrl }: NormalizeDifyOut
   }
   if (url.username || url.password) return null;
   if (sameOriginUrl && url.origin === sameOriginUrl.origin) return url.toString();
+  if (isGeneratedImageUrl(url)) return url.toString();
   if (url.protocol !== "https:") return null;
-  if (isDifyHost(url.hostname)) return url.toString();
 
-  if (difyApiUrl) {
-    try {
-      if (url.origin === new URL(difyApiUrl).origin) return url.toString();
-    } catch {
-      return null;
-    }
-  }
   return null;
 }
 
@@ -233,7 +223,7 @@ function metadataFileSources(metadata: unknown): unknown[] {
   return sources;
 }
 
-function markdownDocumentFileCandidates(answer: unknown, options: NormalizeDifyOutputFilesOptions): Record<string, unknown>[] {
+function markdownDocumentFileCandidates(answer: unknown, options: NormalizeAiChatOutputFilesOptions): Record<string, unknown>[] {
   if (typeof answer !== "string") return [];
 
   const candidates: Record<string, unknown>[] = [];
@@ -246,7 +236,7 @@ function markdownDocumentFileCandidates(answer: unknown, options: NormalizeDifyO
   return candidates;
 }
 
-export function mergeDifyOutputFileSources(
+export function mergeAiChatOutputFileSources(
   {
     answer,
     files,
@@ -256,7 +246,7 @@ export function mergeDifyOutputFileSources(
     files?: unknown;
     metadata?: unknown;
   },
-  options: NormalizeDifyOutputFilesOptions = {},
+  options: NormalizeAiChatOutputFilesOptions = {},
 ): unknown[] {
   const merged: unknown[] = [];
   const seenTrustedUrls = new Set<string>();
@@ -281,12 +271,12 @@ export function mergeDifyOutputFileSources(
 }
 
 /**
- * Converts Dify's loosely-shaped file payload into the small, safe contract
+ * Converts a generated-file payload into the small, safe contract
  * shared by the route handler and chat client.
  */
-export function normalizeDifyOutputFiles(
+export function normalizeAiChatOutputFiles(
   files: unknown,
-  options: NormalizeDifyOutputFilesOptions = {},
+  options: NormalizeAiChatOutputFilesOptions = {},
 ): AiChatOutputFile[] {
   const normalized: AiChatOutputFile[] = [];
   const seenUrls = new Set<string>();
@@ -323,15 +313,15 @@ export function normalizeDifyOutputFiles(
  * exposed through the signed local download control. Images and unrelated
  * resource links remain unchanged.
  */
-export function sanitizeDifyOutputDocumentLinks(
+export function sanitizeAiChatOutputDocumentLinks(
   answer: unknown,
   files: unknown,
-  options: NormalizeDifyOutputFilesOptions = {},
+  options: NormalizeAiChatOutputFilesOptions = {},
 ) {
   if (typeof answer !== "string" || !answer || !files) return typeof answer === "string" ? answer : "";
 
   const documentUrls = new Set(
-    normalizeDifyOutputFiles(files, options)
+    normalizeAiChatOutputFiles(files, options)
       .filter((file) => file.type === "document")
       .map((file) => file.url),
   );

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/auth", () => ({
   getSessionUser: vi.fn(),
+  getFreshSessionUser: vi.fn(),
   getPublicActor: vi.fn().mockResolvedValue({ id: "public-participant", email: "public@example.com", name: "参与者", role: "USER" }),
 }));
 
@@ -14,13 +15,11 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-vi.mock("@vercel/blob", () => ({
-  put: vi.fn(),
-}));
+vi.mock("@/lib/oss-upload", () => ({ persistOssUpload: vi.fn() }));
 
-import { getSessionUser } from "@/lib/auth";
+import { getFreshSessionUser, getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { put } from "@vercel/blob";
+import { persistOssUpload } from "@/lib/oss-upload";
 import { GET, POST } from "./route";
 
 const student = { id: "student-1", email: "student@example.com", name: "小朋友", role: "USER" as const };
@@ -36,15 +35,16 @@ describe("student work collection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getSessionUser).mockResolvedValue(student);
+    vi.mocked(getFreshSessionUser).mockResolvedValue({ ...student, role: "ADMIN" });
   });
 
-  it("creates an immediately public work without an account gate", async () => {
-    vi.mocked(put).mockResolvedValue({ url: "https://blob.example/work.png" } as never);
+  it("keeps an authorized administrator submission pending and internal until review", async () => {
+    vi.mocked(persistOssUpload).mockResolvedValue({ url: "/api/media/uploads/student-works/student-1/work.png" } as never);
     vi.mocked(prisma.studentWork.create).mockResolvedValue({
       id: "work-1",
       title: "纸片桥",
       description: "观察承重变化",
-      mediaUrl: "https://blob.example/work.png",
+      mediaUrl: "/api/media/uploads/student-works/student-1/work.png",
       status: "PENDING",
       visibility: "TEACHER_ONLY",
       ownerId: student.id,
@@ -58,15 +58,49 @@ describe("student work collection", () => {
 
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toMatchObject({ work: { id: "work-1" } });
-    expect(put).toHaveBeenCalledWith(expect.stringContaining("student-works/"), expect.any(File), expect.objectContaining({ access: "public", contentType: "image/png" }));
+    expect(persistOssUpload).toHaveBeenCalledWith(expect.any(File), {folder: `student-works/${student.id}`, maxBytes: 20 * 1024 * 1024});
     expect(prisma.studentWork.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         ownerId: student.id,
-        status: "APPROVED",
-        visibility: "PUBLIC",
-        mediaUrl: "https://blob.example/work.png",
+        status: "PENDING",
+        visibility: "TEACHER_ONLY",
+        mediaUrl: "/api/media/uploads/student-works/student-1/work.png",
       }),
     }));
+  });
+
+  it("denies anonymous submissions before reading or storing the upload", async () => {
+    vi.mocked(getFreshSessionUser).mockResolvedValue(null);
+    expect((await POST(uploadRequest({ title: "作品" }))).status).toBe(401);
+    expect(persistOssUpload).not.toHaveBeenCalled();
+    expect(prisma.studentWork.create).not.toHaveBeenCalled();
+  });
+
+  it("denies new ordinary accounts without verified submission permission", async () => {
+    vi.mocked(getFreshSessionUser).mockResolvedValue(student);
+    expect((await POST(uploadRequest({ title: "作品" }))).status).toBe(403);
+    expect(persistOssUpload).not.toHaveBeenCalled();
+    expect(prisma.studentWork.create).not.toHaveBeenCalled();
+  });
+
+  it("fails closed if the current database permission cannot be checked", async () => {
+    vi.mocked(getFreshSessionUser).mockRejectedValue(new Error("database disconnected"));
+    expect((await POST(uploadRequest({ title: "作品" }))).status).toBe(503);
+    expect(persistOssUpload).not.toHaveBeenCalled();
+  });
+
+  it.each(["TEACHER", "PARENT"] as const)("allows verified %s submissions but keeps them pending and internal", async (accountType) => {
+    vi.mocked(getFreshSessionUser).mockResolvedValue({ ...student, accountType, identityVerified: true });
+    vi.mocked(prisma.studentWork.create).mockResolvedValue({ id: "verified-work", title: "作品", createdAt: new Date() } as never);
+    vi.mocked(persistOssUpload).mockResolvedValue({ url: "/api/media/uploads/student-works/student-1/work.png" } as never);
+    const response = await POST(uploadRequest({ title: "作品" }, new File(["image"], "work.png", { type: "image/png" })));
+    expect(response.status).toBe(201);
+    expect(prisma.studentWork.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "PENDING", visibility: "TEACHER_ONLY", ownerId: student.id }) }));
+  });
+
+  it.each(["TEACHER", "PARENT"] as const)("denies unverified %s accounts", async (accountType) => {
+    vi.mocked(getFreshSessionUser).mockResolvedValue({ ...student, accountType, identityVerified: false });
+    expect((await POST(uploadRequest({ title: "作品" }))).status).toBe(403);
   });
 
   it("rejects uploads without a file or title", async () => {
@@ -99,7 +133,7 @@ describe("student work collection", () => {
   });
 
   it("returns a generic 503 when persistence fails after upload", async () => {
-    vi.mocked(put).mockResolvedValue({ url: "https://blob.example/work.png" } as never);
+    vi.mocked(persistOssUpload).mockResolvedValue({ url: "/api/media/uploads/student-works/student-1/work.png" } as never);
     vi.mocked(prisma.studentWork.create).mockRejectedValue(new Error("P2021 table does not exist"));
 
     const response = await POST(uploadRequest(

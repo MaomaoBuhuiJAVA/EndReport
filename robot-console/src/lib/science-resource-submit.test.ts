@@ -60,4 +60,21 @@ describe("science resource submission validation", () => {
     expect(ids.id).toMatch(/^POEM-[a-f0-9]{12}$/);
     expect(ids.baseId).toMatch(/^BASE-[a-f0-9]{12}$/);
   });
+
+  it.each([
+    "/api/media/uploads/student-works/parent/photo.png",
+    "https://site.example/api/media/uploads/student-works/parent/%E4%BD%9C%E5%93%81.png",
+    "/api/media/migrated/private/student-works/parent/photo.png",
+    "/api/media/uploads/student%2Dworks/parent/photo.png",
+  ])("does not accept a private student-work URL into the public catalogue (%s)", (url) => {
+    expect(publicResourceUrl(url)).toBe("");
+  });
+
+  it.each(["videoUrl", "coverUrl", "documentUrl", "supportingUrl"])("rejects a student-work reference in %s", (field) => {
+    const result = validateScienceResourceSubmit({
+      category: "科学诗", title: "风的旅行", ageLabel: "中班", topic: "风", body: "风吹树叶。",
+      [field]: "/api/media/uploads/student-works/parent/photo.png",
+    });
+    expect(result.ok).toBe(false);
+  });
 });

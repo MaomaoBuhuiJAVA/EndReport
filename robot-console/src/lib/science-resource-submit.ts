@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isStudentWorkObjectKey } from "./oss-media";
 
 export const SUBMIT_AGE_GROUPS = ["托班", "小班", "中班", "大班"] as const;
 export const SUBMIT_CATEGORIES = ["科学诗", "科学故事"] as const;
@@ -37,11 +38,12 @@ function text(value: unknown, maxLength: number) {
 export function publicResourceUrl(value: unknown) {
   const candidate = text(value, 2048);
   if (!candidate) return "";
-  if (candidate.startsWith("/")) return candidate;
-
   try {
-    const url = new URL(candidate);
-    return url.protocol === "https:" && !url.username && !url.password ? url.toString() : "";
+    const relative = candidate.startsWith("/");
+    const url = relative ? new URL(candidate, "https://catalog.invalid") : new URL(candidate);
+    const pathname = decodeURIComponent(url.pathname);
+    if (pathname.startsWith("/api/media/") && isStudentWorkObjectKey(pathname.slice("/api/media/".length))) return "";
+    return url.protocol === "https:" && !url.username && !url.password ? (relative ? candidate : url.toString()) : "";
   } catch {
     return "";
   }

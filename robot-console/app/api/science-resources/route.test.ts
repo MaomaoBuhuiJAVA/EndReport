@@ -12,7 +12,7 @@ vi.mock("@/lib/science-data", () => ({
   getScienceKnowledgeSummaries: vi.fn(),
   searchScienceSummaries: vi.fn(),
 }));
-vi.mock("@vercel/blob", () => ({ put: vi.fn() }));
+vi.mock("@/lib/oss-upload", () => ({ persistOssUpload: vi.fn() }));
 
 import { prisma } from "@/lib/prisma";
 import { PATCH, POST } from "./route";

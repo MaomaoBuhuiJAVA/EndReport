@@ -4,16 +4,16 @@ const VOICE_CALL_MAX_REPLY_CHARS = 72;
 export const VOICE_CALL_EMPTY_REPLY = "我在听呢，小朋友，再说一遍吧！";
 export const VOICE_CALL_SERVICE_ERROR = "哎呀，连接慢了一点，我们再试一次吧！";
 
-/**
- * Keeps voice-call replies short and speakable without changing normal chat
- * output. Dify can still return markdown or a long explanation, but a call
- * should answer the current turn in one or two natural sentences.
- */
-export function normalizeVoiceCallReply(value: string): string {
+/** The same prefix-stable text is used for streaming speech and the final reply. */
+export function voiceCallSpeechText(value: string): string {
   const cleaned = value
-    .replace(/<think>[\s\S]*?<\/think>/giu, "")
-    .replace(/```[\s\S]*?```/gu, "")
-    .replace(/[*_`>#-]+/gu, "")
+    .replace(/<think>[\s\S]*?(?:<\/think>|$)/giu, "")
+    .replace(/```[\s\S]*?(?:```|$)/gu, "")
+    .replace(/\[([^\]]+)\]\([^)]*(?:\)|$)/gu, "$1")
+    .replace(/https?:\/\/\S+/gu, "")
+    .replace(/\bhttps?(?::\S*)?$/giu, "")
+    .replace(/[*_`>#\[\]-]+/gu, "")
+    .trimStart()
     // Voice replies are for young listeners: remove formal report labels and
     // soften a few common, adult-facing phrases without changing the science.
     .replace(/^(?:答案|结论|回答|根据资料库|根据园本资料)[：:]\s*/u, "")
@@ -24,14 +24,14 @@ export function normalizeVoiceCallReply(value: string): string {
     .replace(/科学原理/gu, "为什么会这样")
     .replace(/\s+/gu, " ")
     .trim();
-  if (!cleaned) return VOICE_CALL_EMPTY_REPLY;
-  if (cleaned.length <= VOICE_CALL_MAX_REPLY_CHARS) return cleaned;
-
-  const firstSentences = cleaned.match(/^.{8,72}?[。！？!?]/u)?.[0]?.trim();
-  if (firstSentences && firstSentences.length <= VOICE_CALL_MAX_REPLY_CHARS) return firstSentences;
-
+  if (Array.from(cleaned).length <= VOICE_CALL_MAX_REPLY_CHARS) return cleaned;
+  // Never retract a later sentence that has already entered the speech queue.
   const clipped = Array.from(cleaned).slice(0, VOICE_CALL_MAX_REPLY_CHARS - 1).join("").trimEnd();
   return `${clipped}…`;
+}
+
+export function normalizeVoiceCallReply(value: string): string {
+  return voiceCallSpeechText(value) || VOICE_CALL_EMPTY_REPLY;
 }
 
 export const VOICE_CALL_PROMPT =

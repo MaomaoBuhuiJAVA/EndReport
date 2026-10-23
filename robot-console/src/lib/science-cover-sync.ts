@@ -1,6 +1,6 @@
-import { put } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
-import { publicResourceUrl } from "@/lib/science-resource-submit";
+import { isGeneratedImageUrl } from "@/lib/generated-image-url";
+import { createOssClient, mediaObjectKey, mediaRouteUrl } from "@/lib/oss-media";
 
 const MAX_COVER_BYTES = 8 * 1024 * 1024;
 const COVER_CONTENT_TYPES = new Map([
@@ -55,37 +55,16 @@ function safeCoverName(title: string) {
   return title.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]+/gu, "-").slice(0, 80) || "science-cover";
 }
 
-function trustedDifyUrl(value: string, difyApiUrl?: string) {
-  try {
-    const source = new URL(value);
-    const apiOrigin = difyApiUrl ? new URL(difyApiUrl).origin : "";
-    return source.hostname === "dify.ai" ||
-      source.hostname.endsWith(".dify.ai") ||
-      source.hostname === "udify.app" ||
-      source.hostname.endsWith(".udify.app") ||
-      source.origin === apiOrigin;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Copies a generated image into public Blob storage so an expiring upstream
- * Dify file URL never becomes the resource library's permanent cover.
- */
+/** Copies a verified Qwen image into the existing private OSS bucket. */
 export async function persistScienceCoverImage(
   sourceUrl: string,
   title: string,
-  options: { difyApiUrl?: string; difyApiKey?: string } = {},
 ) {
-  const url = publicResourceUrl(sourceUrl);
-  if (!url) return null;
-
-  const headers = options.difyApiKey && trustedDifyUrl(url, options.difyApiUrl)
-    ? { Authorization: `Bearer ${options.difyApiKey}` }
-    : undefined;
   try {
-    const response = await fetch(url, { headers, redirect: "follow" });
+    const url = new URL(sourceUrl);
+    if (!isGeneratedImageUrl(url)) return null;
+    const client = createOssClient();
+    const response = await fetch(url.toString(), {redirect: "error", cache: "no-store", signal: AbortSignal.timeout(30_000)});
     if (!response.ok) return null;
 
     const declaredContentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
@@ -98,12 +77,11 @@ export async function persistScienceCoverImage(
     const format = detectedCoverFormat(new Uint8Array(buffer), declaredContentType);
     if (!format) return null;
 
-    const blob = await put(
-      `science-resource-covers/${safeCoverName(title)}-${crypto.randomUUID()}.${format.extension}`,
-      new Blob([buffer], { type: format.contentType }),
-      { access: "public", contentType: format.contentType, cacheControlMaxAge: 31536000 },
-    );
-    return blob.url;
+    const key = `uploads/science-resource-covers/${safeCoverName(title)}-${crypto.randomUUID()}.${format.extension}`;
+    await client.put(key, Buffer.from(buffer), {
+      headers: {"Content-Type": format.contentType, "x-oss-object-acl": "private", "x-oss-forbid-overwrite": "true"},
+    });
+    return mediaRouteUrl(key);
   } catch {
     return null;
   }
@@ -116,42 +94,51 @@ export async function persistScienceCoverImage(
 export async function synchronizeSciencePoetryCover(
   itemId: string,
   sourceUrl: string,
-  options: { difyApiUrl?: string; difyApiKey?: string } = {},
 ): Promise<SciencePoetryCoverSync | null> {
   const id = itemId.trim().slice(0, 160);
   if (!id) return null;
   const item = await prisma.scienceKnowledgeItem.findUnique({ where: { id } });
   if (!item || item.category !== "科学诗") return null;
 
-  const coverUrl = await persistScienceCoverImage(sourceUrl, item.title, options);
+  const coverUrl = await persistScienceCoverImage(sourceUrl, item.title);
   if (!coverUrl) return null;
 
   return persistSciencePoetryCoverUrl(itemId, coverUrl);
 }
 
 /**
- * Persists an already-public cover URL for a science poem. This is kept
- * separate from image fetching so the public upload flow can complete the
- * same durable update after its async cover-generation request.
+ * Persists the controlled website path returned by server-side OSS storage.
+ * Provider URLs must be copied before any catalogue writeback.
  */
 export async function persistSciencePoetryCoverUrl(
   itemId: string,
   coverUrl: string,
+): Promise<SciencePoetryCoverSync | null> {
+  return persistScienceCoverUrl(itemId, coverUrl, "科学诗");
+}
+
+/** Both catalogue categories use the same durable image delivery and writeback. */
+export async function persistScienceCoverUrl(
+  itemId: string,
+  coverUrl: string,
+  category: "科学诗" | "科学故事",
 ): Promise<SciencePoetryCoverSync | null> {
   const id = itemId.trim().slice(0, 160);
   if (!id) return null;
 
   let normalizedCoverUrl: string;
   try {
-    const parsed = new URL(coverUrl.trim());
-    if (!/^https?:$/u.test(parsed.protocol)) return null;
-    normalizedCoverUrl = parsed.toString();
+    const candidate = coverUrl.trim();
+    if (!candidate.startsWith("/api/media/uploads/science-resource-covers/") || /[?#]/u.test(candidate)) return null;
+    const key = mediaObjectKey(candidate.slice("/api/media/".length).split("/").map(decodeURIComponent));
+    if (!key) return null;
+    normalizedCoverUrl = mediaRouteUrl(key);
   } catch {
     return null;
   }
 
   const item = await prisma.scienceKnowledgeItem.findUnique({ where: { id } });
-  if (!item || item.category !== "科学诗") return null;
+  if (!item || item.category !== category) return null;
 
   await prisma.$transaction(async (tx) => {
     await tx.scienceKnowledgeResource.deleteMany({
@@ -171,7 +158,7 @@ export async function persistSciencePoetryCoverUrl(
         filePath: item.sourceFile,
         publicPath: normalizedCoverUrl,
         externalUrl: normalizedCoverUrl,
-        source: "科小贝智能体生成封面",
+        source: "千问 API 生成封面",
         isPublic: true,
         sortOrder: 0,
       },
