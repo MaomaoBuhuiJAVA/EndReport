@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { isSiteResourceQuery, routeTeachingRequest } from "./routing";
 
 describe("teaching request routing", () => {
+  it("routes a bare science-poem topic to the resource catalogue", () => {
+    expect(routeTeachingRequest({message: "火焰诗"}).task).toBe("resources");
+  });
+
   it("exports a completed parent activity recap without rewriting it", () => {
     const draft = "纸片活动中，幼儿先猜想再尝试。小磁铁由成人保管。";
     const route = routeTeachingRequest({message: "把这份活动回顾导出Word", state: {task: "document_analysis", query: "整理活动记录为家长回顾", draft}});

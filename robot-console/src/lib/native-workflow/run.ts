@@ -116,11 +116,11 @@ export async function runTeachingWorkflow(body:NativeChatBody, options:WorkflowO
     const evidenceQuery=[route.effectiveQuery,visual.slice(0,1500)].filter(Boolean).join("\n");
     const documentOnly = Boolean(route.previousDraft)
       || route.task === "document_analysis" && !/资料库|资源库|园本资料|园所资料|推荐资源/u.test(route.effectiveQuery);
-    const needsResources=!documentOnly && (route.task!=="voice" || /科学诗|科学故事|实验|资源|视频|园所|幼儿园/u.test(message));
+    const needsResources=!documentOnly && (route.task!=="voice" || /科学诗|诗歌|童谣|诗|科学故事|实验|资源|视频|园所|幼儿园/u.test(message));
     const highRiskFireTopic = /明火|火焰|燃烧|点火|着火|蜡烛|酒精灯|丁烷|火灾|用火|火.{0,5}(?:实验|科学|活动|危险|原理)|(?:实验|科学|活动|危险|原理).{0,5}火/u.test(message);
-    const namedResourceLookup = /[《〈「“"][^》〉」”"]+[》〉」”"]/.test(message)
-      && /找|查|检索|搜索|查看|视频|二维码|图片|照片/u.test(message);
-    const skipFireCatalog = highRiskFireTopic && !namedResourceLookup;
+    const firePoemLookup = /科学诗|诗歌|童谣|诗/u.test(message)
+      && !/实验|活动|教案|步骤|操作|点火|灭火|燃烧/u.test(message);
+    const skipFireCatalog = highRiskFireTopic && !firePoemLookup;
     const safeFireDraft = skipFireCatalog ? safeFireActivity(message, body.voiceCall) : undefined;
     const followUpMedia = route.followUp && /视频|二维码|图片|照片|步骤图/u.test(message)
       && !/托班|小班|中班|大班|上册|下册|科学诗|科学故事|科学实验/u.test(message)
@@ -155,7 +155,11 @@ export async function runTeachingWorkflow(body:NativeChatBody, options:WorkflowO
         && /找|查|检索|搜索|推荐|内容|正文|全文|视频|二维码|步骤图|图片|照片/u.test(route.effectiveQuery);
       const explicitLibraryRecommendation = /找|查|检索|搜索|推荐/u.test(route.effectiveQuery)
         && /科学诗|科学故事|科学实验|诗歌|童谣/u.test(route.effectiveQuery);
-      if (followUpMedia || namedResource || explicitLibraryRecommendation) result.reply = evidence.reply;
+      const briefResourceLookup = Array.from(route.effectiveQuery).length <= 18
+        && /科学诗|科学故事|科学实验|诗歌|童谣|诗|故事|实验/u.test(route.effectiveQuery)
+        && !/为什么|原因|原理|怎么形成|是什么/u.test(route.effectiveQuery)
+        && !safeFireDraft;
+      if (followUpMedia || namedResource || explicitLibraryRecommendation || briefResourceLookup) result.reply = evidence.reply;
       else if (safeFireDraft) result.reply = safeFireDraft;
       else result.reply=await completeModel({signal,maxTokens:1200,messages:[
         {role:"system",content:resourceReasoningPrompt},

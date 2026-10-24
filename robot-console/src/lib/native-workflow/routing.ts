@@ -97,6 +97,7 @@ function requestedTask(message: string, effectiveQuery: string, attachmentType?:
   if (attachmentType === "document") return "document_analysis";
   if (requestedFormat(message) || /课件|活动通知|家园共育材料|教研记录|观察表|记录表/u.test(message)) return "document_creation";
   if (/教案|教学设计|设计.*活动|活动设计|活动方案|活动流程|活动目标|教学目标|教师话术/u.test(message)) return "lesson";
+  if (/(?:科学诗|诗歌|童谣|诗)/u.test(message) && !/(?:写|编|创作|生成|改写)/u.test(message)) return "resources";
   if (isSiteResourceQuery(effectiveQuery) || /[《〈「“"][^》〉」”"]+[》〉」”"].*(?:内容|正文|全文|视频|图片|照片|步骤图)/u.test(message)) return "resources";
   if (/找|查|推荐|资源|科学诗|科学故事|科学实验|视频|二维码|步骤图|图片|照片|媒体|资料库|功能室|园所/u.test(message)) return "resources";
   return "chat";

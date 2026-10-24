@@ -1,6 +1,45 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Bodies, Body, Composite, Engine, Events } from "matter-js";
-import { magneticForce } from "./magnet-world";
+import { createMagnetWorld, magneticForce } from "./magnet-world";
+
+it("renders the magnet scene without Canvas blur shadows that form square patches", () => {
+  const blurredShadowValues: number[] = [];
+  let nextFrame: FrameRequestCallback | undefined;
+  const context = new Proxy({}, {
+    get(_target, property) {
+      if (property === "createLinearGradient" || property === "createRadialGradient") return () => ({addColorStop() {}});
+      return () => {};
+    },
+    set(_target, property, value) {
+      if (property === "shadowBlur" && typeof value === "number" && value > 0) blurredShadowValues.push(value);
+      return true;
+    },
+  }) as CanvasRenderingContext2D;
+  const canvas = {
+    width: 420, height: 520, dataset: {},
+    getContext: () => context,
+    getBoundingClientRect: () => ({left: 0, top: 0, width: 420, height: 520, right: 420, bottom: 520, x: 0, y: 0, toJSON() {return {};}}),
+    addEventListener() {}, removeEventListener() {}, focus() {}, hasPointerCapture() {return false;},
+  } as unknown as HTMLCanvasElement;
+  const motion = {matches: true, addEventListener() {}, removeEventListener() {}};
+  vi.stubGlobal("window", {addEventListener() {}, removeEventListener() {}});
+  vi.stubGlobal("document", {hidden: false, addEventListener() {}, removeEventListener() {}});
+  vi.stubGlobal("matchMedia", () => motion);
+  vi.stubGlobal("devicePixelRatio", 1);
+  vi.stubGlobal("ResizeObserver", class {observe() {} disconnect() {}});
+  vi.stubGlobal("Path2D", class {constructor() {}});
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {nextFrame = callback; return 1;});
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+
+  const world = createMagnetWorld(canvas, () => {});
+  try {
+    nextFrame?.(16);
+    expect(blurredShadowValues).toEqual([]);
+  } finally {
+    world.destroy();
+    vi.unstubAllGlobals();
+  }
+});
 
 describe("magnet sandbox physics", () => {
   it("lifts different masses against gravity when the magnet is equally close above them", () => {

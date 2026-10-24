@@ -36,5 +36,12 @@ describe("voice call replies", () => {
     expect(VOICE_CALL_PROMPT).toContain("3—6岁");
     expect(VOICE_CALL_PROMPT).toContain("科学小伙伴");
     expect(VOICE_CALL_PROMPT).toContain("请老师或家长陪同");
+    expect(VOICE_CALL_PROMPT).toContain("资源结果存在时，按真实标题或节选回答");
+    expect(VOICE_CALL_PROMPT).toContain("不要编造诗句或园本资源");
+    expect(VOICE_CALL_PROMPT).toContain("不主动添加用户没有要求的活动建议");
+    expect(VOICE_CALL_PROMPT).toContain("不用魔法、偏好或有意志比喻解释科学现象");
+    expect(VOICE_CALL_PROMPT).toContain("普通知识问题不提资料库或检索过程");
+    expect(VOICE_CALL_PROMPT).toContain("普通磁铁会吸引铁、镍、钴等少数金属");
+    expect(VOICE_CALL_PROMPT).toContain("铝虽然是金属，普通磁铁也吸不住");
   });
 });

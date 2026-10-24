@@ -25,6 +25,10 @@ export function magneticForce(source: Point, target: Point, mass: number) {
 function rounded(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r = 8) {
   ctx.beginPath(); ctx.roundRect(x, y, w, h, r);
 }
+function groundShadow(ctx: CanvasRenderingContext2D, x: number, y: number, radiusX: number, radiusY: number, opacity = 0.1) {
+  ctx.beginPath(); ctx.ellipse(x, y, radiusX, radiusY, 0, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(24,46,67," + opacity + ")"; ctx.fill();
+}
 function ironFill(ctx: CanvasRenderingContext2D) {
   const gradient = ctx.createLinearGradient(-18, -20, 20, 24);
   gradient.addColorStop(0, "#d9e7ec"); gradient.addColorStop(0.45, "#a9c4d1"); gradient.addColorStop(1, "#6f98b1");
@@ -32,31 +36,34 @@ function ironFill(ctx: CanvasRenderingContext2D) {
 }
 function drawPart(ctx: CanvasRenderingContext2D, part: Part, mini = false) {
   ctx.save(); ctx.translate(part.body.position.x, part.body.position.y); ctx.rotate(part.body.angle);
-  if (!mini) { ctx.shadowColor = "#182e4322"; ctx.shadowBlur = 5; ctx.shadowOffsetY = 4; }
+  if (!mini) {
+    const radiusX = part.kind === "wood" ? 24 : part.kind === "brick" ? 21 : part.kind === "can" ? 13 : part.kind === "clip" ? 15 : 10;
+    groundShadow(ctx, 0, 20, radiusX, 3.5, 0.12);
+  }
   ironFill(ctx);
   if (part.kind === "nail") {
     rounded(ctx, -4, -21, 8, 40, 2); ctx.fill(); ctx.stroke(); rounded(ctx, -13, -24, 26, 7, 3); ctx.fill(); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(-4, 18); ctx.lineTo(0, 27); ctx.lineTo(4, 18); ctx.fill(); ctx.stroke();
   } else if (part.kind === "clip") {
-    ctx.shadowBlur = 0; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = "#395b71"; ctx.lineWidth = 6;
+    ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = "#395b71"; ctx.lineWidth = 6;
     const path = new Path2D("M-15 6L8-16C19-26 31-12 20-2L-3 20C-20 36-36 16-21 2L3-21"); ctx.stroke(path);
     ctx.strokeStyle = "#c1d7df"; ctx.lineWidth = 3; ctx.stroke(path);
   } else if (part.kind === "nut") {
     ctx.beginPath(); for (let i=0;i<6;i++) { const a=i*Math.PI/3; const x=Math.cos(a)*20; const y=Math.sin(a)*20; if(i===0)ctx.moveTo(x,y); else ctx.lineTo(x,y); } ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.shadowBlur=0; ctx.beginPath(); ctx.arc(0,0,8,0,Math.PI*2); ctx.fillStyle="#efe8d9"; ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0,0,8,0,Math.PI*2); ctx.fillStyle="#efe8d9"; ctx.fill(); ctx.stroke();
   } else if (part.kind === "washer") {
-    ctx.beginPath(); ctx.arc(0,0,19,0,Math.PI*2); ctx.fill(); ctx.stroke(); ctx.shadowBlur=0; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fillStyle="#efe8d9"; ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0,0,19,0,Math.PI*2); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fillStyle="#efe8d9"; ctx.fill(); ctx.stroke();
   } else if (part.kind === "bolt") {
-    rounded(ctx,-6,-11,12,34,2); ctx.fill(); ctx.stroke(); rounded(ctx,-14,-21,28,13,4); ctx.fill(); ctx.stroke(); ctx.shadowBlur=0;
+    rounded(ctx,-6,-11,12,34,2); ctx.fill(); ctx.stroke(); rounded(ctx,-14,-21,28,13,4); ctx.fill(); ctx.stroke();
     ctx.strokeStyle="#608599"; ctx.lineWidth=2; for(let y=-3;y<22;y+=6){ctx.beginPath();ctx.moveTo(-6,y);ctx.lineTo(6,y-3);ctx.stroke();}
   } else if (part.kind === "wood") {
-    ctx.fillStyle="#d9ae70"; ctx.strokeStyle="#9b7243"; rounded(ctx,-27,-23,54,46,5); ctx.fill(); ctx.stroke(); ctx.shadowBlur=0;
+    ctx.fillStyle="#d9ae70"; ctx.strokeStyle="#9b7243"; rounded(ctx,-27,-23,54,46,5); ctx.fill(); ctx.stroke();
     ctx.strokeStyle="#bd8e54"; ctx.lineWidth=2; ctx.beginPath();ctx.moveTo(-21,-12);ctx.bezierCurveTo(4,-23,-11,6,20,-4);ctx.moveTo(-21,4);ctx.bezierCurveTo(-6,-5,2,21,22,9);ctx.moveTo(-20,17);ctx.lineTo(-1,14);ctx.stroke();
   } else if (part.kind === "brick") {
-    ctx.fillStyle="#efc64b";ctx.strokeStyle="#b99531";rounded(ctx,-25,-17,50,34,5);ctx.fill();ctx.stroke();ctx.shadowBlur=0;
+    ctx.fillStyle="#efc64b";ctx.strokeStyle="#b99531";rounded(ctx,-25,-17,50,34,5);ctx.fill();ctx.stroke();
     for(const x of [-12,12]) {ctx.beginPath();ctx.ellipse(x,-17,8,5,0,0,Math.PI*2);ctx.fillStyle="#f8d969";ctx.fill();ctx.stroke();}
   } else {
-    ctx.fillStyle="#d3d9d4";ctx.strokeStyle="#8b9996";rounded(ctx,-16,-25,32,50,7);ctx.fill();ctx.stroke();ctx.shadowBlur=0;
+    ctx.fillStyle="#d3d9d4";ctx.strokeStyle="#8b9996";rounded(ctx,-16,-25,32,50,7);ctx.fill();ctx.stroke();
     ctx.beginPath();ctx.ellipse(0,-23,14,4,0,0,Math.PI*2);ctx.fillStyle="#e5eae3";ctx.fill();ctx.stroke();ctx.fillStyle="#7ca39c";ctx.fillRect(-14,-9,28,20);ctx.strokeStyle="#a6b2ac";ctx.beginPath();ctx.moveTo(-8,-17);ctx.lineTo(-8,-10);ctx.stroke();
   }
   ctx.restore();
@@ -195,7 +202,7 @@ export function createMagnetWorld(canvas: HTMLCanvasElement, onState: (state: Ma
     // The collecting tray is part of the game board, not a menu or overlay.
     const readyToDeposit=parts.some(p=>p.tether)&&magnet.position.x<=215&&magnet.position.y<=126;
     const trayHighlighted=readyToDeposit||elapsed<trayFlashUntil;
-    ctx.save();ctx.shadowColor="#23475318";ctx.shadowBlur=8;ctx.shadowOffsetY=4;rounded(ctx,22,23,194,94,13);ctx.fillStyle=trayHighlighted?"#e7b487":"#bd9870";ctx.fill();ctx.shadowBlur=0;ctx.lineWidth=1.5;ctx.strokeStyle=trayHighlighted?"#d96b4e":"#92704f";ctx.stroke();
+    ctx.save();rounded(ctx,22,23,194,94,13);ctx.fillStyle=trayHighlighted?"#e7b487":"#bd9870";ctx.fill();ctx.lineWidth=1.5;ctx.strokeStyle=trayHighlighted?"#d96b4e":"#92704f";ctx.stroke();
     rounded(ctx,27,28,184,84,9);const trayFill=ctx.createLinearGradient(0,28,0,112);trayFill.addColorStop(0,"#fffaf0");trayFill.addColorStop(1,"#f2ead8");ctx.fillStyle=trayFill;ctx.fill();ctx.strokeStyle="#e4d5bc";ctx.lineWidth=1;ctx.stroke();
     ctx.fillStyle="#36515a";ctx.font='600 12px "Microsoft YaHei", sans-serif';ctx.fillText(readyToDeposit?"松手，放进盘子":"零件收集盘",37,47);
     const collected=parts.filter(p=>p.collected);for(let i=0;i<5;i++){const x=44+i*34;ctx.beginPath();ctx.arc(x,82,12.5,0,Math.PI*2);ctx.fillStyle="#e3e8df";ctx.fill();ctx.strokeStyle="#c6d0c7";ctx.lineWidth=1.5;ctx.stroke();if(collected[i]){const p=collected[i];const pos=p.body.position;const angle=p.body.angle;p.body.position={x,y:82};p.body.angle=0;ctx.save();ctx.translate(x,82);ctx.scale(.45,.45);ctx.translate(-x,-82);drawPart(ctx,p,true);ctx.restore();p.body.position=pos;p.body.angle=angle;}}
@@ -213,8 +220,9 @@ export function createMagnetWorld(canvas: HTMLCanvasElement, onState: (state: Ma
       const progress=1-(attachedFlashUntil-elapsed)/480;
       ctx.save();ctx.strokeStyle=`rgba(233,101,69,${reduced ? .65 : (1-progress)*.7})`;ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(m.x,m.y+36,reduced?42:36+progress*15,24,0,0,Math.PI*2);ctx.stroke();ctx.restore();
     }
-    ctx.save();ctx.translate(m.x,m.y);ctx.shadowColor="#783e282e";ctx.shadowBlur=14;ctx.shadowOffsetY=7;
-    ctx.beginPath();ctx.moveTo(-24,25);ctx.lineTo(-24,-9);ctx.bezierCurveTo(-24,-43,24,-43,24,-9);ctx.lineTo(24,25);ctx.strokeStyle="#d64f32";ctx.lineWidth=19;ctx.lineCap="butt";ctx.stroke();ctx.shadowBlur=0;
+    groundShadow(ctx,m.x,m.y+34,23,5,0.16);
+    ctx.save();ctx.translate(m.x,m.y);
+    ctx.beginPath();ctx.moveTo(-24,25);ctx.lineTo(-24,-9);ctx.bezierCurveTo(-24,-43,24,-43,24,-9);ctx.lineTo(24,25);ctx.strokeStyle="#d64f32";ctx.lineWidth=19;ctx.lineCap="butt";ctx.stroke();
     ctx.beginPath();ctx.moveTo(-24,12);ctx.lineTo(-24,30);ctx.moveTo(24,12);ctx.lineTo(24,30);ctx.strokeStyle="#e7e7d9";ctx.lineWidth=19;ctx.stroke();
     ctx.beginPath();ctx.moveTo(-27,-16);ctx.bezierCurveTo(-22,-36,17,-37,23,-18);ctx.strokeStyle="#f68c6e";ctx.lineWidth=4;ctx.lineCap="round";ctx.stroke();
     ctx.beginPath();ctx.arc(0,-13,4,0,Math.PI*2);ctx.fillStyle="#f9c091";ctx.fill();ctx.restore();

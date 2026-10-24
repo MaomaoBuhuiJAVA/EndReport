@@ -4,7 +4,7 @@ import { resolveMediaReferences } from "@/lib/media-links";
 
 const compact = (s:string) => s.toLowerCase().replace(/[\s，。！？、；：,.!?;:()[\]{}《》〈〉「」“”‘’"'的]/gu, "");
 const normalize = (s:string) => compact(s).replace(/磁铁|磁性|磁极|吸铁|铁钉/gu,"磁力");
-const intentWords = /龙湾区国科温州第二幼儿园|国科温州第二幼儿园|国科温州二幼|国科二幼|科学诗歌|科学诗|科学故事|科学实验|诗歌|托班|小班|中班|大班|上册|下册|上学期|下学期|全部|所有|完整|步骤图|步骤|配套|相关|对应|图片|照片|视频|二维码|封面|正文|全文|内容|介绍|资源库|媒体库|资料库|库里|库中|资源|资料|推荐|查找|搜索|检索|查看|看看|看一看|适合|关于|有关|帮我|请问|请|给我|想要|里面|哪些|有没有|一首|一个|实验详情|详情|链接|打开|返回|提供|以及|告诉我|说明|在哪里|怎么带幼儿读|朗读建议|朗读节奏|怎么读|带读|本轮要求|刚才|上面|上一条|这个|这份|它们|它的|继续|改成|改为|换成|换为|还有|呢|和|与|及|并|找|给/gu;
+const intentWords = /龙湾区国科温州第二幼儿园|国科温州第二幼儿园|国科温州二幼|国科二幼|科学诗歌|科学诗|科学故事|科学实验|诗歌|诗|托班|小班|中班|大班|上册|下册|上学期|下学期|全部|所有|完整|步骤图|步骤|配套|相关|对应|图片|照片|视频|二维码|封面|正文|全文|内容|介绍|资源库|媒体库|资料库|库里|库中|资源|资料|推荐|查找|搜索|检索|查看|看看|看一看|适合|关于|有关|帮我|请问|请|给我|想要|里面|哪些|有没有|一首|一个|实验详情|详情|链接|打开|返回|提供|以及|告诉我|说明|在哪里|怎么带幼儿读|朗读建议|朗读节奏|怎么读|带读|本轮要求|刚才|上面|上一条|这个|这份|它们|它的|继续|改成|改为|换成|换为|还有|呢|和|与|及|并|找|给/gu;
 
 export function requestsReadingGuidance(query: string) {
   return /怎么(?:带幼儿)?读|带读|朗读(?:建议|节奏|方法)/u.test(query);
@@ -13,7 +13,7 @@ export function requestsReadingGuidance(query: string) {
 /** Hard constraints first, then evidence-bearing title/topic terms. */
 export function selectTeachingResources<T extends ScienceKnowledgeSummary>(items:T[], query:string, limit=5):T[] {
   const q = normalize(query);
-  const category = /科学诗|诗歌|童谣/u.test(query) ? "科学诗" : /故事/u.test(query) ? "科学故事" : /实验/u.test(query) ? "科学实验" : undefined;
+  const category = /科学诗|诗歌|童谣|诗/u.test(query) ? "科学诗" : /故事/u.test(query) ? "科学故事" : /实验/u.test(query) ? "科学实验" : undefined;
   const age = query.match(/托班|小班|中班|大班/u)?.[0];
   const semester = /上册|上学期/u.test(query) ? "上" : /下册|下学期/u.test(query) ? "下" : undefined;
   const quoted = query.match(/主题[：:]\s*[《〈「“"]([^》〉」”"]+)[》〉」”"]/u)?.[1]

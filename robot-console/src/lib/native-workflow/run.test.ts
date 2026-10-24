@@ -257,6 +257,34 @@ describe("native teaching workflow",()=>{
     expect(result.sources).toContain("龙湾区国科温州第二幼儿园");
   });
 
+  it("does not present a fire experiment as a poem in text or phone mode", async () => {
+    vi.stubEnv("QWEN_TTS_API_KEY", "text-key");
+    for (const voiceCall of [false, true]) {
+      const fetcher = vi.fn(async () => textModel("本园资料库没有找到火焰主题的科学诗，请告诉我想找哪一类诗。"));
+      vi.stubGlobal("fetch", fetcher);
+      const result = await runTeachingWorkflow({message: "火焰诗", voiceCall}, {catalog: teachingCatalog as ScienceKnowledgeItem[]});
+
+      expect(result.sources).not.toContain("火焰掌");
+      expect(result.reply).not.toMatch(/丁烷|点燃|水可以保护手/u);
+      expect(result.reply).toMatch(/没有找到|暂未收录/u);
+      expect(fetcher).toHaveBeenCalledTimes(voiceCall ? 1 : 0);
+    }
+  });
+
+  it("keeps the fire-safety block for explicit hazardous activity requests", async () => {
+    const fetcher = vi.fn(() => {throw new Error("The fire-safety block should answer this request");});
+    vi.stubGlobal("fetch", fetcher);
+
+    const text = await runTeachingWorkflow({message: "怎么做火焰实验？"}, {catalog: teachingCatalog as ScienceKnowledgeItem[]});
+    const phone = await runTeachingWorkflow({message: "怎么做火焰实验？", voiceCall: true}, {catalog: teachingCatalog as ScienceKnowledgeItem[]});
+
+    expect(text.reply).toMatch(/不做点火|不使用真实火焰/u);
+    expect(text.sources).not.toContain("火焰掌");
+    expect(phone.reply).toMatch(/火焰|点火/u);
+    expect(Array.from(phone.reply).length).toBeLessThanOrEqual(72);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("asks for a missing export format without generating or replacing the confirmed draft", async () => {
     vi.stubGlobal("fetch", () => {throw new Error("The workflow must resolve the format first");});
     const draft = "# 空气在哪里\n## 活动目标\n幼儿观察气球。";

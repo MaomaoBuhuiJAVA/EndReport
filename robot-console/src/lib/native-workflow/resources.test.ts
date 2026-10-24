@@ -43,6 +43,11 @@ describe("grounded catalog selection",()=>{
     expect(selectTeachingResources(items,"推荐科学诗《火星小汽车》")).toEqual([]);
     expect(selectTeachingResources(items,"小班恐龙科学诗")).toEqual([]);
   });
+  it("treats a bare poem suffix as a category constraint instead of matching a fire experiment", () => {
+    const fireExperiment = fixture("FIRE", "火焰掌", "科学实验", "中班", "中班上册", "化学反应");
+    const magnetPoem = fixture("MAGNET", "磁铁小精灵", "科学诗", "大班", "大班上册", "磁力");
+    expect(selectTeachingResources([fireExperiment, magnetPoem], "火焰诗")).toEqual([]);
+  });
   it("returns only the named experiment and orders all its step images naturally",()=>{
     const found=selectTeachingResources(items,"《会跳舞的纸片》的全部步骤图");
     const evidence=resourceEvidence(found,"《会跳舞的纸片》的全部步骤图");
