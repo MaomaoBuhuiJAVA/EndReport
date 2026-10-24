@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { normalizeTtsText, synthesizeXfyunSpeech } from "@/lib/xfyun-tts";
+import { normalizeTtsText, synthesizeQwenSpeech } from "@/lib/qwen-tts";
 
 export const runtime = "nodejs";
 
@@ -28,10 +28,13 @@ export async function POST(request: Request) {
   if (!text) return invalidTextResponse();
 
   try {
-    const audio = await synthesizeXfyunSpeech(text, { signal: request.signal });
+    const voiceCall = Boolean(body && typeof body === "object" && (body as {voiceCall?: unknown}).voiceCall === true);
+    const audio = await synthesizeQwenSpeech(text, {
+      signal: request.signal, ...(voiceCall ? {timeoutMs: 12000} : {}),
+    });
     return new Response(new Uint8Array(audio), {
       headers: {
-        "Content-Type": "audio/mpeg",
+        "Content-Type": "audio/wav",
         "Cache-Control": "no-store",
       },
     });

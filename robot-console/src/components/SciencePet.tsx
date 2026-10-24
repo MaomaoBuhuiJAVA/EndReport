@@ -21,12 +21,15 @@ import {
   Sparkles,
   ThumbsDown,
   ThumbsUp,
+  Trash2,
   Upload,
   Volume2,
   VolumeX,
   X,
 } from "lucide-react";
-import { GardenSeal } from "@/components/GardenSeal";
+import { BrandLogo } from "@/components/BrandLogo";
+import { KexiaobeiSprite } from "@/components/KexiaobeiSprite";
+import { resolvePetMotionState } from "@/lib/pet-motion";
 import { AgentResultCard } from "@/components/AgentResultCard";
 import {
   readAiChatResponse,
@@ -34,20 +37,26 @@ import {
   type AiChatCoverSync,
   type AiChatStreamEvent,
 } from "@/lib/ai-chat-stream";
-import { buildAiChatDocumentDownloadUrl } from "@/lib/ai-chat-download";
+import { buildAiChatDocumentDownloadUrl, buildAiChatImageDownloadUrl } from "@/lib/ai-chat-download";
 import type { AiChatOutputFile } from "@/lib/ai-chat-files";
 import { buildLessonPlanDocx } from "@/lib/lesson-plan-docx";
 import type { AgentResult } from "@/lib/agent-result";
-import { assistantDisplayText, assistantFallbackText } from "@/lib/assistant-display-text";
-import { createDifyWebUserId } from "@/lib/dify-session";
-import { normalizeVoiceCallReply } from "@/lib/voice-call";
+import { assistantDisplayText, assistantFallbackText, hasVisibleAssistantText } from "@/lib/assistant-display-text";
+import { createWebUserId } from "@/lib/chat-session";
+import { clearChatHistory, readChatHistory, writeChatHistory, type StoredChatMessage } from "@/lib/chat-history";
+import { normalizeVoiceCallReply, voiceCallSpeechText } from "@/lib/voice-call";
+import { createVoiceSpeechQueue } from "@/lib/voice-speech";
+import { createVoiceTranscriptBuffer } from "@/lib/voice-transcript";
+import { playSpeechBatches, playSpeechClip } from "@/lib/speech-batches";
+import type { TeachingWorkflowState } from "@/lib/native-workflow/state";
 import type { ScienceLabLink } from "@/lib/science-lab-links";
 import {
   beginVoiceSession,
   canApplyVoiceSessionResult,
   canRestartListening,
-  extractFinalTranscript,
   invalidateVoiceSession,
+  prepareSpeechAudio,
+  shouldRestartPressAndHoldRecognition,
   stopAudioPlayback,
   transitionCallPhase,
   type VoiceSession,
@@ -123,7 +132,7 @@ type FeedbackRating = "adopted" | "needs_revision" | "not_helpful";
 
 type AssistantReply = {
   text: string;
-  provider?: "dify" | "deepseek" | "fallback";
+  provider?: "native" | "fallback";
   responseId?: string;
   photos?: PetPhoto[];
   labLinks?: ScienceLabLink[];
@@ -193,14 +202,6 @@ type PendingLessonPlanRequest = {
   prompt: string;
   request: LessonPlanRequest;
 };
-
-type PetAnimationState =
-  | "idle"
-  | "running-left"
-  | "running-right"
-  | "waiting"
-  | "moving"
-  | "working";
 
 type WalkDirection = "left" | "right";
 
@@ -280,20 +281,6 @@ const mobilePetBottom = 82;
 const mobileNavigationGap = 12;
 const chatGap = 14;
 const patrolDuration = 2200;
-const spriteColumns = 6;
-const spriteRows = 8;
-const petAnimations: Record<
-  PetAnimationState,
-  { row: number; durations: readonly number[] }
-> = {
-  idle: { row: 0, durations: [1680, 660, 660, 840, 840] },
-  "running-right": { row: 1, durations: [120, 120, 120, 120, 120, 220] },
-  "running-left": { row: 2, durations: [120, 120, 120, 120, 120, 220] },
-  waiting: { row: 4, durations: [150, 150, 150, 150, 150, 260] },
-  moving: { row: 5, durations: [120, 120, 120, 120, 120, 220] },
-  working: { row: 6, durations: [150, 150, 150, 150, 150, 280] },
-};
-
 const thinkingGhostPieces = [
   "top0",
   "top1",
@@ -449,17 +436,17 @@ export function SciencePet() {
   const [speakingMessageId, setSpeakingMessageId] = useState<number | null>(null);
   const [callPhase, setCallPhase] = useState<CallPhase>("idle");
   const [callNotice, setCallNotice] = useState("");
+  const [callSpeechUnavailable, setCallSpeechUnavailable] = useState(false);
   const [callTranscript, setCallTranscript] = useState("");
   const [callReply, setCallReply] = useState("");
   const [speakerEnabled, setSpeakerEnabled] = useState(true);
   const [dragging, setDragging] = useState(false);
-  const [spriteFrame, setSpriteFrame] = useState(0);
   const [autoWalk, setAutoWalk] = useState<WalkDirection | null>(null);
   const [position, setPosition] = useState<PetPosition>({ right: 18, bottom: 10 });
   const [positionReady, setPositionReady] = useState(false);
   const [dock, setDock] = useState({ left: false, top: false });
   const [chatSize, setChatSize] = useState<PetChatSize>({ width: 360, height: 640 });
-  const [difyUserId] = useState(createDifyWebUserId);
+  const [webUserId] = useState(createWebUserId);
   const [messages, setMessages] = useState<PetMessage[]>([
     {
       id: 1,
@@ -468,7 +455,8 @@ export function SciencePet() {
     },
   ]);
   const messagesRef = useRef<PetMessage[]>(messages);
-  const difyConversationIdRef = useRef<string | undefined>(undefined);
+  const chatHistoryLoadedRef = useRef(false);
+  const nativeWorkflowStateRef = useRef<TeachingWorkflowState | undefined>(undefined);
   const pendingPoetryCoverTargetRef = useRef<PendingPoetryCoverTarget | null>(null);
   const pendingLessonPlanRef = useRef<PendingLessonPlanRequest | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -489,6 +477,7 @@ export function SciencePet() {
   const voiceReleaseActionRef = useRef<VoiceReleaseAction>("send");
   const voiceReleasedRef = useRef(false);
   const voiceCancelledRef = useRef(false);
+  const voiceRestartTimerRef = useRef<number | null>(null);
   const voiceBaseInputRef = useRef("");
   const voiceTranscriptRef = useRef("");
   const voiceCancelTargetRef = useRef<HTMLSpanElement>(null);
@@ -501,6 +490,7 @@ export function SciencePet() {
   const voiceMeterSessionRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioObjectUrlRef = useRef<string | null>(null);
+  const callSpeechQueueRef = useRef<{cancel: () => void} | null>(null);
   const callAudioElementRef = useRef<HTMLAudioElement | null>(null);
   const ttsAbortRef = useRef<AbortController | null>(null);
   const copyTimeoutRef = useRef<number | null>(null);
@@ -515,8 +505,8 @@ export function SciencePet() {
   const callListeningWantedRef = useRef(false);
   const callMutedRef = useRef(false);
   const speakerEnabledRef = useRef(true);
-  const callFinalTimerRef = useRef<number | null>(null);
-  const callFinalTranscriptRef = useRef("");
+  const callTranscriptBufferRef = useRef<ReturnType<typeof createVoiceTranscriptBuffer> | null>(null);
+  const callAssistantMessageRef = useRef<number | null>(null);
   const callRestartTimerRef = useRef<number | null>(null);
   const localObjectUrlsRef = useRef<Set<string>>(new Set());
 
@@ -554,39 +544,40 @@ export function SciencePet() {
     messagesRef.current = messages;
   }, [messages]);
 
+  useEffect(() => {
+    const restored = readChatHistory();
+    if (restored.length) {
+      // Restore after the first client render so the server and client markup stay identical.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMessages(restored as PetMessage[]);
+      messageIdRef.current = Math.max(...restored.map(message => message.id)) + 1;
+    }
+    window.requestAnimationFrame(() => {
+      chatHistoryLoadedRef.current = true;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!chatHistoryLoadedRef.current) return;
+    writeChatHistory(messages as StoredChatMessage[]);
+  }, [messages]);
+
   useEffect(() => () => {
     if (attachmentPreviewUrlRef.current) URL.revokeObjectURL(attachmentPreviewUrlRef.current);
     for (const url of localObjectUrlsRef.current) URL.revokeObjectURL(url);
     localObjectUrlsRef.current.clear();
   }, []);
 
-  const animationState: PetAnimationState = busy
-    ? "working"
-    : dragging
-      ? "moving"
-      : autoWalk
-        ? `running-${autoWalk}`
-        : open
-          ? "waiting"
-          : "idle";
-  const animation = petAnimations[animationState];
-
-  useEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-
-    let currentFrame = 0;
-    let timer = 0;
-    const scheduleNextFrame = () => {
-      timer = window.setTimeout(() => {
-        currentFrame = (currentFrame + 1) % animation.durations.length;
-        setSpriteFrame(currentFrame);
-        scheduleNextFrame();
-      }, animation.durations[currentFrame]);
-    };
-
-    scheduleNextFrame();
-    return () => window.clearTimeout(timer);
-  }, [animation]);
+  const latestMessage = messages[messages.length - 1];
+  const animationState = resolvePetMotionState({
+    dragging,
+    autoWalk,
+    open,
+    busy: busy || callPhase === "thinking" || voiceStatus === "processing",
+    receivingReply: latestMessage?.role === "assistant" && !latestMessage.pending && Boolean(latestMessage.text.trim()),
+    speaking: speakingMessageId !== null || callPhase === "speaking",
+    listening: voiceStatus === "listening" || callPhase === "listening",
+  });
 
   useEffect(() => {
     if (
@@ -742,15 +733,20 @@ export function SciencePet() {
   }, []);
 
   const clearCallTimers = useCallback(() => {
-    callFinalTranscriptRef.current = "";
-    if (callFinalTimerRef.current) {
-      window.clearTimeout(callFinalTimerRef.current);
-      callFinalTimerRef.current = null;
-    }
+    callTranscriptBufferRef.current?.cancel();
+    callTranscriptBufferRef.current = null;
     if (callRestartTimerRef.current) {
       window.clearTimeout(callRestartTimerRef.current);
       callRestartTimerRef.current = null;
     }
+  }, []);
+
+  const settleVoiceCallMessage = useCallback(() => {
+    const id = callAssistantMessageRef.current;
+    callAssistantMessageRef.current = null;
+    if (id === null) return;
+    setMessages(current => current.flatMap(message => message.id !== id ? [message]
+      : message.text.trim() ? [{...message, pending: false, statusText: undefined}] : []));
   }, []);
 
   useLayoutEffect(() => {
@@ -860,6 +856,10 @@ export function SciencePet() {
   }, [resetVoiceWaveBars, stopVoiceWaveMeter]);
 
   const stopPressAndHoldVoice = useCallback(({ resetUi = true }: { resetUi?: boolean } = {}) => {
+    if (voiceRestartTimerRef.current !== null) {
+      window.clearTimeout(voiceRestartTimerRef.current);
+      voiceRestartTimerRef.current = null;
+    }
     voicePressedRef.current = false;
     voiceReleasedRef.current = false;
     voiceReleaseActionRef.current = "send";
@@ -881,6 +881,8 @@ export function SciencePet() {
   }, [stopVoiceWaveMeter]);
 
   const stopCallRecognition = useCallback(() => {
+    callTranscriptBufferRef.current?.cancel();
+    callTranscriptBufferRef.current = null;
     const recognition = callRecognitionRef.current;
     callRecognitionRef.current = null;
     if (!recognition) return;
@@ -921,6 +923,9 @@ export function SciencePet() {
       callActiveRef.current = false;
       callListeningWantedRef.current = false;
       callMutedRef.current = false;
+      callSpeechQueueRef.current?.cancel();
+      callSpeechQueueRef.current = null;
+      if (resetUi) settleVoiceCallMessage();
       callAudioElementRef.current = null;
       stopActiveAudio(resetUi);
       if (!resetUi) return;
@@ -932,7 +937,7 @@ export function SciencePet() {
       setCopiedMessageId(null);
       setBusy(false);
     },
-    [clearCallTimers, stopActiveAudio, stopCallRecognition, stopPressAndHoldVoice],
+    [clearCallTimers, settleVoiceCallMessage, stopActiveAudio, stopCallRecognition, stopPressAndHoldVoice],
   );
 
   useEffect(
@@ -989,12 +994,10 @@ export function SciencePet() {
     if (formData && attachment) {
       formData.append("message", content);
       formData.append("history", JSON.stringify(history));
-      formData.append("userId", difyUserId);
-      if (difyConversationIdRef.current) {
-        formData.append("conversationId", difyConversationIdRef.current);
-      }
+      formData.append("userId", webUserId);
       if (targetResourceId) formData.append("targetResourceId", targetResourceId);
       if (voiceCall) formData.append("voiceCall", "true");
+      if (!voiceCall && nativeWorkflowStateRef.current) formData.append("workflowState", JSON.stringify(nativeWorkflowStateRef.current));
       formData.append("attachment", attachment);
     }
 
@@ -1007,8 +1010,9 @@ export function SciencePet() {
       body: formData ?? JSON.stringify({
         message: content,
         history,
-        userId: difyUserId,
-        conversationId: difyConversationIdRef.current,
+        userId: webUserId,
+
+        ...(!voiceCall ? {workflowState: nativeWorkflowStateRef.current} : {}),
         ...(targetResourceId ? { targetResourceId } : {}),
         ...(voiceCall ? { voiceCall: true } : {}),
       }),
@@ -1027,12 +1031,10 @@ export function SciencePet() {
     }
 
     const data = await readAiChatResponse(response, onEvent);
-    // A locally-grounded answer did not enter Dify's conversation memory. Do
-    // not carry an older remote conversation into the next question, where it
-    // can add stale context and make the next response both slower and less
-    // accurate.
-    if (data.provider !== "dify") difyConversationIdRef.current = undefined;
-    else if (data.conversationId) difyConversationIdRef.current = data.conversationId;
+    if (!voiceCall && !signal?.aborted) {
+      if (data.provider === "native" && data.workflowState) nativeWorkflowStateRef.current = data.workflowState;
+      else if (data.provider !== "native") nativeWorkflowStateRef.current = undefined;
+    }
     return {
       text: voiceCall
         ? normalizeVoiceCallReply(data.reply?.trim() || assistantFallbackText(data.agentResult?.kind) || "资料库暂时没有返回内容，请换个问法试试。")
@@ -1074,8 +1076,8 @@ export function SciencePet() {
     } else if (event.type === "delta") {
       updatePetMessage(messageId, (message) => ({
         ...message,
-        pending: false,
-        statusText: undefined,
+        pending: !hasVisibleAssistantText(`${message.text}${event.delta}`),
+        ...(hasVisibleAssistantText(`${message.text}${event.delta}`) ? { statusText: undefined } : {}),
         text: `${message.text}${event.delta}`,
       }));
       onText?.(event.delta, "delta");
@@ -1115,7 +1117,7 @@ export function SciencePet() {
     startCallRecognition(sessionId);
   }
 
-  function scheduleCallRecognitionRestart(sessionId: number, delay = 420) {
+  function scheduleCallRecognitionRestart(sessionId: number, delay = 200) {
     if (callRestartTimerRef.current || !isCurrentVoiceCallListening(sessionId)) return;
     callRestartTimerRef.current = window.setTimeout(() => {
       callRestartTimerRef.current = null;
@@ -1128,76 +1130,98 @@ export function SciencePet() {
     options: {
       messageId?: number;
       callSessionId?: number;
+      audioBlob?: Blob;
+      signal?: AbortSignal;
       onStarted?: () => void;
       onEnded?: () => void;
+      onFailed?: () => void;
     } = {},
   ) {
     const text = toSpeechText(sourceText);
-    if (!text) return false;
+    if (!text || options.signal?.aborted) return false;
     stopActiveAudio();
 
     const controller = new AbortController();
     let audio: HTMLAudioElement | null = null;
+    let started = false;
+    let played = false;
     ttsAbortRef.current = controller;
-    try {
-      const response = await fetch("/api/voice/tts", {
-        method: "POST",
-        signal: controller.signal,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      if (!response.ok) throw new Error("TTS request failed");
+    const onParentAbort = () => {
+      controller.abort();
+      if (ttsAbortRef.current === controller) stopActiveAudio();
+    };
+    options.signal?.addEventListener("abort", onParentAbort, {once: true});
+    if (options.messageId !== undefined) setSpeakingMessageId(options.messageId);
+    const isCurrentPlayback = () => !controller.signal.aborted && ttsAbortRef.current === controller &&
+      (options.callSessionId === undefined || isCurrentVoiceCall(options.callSessionId));
 
-      const blob = await response.blob();
-      if (controller.signal.aborted) return false;
-      if (options.callSessionId !== undefined && !isCurrentVoiceCall(options.callSessionId)) {
-        return false;
-      }
-
-      const objectUrl = URL.createObjectURL(blob);
-      audio = options.callSessionId !== undefined
-        ? callAudioElementRef.current ?? new Audio()
-        : new Audio();
+    const playClip = async (blob: Blob, _text: string, signal: AbortSignal) => {
+      if (signal.aborted || !isCurrentPlayback()) return false;
+      audio ??= options.callSessionId !== undefined ? callAudioElementRef.current ?? new Audio() : new Audio();
       if (options.callSessionId !== undefined) callAudioElementRef.current = audio;
-      audio.preload = "auto";
-      audio.src = objectUrl;
-      audio.muted = options.callSessionId !== undefined && !speakerEnabledRef.current;
-      audioRef.current = audio;
+      const clipAudio = audio;
+      const objectUrl = URL.createObjectURL(blob);
+      audioRef.current = clipAudio;
       audioObjectUrlRef.current = objectUrl;
-      if (options.messageId !== undefined) setSpeakingMessageId(options.messageId);
-      audio.onended = () => {
-        if (audioRef.current !== audio) return;
-        stopActiveAudio();
-        options.onEnded?.();
-      };
-      audio.onerror = () => {
-        if (audioRef.current !== audio) return;
-        stopActiveAudio();
-        if (options.callSessionId !== undefined && isCurrentVoiceCall(options.callSessionId)) {
-          resumeVoiceCallListening(options.callSessionId);
-        } else if (options.messageId !== undefined) {
-          setVoiceNotice("语音暂时不可用，文字内容仍可继续查看。");
+      try {
+        prepareSpeechAudio(clipAudio, objectUrl, options.callSessionId !== undefined && !speakerEnabledRef.current);
+        return await playSpeechClip(clipAudio, {
+          signal,
+          onStarted: () => {
+            if (!started && isCurrentPlayback()) {
+              started = true;
+              options.onStarted?.();
+            }
+          },
+        });
+      } finally {
+        // A canceled older clip must never clear a newer playback's element.
+        if (audioRef.current === clipAudio && audioObjectUrlRef.current === objectUrl) {
+          stopAudioPlayback({ audio: clipAudio, objectUrl }, URL);
+          audioRef.current = null;
+          audioObjectUrlRef.current = null;
         }
-      };
-      await audio.play();
-      options.onStarted?.();
-      return true;
+      }
+    };
+
+    try {
+      played = options.audioBlob
+        ? await playClip(options.audioBlob, text, controller.signal)
+        : await playSpeechBatches(text, {
+          signal: controller.signal,
+          prepare: async (batch, signal) => {
+            const response = await fetch("/api/voice/tts", {
+              method: "POST", signal,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text: batch }),
+            });
+            if (!response.ok) throw new Error("TTS request failed");
+            return response.blob();
+          },
+          play: playClip,
+        });
     } catch {
-      const shouldReportPlayFailure = !controller.signal.aborted;
-      if (audio && audioRef.current === audio) {
-        stopActiveAudio();
-      }
-      if (shouldReportPlayFailure) {
-        if (options.callSessionId !== undefined && isCurrentVoiceCall(options.callSessionId)) {
-          setCallNotice("语音暂时不可用，已保留文字回复。继续说话可重试。");
-        } else if (options.messageId !== undefined) {
-          setVoiceNotice("语音暂时不可用，文字内容仍可继续查看。");
-        }
-      }
-      return false;
+      played = false;
     } finally {
-      if (ttsAbortRef.current === controller) ttsAbortRef.current = null;
+      options.signal?.removeEventListener("abort", onParentAbort);
+      if (ttsAbortRef.current === controller) {
+        ttsAbortRef.current = null;
+        if (options.messageId !== undefined) setSpeakingMessageId(null);
+      }
     }
+    if (played && !controller.signal.aborted) {
+      options.onEnded?.();
+      return true;
+    }
+    if (!controller.signal.aborted) {
+      if (options.callSessionId !== undefined && isCurrentVoiceCall(options.callSessionId)) {
+        setCallNotice("语音暂时不可用，已保留文字回复。继续说话可重试。");
+      } else if (options.messageId !== undefined) {
+        setVoiceNotice("语音暂时不可用，文字内容仍可继续查看。");
+      }
+    }
+    options.onFailed?.();
+    return false;
   }
 
   function handleCopyMessage(message: PetMessage) {
@@ -1235,7 +1259,7 @@ export function SciencePet() {
         body: JSON.stringify({
           responseId: message.responseId,
           rating,
-          userId: difyUserId,
+          userId: webUserId,
           ...(message.agentResult ? { kind: message.agentResult.kind } : {}),
         }),
       });
@@ -1253,7 +1277,6 @@ export function SciencePet() {
   async function processVoiceCallTranscript(transcript: string, sessionId: number) {
     const session = callSessionRef.current;
     if (!session || !isCurrentVoiceCallListening(sessionId)) return;
-    callFinalTranscriptRef.current = "";
     callListeningWantedRef.current = false;
     if (callRestartTimerRef.current !== null) {
       window.clearTimeout(callRestartTimerRef.current);
@@ -1266,14 +1289,16 @@ export function SciencePet() {
     setCallPhase("thinking");
     setCallReply("");
     setCallTranscript(transcript);
+    setCallSpeechUnavailable(false);
     setCallNotice("让我想一想，很快告诉你。");
 
     const userMessageId = messageIdRef.current++;
     const assistantMessageId = messageIdRef.current++;
-    const history = messagesRef.current.slice(-12).map((message) => ({
+    const history = messagesRef.current.filter(message => message.text.trim()).slice(-6).map((message) => ({
       role: message.role,
-      content: message.text,
+      content: message.text.slice(-800),
     }));
+    callAssistantMessageRef.current = assistantMessageId;
     setMessages((current) => [
       ...current,
       { id: userMessageId, role: "user", text: transcript },
@@ -1281,21 +1306,67 @@ export function SciencePet() {
     ]);
     setBusy(true);
 
+    let streamedText = "";
+    const speech = createVoiceSpeechQueue({
+      signal: thinking.abortController.signal,
+      prepare: async (text, signal) => {
+        const response = await fetch("/api/voice/tts", {
+          method: "POST", signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, voiceCall: true }),
+        });
+        if (!response.ok) throw new Error("TTS request failed");
+        return response.blob();
+      },
+      play: (audioBlob, text, signal) => new Promise<boolean>(resolve => {
+        if (signal.aborted || !isCurrentVoiceCall(sessionId)) {resolve(false);return;}
+        let settled = false;
+        const finish = (played: boolean) => {
+          if (settled) return;
+          settled = true;
+          signal.removeEventListener("abort", onAbort);
+          resolve(played);
+        };
+        const onAbort = () => finish(false);
+        signal.addEventListener("abort", onAbort, {once: true});
+        const current = callSessionRef.current;
+        if (!current) {finish(false);return;}
+        if (current.phase === "thinking") callSessionRef.current = transitionCallPhase(current, "speaking");
+        setCallPhase("speaking");
+        setCallNotice("我来告诉你啦！");
+        void playSpeech(text, {
+          callSessionId: sessionId, audioBlob, signal,
+          onEnded: () => finish(true),
+          onFailed: () => finish(false),
+        }).then(started => {if (!started) finish(false);}, () => finish(false));
+      }),
+    });
+    callSpeechQueueRef.current = speech;
+    if (!speakerEnabledRef.current) speech.cancel();
+
     try {
       const reply = await requestAssistantReply(
         transcript,
         history,
         thinking.abortController.signal,
-        (event) => applyAssistantStreamEvent(assistantMessageId, event),
+        (event) => {
+          if (!isCurrentVoiceCall(sessionId)) return;
+          applyAssistantStreamEvent(assistantMessageId, event, (text, mode) => {
+            streamedText = mode === "delta" ? streamedText + text : text;
+            const visible = voiceCallSpeechText(streamedText);
+            setCallReply(visible);
+            updatePetMessage(assistantMessageId, message => ({...message, text: visible, pending: !visible}));
+          });
+          if (event.type === "delta") speech.push(event.delta);
+        },
         undefined,
         undefined,
         true,
       );
       if (!isCurrentVoiceCall(sessionId)) return;
 
-      // Hold the short call reply until it is complete so the text appears at
-      // the same moment that the existing 豆豆 TTS request starts playing.
       const callText = normalizeVoiceCallReply(reply.text);
+      setCallReply(callText);
       updatePetMessage(assistantMessageId, (message) => ({
         ...message,
         pending: false,
@@ -1310,20 +1381,16 @@ export function SciencePet() {
 
       const current = callSessionRef.current;
       if (!current) return;
-      const speaking = transitionCallPhase(current, "speaking");
-      if (speaking.phase !== "speaking") return;
-      callSessionRef.current = speaking;
-      setCallPhase("speaking");
-      setCallNotice("我来告诉你啦！");
-      const started = await playSpeech(callText, {
-        callSessionId: sessionId,
-        onStarted: () => setCallReply(callText),
-        onEnded: () => resumeVoiceCallListening(sessionId),
-      });
-      if (!started && isCurrentVoiceCall(sessionId)) setCallReply(callText);
-      if (!started && isCurrentVoiceCall(sessionId)) resumeVoiceCallListening(sessionId);
-    } catch {
+      callAssistantMessageRef.current = null;
+      if (current.phase === "thinking") callSessionRef.current = transitionCallPhase(current, "speaking");
+      const played = await speech.finish(callText);
       if (!isCurrentVoiceCall(sessionId)) return;
+      if (!played && speakerEnabledRef.current) setCallSpeechUnavailable(true);
+      resumeVoiceCallListening(sessionId);
+    } catch {
+      speech.cancel();
+      if (!isCurrentVoiceCall(sessionId)) return;
+      callAssistantMessageRef.current = null;
       updatePetMessage(assistantMessageId, (message) => ({
         ...message,
         pending: false,
@@ -1331,6 +1398,8 @@ export function SciencePet() {
       }));
       setVoiceCallError(sessionId, "哎呀，我这边没连上，再说一次试试吧。你也可以回到文字聊天。");
     } finally {
+      speech.cancel();
+      if (callSpeechQueueRef.current === speech) callSpeechQueueRef.current = null;
       if (callActiveRef.current && callSessionIdRef.current === sessionId) setBusy(false);
     }
   }
@@ -1344,9 +1413,14 @@ export function SciencePet() {
     }
 
     const recognition = new Recognition();
+    const transcriptBuffer = createVoiceTranscriptBuffer({
+      onPreview: text => {if (isCurrentVoiceCallListening(sessionId)) setCallTranscript(text);},
+      onFinal: text => {void processVoiceCallTranscript(text, sessionId);},
+    });
+    callTranscriptBufferRef.current = transcriptBuffer;
     callRecognitionRef.current = recognition;
     recognition.continuous = true;
-    recognition.interimResults = false;
+    recognition.interimResults = true;
     recognition.lang = "zh-CN";
     recognition.maxAlternatives = 1;
     recognition.onstart = () => {
@@ -1356,27 +1430,17 @@ export function SciencePet() {
     };
     recognition.onresult = (event) => {
       if (callRecognitionRef.current !== recognition || !isCurrentVoiceCallListening(sessionId)) return;
-      const fragment = extractFinalTranscript(event).trim();
-      if (!fragment) return;
-      callFinalTranscriptRef.current += fragment;
-      if (callFinalTimerRef.current) window.clearTimeout(callFinalTimerRef.current);
-      setCallTranscript(callFinalTranscriptRef.current);
-      callFinalTimerRef.current = window.setTimeout(() => {
-        callFinalTimerRef.current = null;
-        const transcript = callFinalTranscriptRef.current.trim();
-        callFinalTranscriptRef.current = "";
-        void processVoiceCallTranscript(transcript, sessionId);
-      }, 480);
+      transcriptBuffer.update(event);
     };
     recognition.onerror = (event) => {
       if (callRecognitionRef.current !== recognition || !isCurrentVoiceCall(sessionId)) return;
       if (event.error === "no-speech") {
+        transcriptBuffer.cancel();
         setCallNotice("我没听清，再说一次好吗？");
         return;
       }
       if (event.error === "network") {
-        if (callFinalTimerRef.current !== null || callFinalTranscriptRef.current.trim()) return;
-        setCallNotice("网络抖了一下，我还在继续听哦。");
+        setCallNotice("网络中断，刚才的话还没发送，请再说一次。");
         stopCallRecognition();
         scheduleCallRecognitionRestart(sessionId, 550);
         return;
@@ -1397,20 +1461,20 @@ export function SciencePet() {
         !current ||
         !isCurrentVoiceCall(sessionId) ||
         current.phase !== "listening" ||
-        callMutedRef.current ||
-        // A final result is debounced before it is sent. Restarting here
-        // creates a second recognition instance which is immediately aborted
-        // by processVoiceCallTranscript.
-        callFinalTimerRef.current !== null ||
-        callFinalTranscriptRef.current.trim()
+        callMutedRef.current
       ) {
         return;
       }
+      if (transcriptBuffer.end()) return;
+      transcriptBuffer.cancel();
+      if (callTranscriptBufferRef.current === transcriptBuffer) callTranscriptBufferRef.current = null;
       scheduleCallRecognitionRestart(sessionId);
     };
     try {
       recognition.start();
     } catch {
+      transcriptBuffer.cancel();
+      if (callTranscriptBufferRef.current === transcriptBuffer) callTranscriptBufferRef.current = null;
       callRecognitionRef.current = null;
       if (isCurrentVoiceCallListening(sessionId)) {
         setCallNotice("麦克风正在重新连接，我马上继续听。");
@@ -1453,7 +1517,8 @@ export function SciencePet() {
     speakerEnabledRef.current = true;
     setSpeakerEnabled(true);
     setCallPhase("preparing");
-    setCallNotice("马上开始，说给我听就好啦！");
+    setCallNotice("正在连接麦克风，准备好后就可以说话。");
+    setCallSpeechUnavailable(false);
     setCallTranscript("");
     setCallReply("");
     startCallRecognition(session.id);
@@ -1477,12 +1542,39 @@ export function SciencePet() {
 
     const session = callSessionRef.current;
     if (session) callSessionRef.current = invalidateVoiceSession(session, "muted");
+    callSpeechQueueRef.current?.cancel();
+    callSpeechQueueRef.current = null;
+    settleVoiceCallMessage();
+    setBusy(false);
     callListeningWantedRef.current = false;
     callMutedRef.current = true;
+    stopActiveAudio(false);
     stopCallRecognition();
     clearCallTimers();
     setCallPhase("muted");
     setCallNotice("麦克风已静音，恢复后可以继续对话。");
+  }
+
+  function interruptVoiceCall() {
+    if (!callActiveRef.current || callMutedRef.current) return;
+    const current = callSessionRef.current;
+    if (current) invalidateVoiceSession(current, "ended");
+    callSpeechQueueRef.current?.cancel();
+    callSpeechQueueRef.current = null;
+    stopActiveAudio();
+    stopCallRecognition();
+    clearCallTimers();
+    settleVoiceCallMessage();
+    const session = beginVoiceSession(callSessionIdRef.current);
+    callSessionRef.current = session;
+    callSessionIdRef.current = session.id;
+    callListeningWantedRef.current = true;
+    setBusy(false);
+    setCallTranscript("");
+    setCallReply("");
+    setCallPhase("listening");
+    setCallNotice("好啦，你说，我在听。");
+    startCallRecognition(session.id);
   }
 
   function toggleCallSpeaker() {
@@ -1494,19 +1586,9 @@ export function SciencePet() {
       return;
     }
 
-    const session = callSessionRef.current;
-    const wasSpeaking = session?.phase === "speaking";
+    callSpeechQueueRef.current?.cancel();
     stopActiveAudio(false);
-    setCallNotice("扬声器已关闭，通话会继续监听。");
-    if (wasSpeaking && session && isCurrentVoiceCall(callSessionIdRef.current)) {
-      const listening = transitionCallPhase(session, "listening");
-      if (listening.phase === "listening") {
-        callSessionRef.current = listening;
-        callListeningWantedRef.current = true;
-        setCallPhase("listening");
-        startCallRecognition(callSessionIdRef.current);
-      }
-    }
+    setCallNotice("扬声器已关闭，文字回复后会继续监听。");
   }
 
   function endVoiceCall() {
@@ -1519,6 +1601,18 @@ export function SciencePet() {
     setMoreMenuOpen(false);
     setCreationDialog(null);
     setOpen(false);
+  }
+
+  function handleClearChatHistory() {
+    if (!window.confirm("要清空科小贝的全部对话记录吗？")) return;
+    clearChatHistory();
+    nativeWorkflowStateRef.current = undefined;
+    messageIdRef.current = 2;
+    setMessages([{
+      id: 1,
+      role: "assistant",
+      text: "你好，我是科小贝。想找科学诗、科学故事或实验教案，都可以问我。",
+    }]);
   }
 
   function resizeComposerInput(element = inputRef.current) {
@@ -1715,7 +1809,7 @@ export function SciencePet() {
       );
       let outputFiles = reply.files;
       const canPackageLessonPlan =
-        (reply.provider === "dify" || reply.provider === "deepseek" || reply.provider === "fallback") &&
+        (reply.provider === "native" || reply.provider === "fallback") &&
         reply.text.length >= 80 &&
         /活动目标/u.test(reply.text) &&
         /活动准备/u.test(reply.text) &&
@@ -1833,6 +1927,10 @@ export function SciencePet() {
 
   function startVoiceInput(event: ReactPointerEvent<HTMLButtonElement>) {
     if (busy || callPhase !== "idle" || callActiveRef.current || voiceStatus === "starting" || voiceStatus === "listening") return;
+    if (voiceRestartTimerRef.current !== null) {
+      window.clearTimeout(voiceRestartTimerRef.current);
+      voiceRestartTimerRef.current = null;
+    }
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     measureVoiceOverlayBottom(event.currentTarget);
@@ -1899,18 +1997,45 @@ export function SciencePet() {
       setVoiceNotice(errorMessages[errorEvent.error] ?? "语音识别失败，请重新尝试。");
     };
     recognition.onend = () => {
+      const held = voicePressedRef.current;
+      const released = voiceReleasedRef.current;
+      const cancelled = voiceCancelledRef.current;
       recognitionRef.current = null;
-      voicePressedRef.current = false;
       stopVoiceWaveMeter();
-      if (voiceCancelledRef.current) {
+      if (cancelled) {
+        voicePressedRef.current = false;
         voiceCancelledRef.current = false;
         voiceReleasedRef.current = false;
         voiceReleaseActionRef.current = "send";
         return;
       }
-      if (failed) return;
+      if (failed) {
+        voicePressedRef.current = false;
+        return;
+      }
+      if (shouldRestartPressAndHoldRecognition({held, released, cancelled, failed})) {
+        voicePressedRef.current = true;
+        setVoiceStatus("listening");
+        setVoiceNotice("正在聆听，松开后完成输入");
+        startVoiceWaveMeter();
+        voiceRestartTimerRef.current = window.setTimeout(() => {
+          voiceRestartTimerRef.current = null;
+          if (!voicePressedRef.current || voiceCancelledRef.current || voiceReleasedRef.current) return;
+          recognitionRef.current = recognition;
+          try {
+            recognition.start();
+          } catch {
+            recognitionRef.current = null;
+            voicePressedRef.current = false;
+            setVoiceStatus("error");
+            setVoiceNotice("麦克风暂时中断，请松手后重新按住尝试。");
+          }
+        }, 80);
+        return;
+      }
+      voicePressedRef.current = false;
       const releaseAction = voiceReleaseActionRef.current;
-      const releasedByUser = voiceReleasedRef.current;
+      const releasedByUser = released;
       voiceReleaseActionRef.current = "send";
       voiceReleasedRef.current = false;
       setVoiceReleaseAction("send");
@@ -2001,6 +2126,10 @@ export function SciencePet() {
   }
 
   function cancelVoiceInput(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (voiceRestartTimerRef.current !== null) {
+      window.clearTimeout(voiceRestartTimerRef.current);
+      voiceRestartTimerRef.current = null;
+    }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -2042,6 +2171,10 @@ export function SciencePet() {
     voiceCancelledRef.current = false;
     setVoiceReleaseAction("send");
     stopVoiceWaveMeter();
+    if (voiceRestartTimerRef.current !== null) {
+      window.clearTimeout(voiceRestartTimerRef.current);
+      voiceRestartTimerRef.current = null;
+    }
     const recognition = recognitionRef.current;
     if (!recognition) return;
     setVoiceStatus("processing");
@@ -2142,11 +2275,6 @@ export function SciencePet() {
     setOpen(true);
   }
 
-  const visibleFrame = spriteFrame % animation.durations.length;
-  const spriteStyle = {
-    "--pet-x": `${(visibleFrame / (spriteColumns - 1)) * 100}%`,
-    "--pet-y": `${(animation.row / (spriteRows - 1)) * 100}%`,
-  } as CSSProperties;
   const callInputLocked = callPhase !== "idle" && callPhase !== "error";
 
   return (
@@ -2180,10 +2308,19 @@ export function SciencePet() {
             {callPhase === "idle" ? (
               <header className="pet-chat__header">
                 <span>
-                  <GardenSeal glyph="贝" size="mini" tone="gold" />
+                  <BrandLogo size={26} />
                   科小贝
                 </span>
                 <div className="pet-chat__header-actions">
+                  <button
+                    type="button"
+                    onClick={handleClearChatHistory}
+                    disabled={busy}
+                    aria-label="清空对话记录"
+                    title="清空对话记录"
+                  >
+                    <Trash2 size={16} />
+                  </button>
                   <button
                     type="button"
                     onClick={startVoiceCall}
@@ -2204,7 +2341,7 @@ export function SciencePet() {
               <section className="pet-call" aria-label="科小贝通话" aria-live="polite">
                 <div className="pet-call__pet-stage" aria-hidden="true">
                   <div className="pet-call__pet-orbit">
-                    <span className="science-pet__sprite pet-call__pet" data-pet-state={animationState} style={spriteStyle} />
+                    <KexiaobeiSprite className="pet-call__pet" state={animationState} />
                   </div>
                 </div>
 
@@ -2212,7 +2349,7 @@ export function SciencePet() {
                   {Array.from({ length: 13 }, (_, index) => <i key={index} />)}
                 </div>
 
-                <span className="sr-only" role="status">{callNotice}</span>
+                <p className="pet-call__notice" role="status">{callNotice}</p>
                 <div className="pet-call__messages" aria-label="通话中的聊天内容">
                   {!callReply && !callTranscript ? (
                     <div className="pet-call__bubble pet-call__bubble--assistant">
@@ -2226,7 +2363,7 @@ export function SciencePet() {
                       <p>{callTranscript}</p>
                     </div>
                   ) : null}
-                  {(callPhase === "thinking" || (callPhase === "speaking" && !callReply)) ? (
+                  {((callPhase === "thinking" || callPhase === "speaking") && !callReply) ? (
                     <div className="pet-call__bubble pet-call__bubble--assistant">
                       <span className="thinking-copy">
                         <ThinkingGhost />
@@ -2240,6 +2377,11 @@ export function SciencePet() {
                       <p>{callReply}</p>
                     </div>
                   ) : null}
+                  {callSpeechUnavailable ? (
+                    <div className="pet-call__error" role="status">
+                      <p>语音暂时不可用，文字回复已保留，可以继续说。</p>
+                    </div>
+                  ) : null}
                   {callPhase === "error" ? (
                     <div className="pet-call__error" role="alert">
                       <p>{callNotice}</p>
@@ -2250,6 +2392,11 @@ export function SciencePet() {
                   ) : null}
                 </div>
 
+                {callPhase === "thinking" || callPhase === "speaking" ? (
+                  <button type="button" className="pet-call__text-action" onClick={interruptVoiceCall}>
+                    打断重说
+                  </button>
+                ) : null}
                 <div className="pet-call__controls">
                   <button
                     type="button"
@@ -2330,7 +2477,7 @@ export function SciencePet() {
                       {message.files?.length ? (
                         <div className="pet-message__output-files" aria-label="生成文件">
                           {message.files.map((file) => {
-                            const downloadUrl = buildAiChatDocumentDownloadUrl(file);
+                            const downloadUrl = file.type === "image" ? buildAiChatImageDownloadUrl(file) : buildAiChatDocumentDownloadUrl(file);
                             if (!downloadUrl) return null;
 
                             return (
@@ -2338,15 +2485,21 @@ export function SciencePet() {
                                 className="pet-message__output-file"
                                 download
                                 href={downloadUrl}
+                                target={file.type === "image" ? "_blank" : undefined}
+                                rel={file.type === "image" ? "noreferrer" : undefined}
                                 key={file.url}
                                 aria-label={`下载文件 ${file.name}`}
                                 title={`下载 ${file.name}`}
                               >
-                                <FileText aria-hidden="true" size={15} />
+                                {file.type === "image" ? (
+                                  // The file URL has already passed the generated-media allowlist.
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={downloadUrl} alt={file.name} width={64} height={64} style={{objectFit: "cover", borderRadius: 8}} />
+                                ) : <FileText aria-hidden="true" size={15} />}
                                 <span className="pet-message__output-file-name">{file.name}</span>
                                 <span className="pet-message__output-file-action">
                                   <Download aria-hidden="true" size={13} />
-                                  下载
+                                  {file.type === "image" ? "查看" : "下载"}
                                 </span>
                               </a>
                             );
@@ -2809,13 +2962,7 @@ export function SciencePet() {
         aria-label={open ? "收起科小贝，可拖动" : "问问科小贝，可拖动"}
         title="拖动科小贝，点击开始对话"
       >
-        <span
-          className="science-pet__sprite"
-          role="img"
-          aria-label="科小贝科学实验员"
-          data-pet-state={animationState}
-          style={spriteStyle}
-        />
+        <KexiaobeiSprite state={animationState} />
       </button>
     </div>
   );

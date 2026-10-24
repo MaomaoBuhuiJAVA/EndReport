@@ -3,6 +3,111 @@ import { describe, expect, it } from "vitest";
 import { buildLessonPlanDocx } from "./lesson-plan-docx";
 
 describe("buildLessonPlanDocx", () => {
+  it("keeps unmarked Chinese stage headings in the same continuation row as their first instruction", async () => {
+    const archive = await JSZip.loadAsync(await buildLessonPlanDocx("水果", "小班", "20分钟", [
+      "## 活动内容", "前一阶段观察记录。".repeat(20), "（二）果农大冒险", "幼儿依次走过独木桥。",
+      "设计意图：", "提高平衡能力。", "后续过程记录。".repeat(40),
+    ].join("\n")));
+    const xml = await archive.file("word/document.xml")!.async("string");
+    const rows = xml.match(/<w:tr>[\s\S]*?<\/w:tr>/gu)!;
+    const stage = rows.find((row) => row.includes("（二）果农大冒险"))!;
+    expect(stage).toContain("幼儿依次走过独木桥。");
+    const heading = stage.match(/<w:p>(?:(?!<\/w:p>)[\s\S])*?（二）果农大冒险(?:(?!<\/w:p>)[\s\S])*?<\/w:p>/u)![0];
+    expect(heading).toContain("<w:keepNext/>");
+  });
+
+  it("lets long form rows continue across pages while keeping stage headings with their text", async () => {
+    const content = ["## 活动目标", "愿意尝试。", "## 活动准备", "纸片。", "## 活动内容",
+      "### 一、导入猜想（5分钟）", "教师引导幼儿观察纸片并交流。".repeat(180),
+      "### 二、分组操作（10分钟）", "幼儿比较操作结果。", "## 活动反思", "调整材料。".repeat(100)].join("\n");
+    const archive = await JSZip.loadAsync(await buildLessonPlanDocx("纸片", "中班", "20分钟", content));
+    const xml = await archive.file("word/document.xml")!.async("string");
+    const rows = xml.match(/<w:tr>[\s\S]*?<\/w:tr>/gu)!;
+    expect(rows.length).toBeGreaterThan(6);
+    expect(rows[0]).toContain("<w:cantSplit/>");
+    for (const row of [rows[2], rows[3], rows.at(-1)]) expect(row).not.toContain("<w:cantSplit/>");
+    const activityRows = rows.slice(4, -1);
+    for (const row of activityRows) expect(row).toContain("<w:cantSplit/>");
+    const paragraphs = activityRows.join("").match(/<w:p>[\s\S]*?<\/w:p>/gu)!;
+    const heading = paragraphs.find((p) => p.includes("一、导入猜想"));
+    expect(heading).toContain("<w:keepNext/>");
+    expect(heading).not.toContain("###");
+    const body = paragraphs.find((p) => p.includes("教师引导幼儿观察纸片并交流。"));
+    expect(body).toContain("<w:widowControl/>");
+    expect(body).not.toContain("<w:keepNext/>");
+    expect(body).not.toContain("<w:keepLines/>");
+    expect(xml).toContain('<w:snapToGrid w:val="0"/>');
+    expect(xml).not.toContain("w:pageBreakBefore");
+    expect(xml.match(/教师引导幼儿观察纸片并交流。/gu)).toHaveLength(180);
+  });
+
+  it("preserves standalone metadata headings and observation table cells", async () => {
+    const archive = await JSZip.loadAsync(await buildLessonPlanDocx("水果", "小班", "20分钟", [
+      "## 领域", "健康", "## 来源", "园本原创资料", "## 教学活动", "寻找水果",
+      "## 活动目标", "愿意尝试。", "## 活动内容", "观察记录：",
+      "| 对象 | 预测 | 结果 |", "| --- | --- | --- |", "| 铁钉 | 会吸住 | 已吸住 |", "| 木块 | 不吸住 | 未吸住 |",
+    ].join("\n")));
+    const xml = await archive.file("word/document.xml")!.async("string");
+    for (const value of ["健康", "园本原创资料", "寻找水果", "铁钉", "已吸住", "木块", "未吸住"]) expect(xml).toContain(value);
+  });
+
+  it("retains every column of an activity table even when one header matches a lesson field", async () => {
+    const archive = await JSZip.loadAsync(await buildLessonPlanDocx("磁铁", "中班", "20分钟", [
+      "## 活动过程", "| 时间 | 活动内容 | 教师提问 | 幼儿反应 |", "| --- | --- | --- | --- |",
+      "| 5分钟 | 比较木块和铁钉 | 为什么木块没有吸住 | 幼儿说木块不吸住 |",
+      "| 10分钟 | 分类尝试 | 哪些物体能吸住 | 幼儿说铁钉能吸住 |",
+    ].join("\n")));
+    const xml = await archive.file("word/document.xml")!.async("string");
+    for (const text of ["教师提问", "幼儿反应", "5分钟", "比较木块和铁钉", "为什么木块没有吸住", "幼儿说木块不吸住", "10分钟", "哪些物体能吸住"])
+      expect(xml).toContain(text);
+  });
+
+  it("keeps substantive lesson prefaces while omitting duplicate titles and metadata", async () => {
+    const archive = await JSZip.loadAsync(await buildLessonPlanDocx("磁铁", "中班", "20分钟", [
+      "# 《磁铁》完整教案", "主题：磁铁", "班级：中班", "教师：待填写",
+      "## 设计依据", "幼儿已经比较过木块与铁钉。", "## 活动过程", "比较哪些材料能被吸住。",
+    ].join("\n")));
+    const xml = await archive.file("word/document.xml")!.async("string");
+    expect(xml).toContain("设计依据");
+    expect(xml).toContain("幼儿已经比较过木块与铁钉。");
+    expect(xml).not.toContain("完整教案");
+    expect(xml).not.toContain("教师：待填写");
+  });
+
+  it("maps bold field labels and unmarked section headings without losing metadata or printing separators", async () => {
+    const archive = await JSZip.loadAsync(await buildLessonPlanDocx("吃得香", "小四班", "25分钟", [
+      "**领域**：健康", "**来源**：网络资源", "**教学活动**：果农大冒险",
+      "一、活动目标", "愿意参加游戏。", "---", "二、活动准备", "水果卡片。",
+      "三、活动内容", "### 设计意图", "锻炼平衡能力。", "<!-- pagebreak -->", "### 采摘水果", "幼儿按序参与。",
+    ].join("\n")));
+    const xml = await archive.file("word/document.xml")!.async("string");
+    const rows = xml.match(/<w:tr>[\s\S]*?<\/w:tr>/gu)!;
+    expect(rows[0]).toContain("健康");
+    expect(rows[0]).toContain("网络资源");
+    expect(rows[1]).toContain("果农大冒险");
+    expect(rows[2]).toContain("愿意参加游戏。");
+    expect(rows[3]).toContain("水果卡片。");
+    expect(rows[4]).toContain("锻炼平衡能力。");
+    expect(xml).not.toContain("pagebreak");
+    expect(xml).not.toContain(">---<");
+  });
+
+  it("keeps standalone teacher labels and short responses intact at a page boundary", async () => {
+    const archive = await JSZip.loadAsync(await buildLessonPlanDocx("纸片", "中班", "20分钟", [
+      "## 活动内容", "### 一、导入猜想", "- **教师行为**：", "1. 请幼儿比较纸片。",
+      "- **幼儿可能回应**：", "- 它变小了！", "长段观察记录。".repeat(80),
+    ].join("\n")));
+    const xml = await archive.file("word/document.xml")!.async("string");
+    const paragraphs = xml.match(/<w:p>[\s\S]*?<\/w:p>/gu)!;
+    for (const label of ["一、导入猜想", "教师行为", "幼儿可能回应"]) {
+      const p = paragraphs.find((value) => value.includes(label));
+      expect(p).toContain("<w:keepNext/>");
+      expect(p).toContain("<w:keepLines/>");
+    }
+    expect(paragraphs.find((p) => p.includes("它变小了"))).toContain("<w:keepLines/>");
+    expect(paragraphs.find((p) => p.includes("长段观察记录"))).not.toContain("<w:keepLines/>");
+  });
+
   it("builds an A4 lesson-plan Word document from common Markdown sections", async () => {
     const bytes = await buildLessonPlanDocx(
       "玩转纸片",

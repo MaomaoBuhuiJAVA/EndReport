@@ -47,11 +47,28 @@ export type AudioLike = {
 export type VoiceAudioPlayback = {
   readonly audio?: AudioLike | null;
   readonly objectUrl?: string | null;
+  readonly onStopped?: () => void;
 };
 
 export type ObjectUrlApiLike = {
   revokeObjectURL?: (url: string) => void;
 };
+
+export function prepareSpeechAudio(
+  audio: Pick<HTMLAudioElement, "preload" | "src" | "muted" | "volume" | "playbackRate" | "defaultPlaybackRate" | "preservesPitch">,
+  sourceUrl: string,
+  muted: boolean,
+): void {
+  audio.preload = "auto";
+  audio.muted = muted;
+  // The call reuses a player whose unlock clip deliberately had zero volume.
+  audio.volume = 1;
+  // Set the default too, so loading another speech clip keeps the faster pace.
+  audio.defaultPlaybackRate = 1.2;
+  audio.preservesPitch = true;
+  audio.src = sourceUrl;
+  audio.playbackRate = 1.2;
+}
 
 const phaseTransitions: Record<CallPhase, readonly CallPhase[]> = {
   listening: ["thinking"],
@@ -98,6 +115,15 @@ export function canApplyVoiceSessionResult(session: VoiceSession, currentSession
 
 export function canRestartListening(session: VoiceSession, currentSessionId: number): boolean {
   return canApplyVoiceSessionResult(session, currentSessionId) && session.phase === "speaking";
+}
+
+export function shouldRestartPressAndHoldRecognition(options: {
+  held: boolean;
+  released: boolean;
+  cancelled: boolean;
+  failed: boolean;
+}): boolean {
+  return options.held && !options.released && !options.cancelled && !options.failed;
 }
 
 export function extractFinalTranscript(event: RecognitionResultEventLike): string {
@@ -147,6 +173,9 @@ export function stopAudioPlayback(
   } catch {
     // URL cleanup is best effort because it should never block ending a call.
   }
+
+  // Removing media handlers must also release callers awaiting playback.
+  try { playback?.onStopped?.(); } catch { /* Continue cleanup after a consumer failure. */ }
 
   return null;
 }

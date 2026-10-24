@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { put } from "@vercel/blob";
+import { persistOssUpload } from "@/lib/oss-upload";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
@@ -15,8 +15,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-// The browser normally uploads material directly to Blob. Keep this narrow
-// fallback below typical serverless request-body limits.
+// Small multipart submissions share the OSS storage used by the upload route.
 const MAX_INLINE_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 function persistenceFailureResponse(error: unknown, fallbackMessage: string) {
@@ -44,23 +43,10 @@ function isFile(value: FormDataEntryValue | null): value is File {
   return Boolean(value && typeof value === "object" && "arrayBuffer" in value && "size" in value);
 }
 
-function safeFileName(value: string) {
-  return value.replace(/[^a-zA-Z0-9._-]/g, "-").slice(-120) || "upload";
-}
-
 async function saveInlineUpload(file: File, folder: string) {
   if (!isFile(file) || file.size <= 0 || file.size > MAX_INLINE_UPLOAD_BYTES) return null;
   try {
-    return await put(
-      `science-resources/${folder}/${crypto.randomUUID()}-${safeFileName(file.name)}`,
-      file,
-      {
-        access: "public",
-        contentType: file.type || "application/octet-stream",
-        addRandomSuffix: false,
-        cacheControlMaxAge: 31536000,
-      },
-    );
+    return await persistOssUpload(file, {folder: `science-resources/${folder}`, maxBytes: MAX_INLINE_UPLOAD_BYTES});
   } catch {
     return null;
   }

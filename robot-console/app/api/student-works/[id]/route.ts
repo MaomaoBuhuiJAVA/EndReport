@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { resolveMediaUrl } from "@/lib/media-links";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -45,8 +46,8 @@ export async function GET(_request: Request, { params }: Params) {
       fileName: work.fileName,
       mimeType: work.mimeType,
       fileSize: work.fileSize,
-      mediaUrl: work.mediaUrl,
-      thumbnailUrl: work.thumbnailUrl,
+      mediaUrl: resolveMediaUrl(work.mediaUrl),
+      thumbnailUrl: work.thumbnailUrl ? resolveMediaUrl(work.thumbnailUrl) : work.thumbnailUrl,
       status: work.status,
       visibility: work.visibility,
       ...(privateView ? { ownerId: work.ownerId, reviewNote: work.reviewNote, libraryDocumentId: work.libraryDocumentId } : {}),

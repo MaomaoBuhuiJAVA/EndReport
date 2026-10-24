@@ -11,7 +11,7 @@
 - **服务端适配器**：在 Next.js Route Handler 中保存 Dify API 密钥，向 Dify 发送 `inputs`、`query`、`response_mode`、`user` 和可选 `conversation_id`，只把 `answer` 和会话编号返回浏览器。
 - **Next.js + TypeScript**：用于实现官网页面、实验室资源中心、对话界面和服务端接口，前后端在同一项目中部署。
 - **Prisma + PostgreSQL**：存储园所资料、知识分块、科学资源、照片、功能室及用户数据。
-- **Vercel**：用于持续部署网站和服务端接口；模型密钥仅配置在服务端环境变量中。
+- **阿里云 ECS**：运行网站与服务端接口；模型密钥只保存在服务器受限的环境配置中，媒体使用杭州私有 OSS。
 
 ## （二）开发过程
 

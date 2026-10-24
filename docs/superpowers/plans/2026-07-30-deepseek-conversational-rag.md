@@ -6,7 +6,7 @@
 
 **架构：** `app/api/ai-chat/route.ts` 继续负责 HTTP 请求校验、资料检索和响应结构；新增 `src/lib/deepseek.ts` 只负责构造 DeepSeek 请求、超时处理和响应解析。路由无条件将限制后的资料上下文和近期对话传给该模块，模型无结果时沿用本地资料库回复。
 
-**技术栈：** Next.js 16 Route Handler、TypeScript、Vitest、DeepSeek Chat Completions API、Vercel CLI。
+**技术栈：** Next.js 16 Route Handler、TypeScript、Vitest、DeepSeek Chat Completions API。
 
 ---
 
@@ -270,7 +270,7 @@ git add robot-console/package.json robot-console/package-lock.json robot-console
 git commit -m "test: add Vitest coverage for AI chat"
 ```
 
-### 任务 4：更新 GitHub 和 Vercel 生产环境
+### 任务 4：更新 GitHub 和阿里云生产环境
 
 **文件：**
 - 不创建或提交任何密钥文件。
@@ -287,15 +287,13 @@ git commit -m "test: add Vitest coverage for AI chat"
 
 预期：远端 `master` 更新成功。
 
-- [ ] **步骤 3：把用户提供的密钥写入 Vercel 的生产和预览环境**
+- [ ] **步骤 3：把用户提供的密钥写入阿里云生产环境**
 
-在不打印密钥、不写入受版本控制文件的前提下，通过 Vercel CLI 向 `end-report` 项目的 `production` 和 `preview` 更新 `DEEPSEEK_API_KEY`。保留已存在的 `DEEPSEEK_API_URL`。
+在不打印密钥、不写入受版本控制文件的前提下，将 `DEEPSEEK_API_KEY` 配置到阿里云 ECS 上的应用运行环境，并保留已有的 `DEEPSEEK_API_URL`。
 
-- [ ] **步骤 4：部署生产版本并记录 URL**
+- [ ] **步骤 4：通过阿里云既有发布流程部署并记录版本**
 
-运行：`npx --yes vercel@latest --prod --project end-report --scope maomaobuhuijavas-projects`
-
-预期：部署成功并返回生产访问 URL。
+按工作区的 ECS 发布与回滚流程部署已验证版本，并记录发布版本和正式访问地址。
 
 - [ ] **步骤 5：线上冒烟验证**
 
@@ -303,6 +301,6 @@ git commit -m "test: add Vitest coverage for AI chat"
 
 ## 自检结果
 
-- 规格覆盖：任务 1 和 2 实现“每次检索后调用模型”、资料约束和兜底；任务 2 保持来源、图片和两个既有前端入口的契约；任务 3 验证代码质量；任务 4 覆盖密钥配置、GitHub 推送和 Vercel 发布。
+- 规格覆盖：任务 1 和 2 实现“每次检索后调用模型”、资料约束和兜底；任务 2 保持来源、图片和两个既有前端入口的契约；任务 3 验证代码质量；任务 4 覆盖密钥配置、GitHub 推送和阿里云发布。
 - 占位检查：文档不含 TBD、TODO 或未定义的操作；每个代码步骤给出了具体接口、测试和命令。
 - 类型一致性：`ConversationMessage` 作为模型历史的唯一类型；模型函数统一返回 `string | null`，路由以此决定 `provider` 和兜底行为。

@@ -20,6 +20,10 @@
 # production
 /build
 
+# Private generated documents, signing keys, and local provider smoke results
+/.ai-artifacts/
+/tmp/native-workflow-smoke/
+
 # misc
 .DS_Store
 *.pem
@@ -34,9 +38,11 @@ yarn-error.log*
 .env*
 !.env.example
 
-# vercel
-.vercel
-
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Local experiments and generated runtime evidence
+tmp/
+gcm-diagnose.log
+*.sse

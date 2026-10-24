@@ -1,10 +1,11 @@
 "use client";
 
-/* Student uploads are public Blob URLs with runtime hosts; next/image cannot
- * optimize an unknown host without weakening the deployment configuration. */
+/* Student uploads use same-origin media routes, so next/image is unnecessary. */
 /* eslint-disable @next/next/no-img-element */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { BrandLogo } from "@/components/BrandLogo";
+import { AccountMenu } from "@/components/AccountMenu";
 import {
   Check,
   ChevronRight,
@@ -22,7 +23,7 @@ import {
   X,
 } from "lucide-react";
 
-type SessionUser = { id: string; email: string; name: string; role: "USER" | "ADMIN" };
+type SessionUser = import("@/lib/auth").SessionUser;
 
 type Work = {
   id: string;
@@ -182,8 +183,9 @@ export function StudentWorks({ initialUser }: { initialUser: SessionUser | null 
   return (
     <main className="student-works-page">
       <header className="student-works-header">
-        <div><span className="student-works-kicker">科小贝 · 成长档案</span><h1>科学作品展示</h1><p>把每次观察、表达和尝试留在自己的探究记录里。</p></div>
+        <div><a className="mb-3 inline-flex" href="/" aria-label="科小贝首页"><BrandLogo variant="wordmark" size={48} /></a><br /><span className="student-works-kicker">科小贝 · 成长档案</span><h1>科学作品展示</h1><p>把每次观察、表达和尝试留在自己的探究记录里。</p></div>
         <a className="student-works-home" href="/lab">返回实验室 <ChevronRight size={16} /></a>
+        <AccountMenu initialUser={user} />
       </header>
 
       <section className="student-works-shell">
@@ -196,7 +198,7 @@ export function StudentWorks({ initialUser }: { initialUser: SessionUser | null 
 
         {
           <form className="student-work-upload" onSubmit={submitUpload}>
-            <div className="student-work-upload__intro"><Upload size={20} /><div><strong>提交一件新作品</strong><span>无需注册，提交后即可在公开展示中查看。</span></div></div>
+            <div className="student-work-upload__intro"><Upload size={20} /><div><strong>提交一件新作品</strong><span>已验证的老师和本园家长可投稿，作品经园方审核后展示。</span></div></div>
             <div className="student-work-upload__fields">
               <input aria-label="作品标题" placeholder="作品标题" value={upload.title} onChange={(event) => setUpload({ ...upload, title: event.target.value })} />
               <input aria-label="班级或小组" placeholder="班级 / 小组（可选）" value={upload.studentLabel} onChange={(event) => setUpload({ ...upload, studentLabel: event.target.value })} />

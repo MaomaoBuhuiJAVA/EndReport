@@ -1,6 +1,7 @@
 import type { ScienceLabLink } from "@/lib/science-lab-links";
 import { parseAgentResult, type AgentResult } from "@/lib/agent-result";
-import { normalizeDifyOutputFiles, type AiChatOutputFile } from "@/lib/ai-chat-files";
+import { normalizeAiChatOutputFiles, type AiChatOutputFile } from "@/lib/ai-chat-files";
+import { sanitizeTeachingState, type TeachingWorkflowState } from "@/lib/native-workflow/state";
 
 export type AiChatPhoto = {
   id: string;
@@ -22,7 +23,7 @@ export type AiChatCoverSync = {
   coverUrl: string;
 };
 
-export type AiChatProvider = "dify" | "deepseek" | "fallback";
+export type AiChatProvider = "native" | "fallback";
 
 const RESPONSE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -58,6 +59,7 @@ export type AiChatStreamEvent =
       agentResult?: AgentResult;
       coverSync?: AiChatCoverSync;
       files?: AiChatOutputFile[];
+      workflowState?: TeachingWorkflowState;
     }
   | { type: "delta"; delta: string }
   | { type: "status"; message: string }
@@ -67,6 +69,7 @@ export type AiChatStreamEvent =
       reply: string;
       responseId?: string;
       conversationId?: string;
+      workflowState?: TeachingWorkflowState;
       photos?: AiChatPhoto[];
       sources?: string[];
       labLinks?: ScienceLabLink[];
@@ -82,6 +85,7 @@ export type AiChatResponse = {
   provider?: AiChatProvider;
   responseId?: string;
   conversationId?: string;
+  workflowState?: TeachingWorkflowState;
   photos?: AiChatPhoto[];
   sources?: string[];
   labLinks?: ScienceLabLink[];
@@ -118,9 +122,9 @@ function parseFrame(frame: string): AiChatStreamEvent | null {
     const type = (value as { type?: unknown }).type;
     if (type === "meta") {
       const payload = value as Record<string, unknown>;
-      const { attachment, agentResult, coverSync, files, ...rest } = payload;
+      const { attachment, agentResult, coverSync, files, workflowState, ...rest } = payload;
       const result = parsedAgentResult(undefined, agentResult);
-      const outputFiles = normalizeDifyOutputFiles(files, { sameOrigin: currentSameOrigin() });
+      const outputFiles = normalizeAiChatOutputFiles(files, { sameOrigin: currentSameOrigin() });
       return {
         ...rest,
         type: "meta",
@@ -128,6 +132,7 @@ function parseFrame(frame: string): AiChatStreamEvent | null {
         ...(result ? { agentResult: result } : {}),
         ...(isCoverSync(coverSync) ? { coverSync } : {}),
         ...(outputFiles.length ? { files: outputFiles } : {}),
+        ...(sanitizeTeachingState(workflowState) ? {workflowState: sanitizeTeachingState(workflowState)} : {}),
       } as AiChatStreamEvent;
     }
     if (type === "delta" && typeof (value as { delta?: unknown }).delta === "string") {
@@ -138,9 +143,9 @@ function parseFrame(frame: string): AiChatStreamEvent | null {
     }
     if (type === "done" && typeof (value as { reply?: unknown }).reply === "string") {
       const payload = value as Record<string, unknown>;
-      const { attachment, agentResult, responseId, coverSync, files, ...rest } = payload;
+      const { attachment, agentResult, responseId, coverSync, files, workflowState, ...rest } = payload;
       const result = parsedAgentResult(payload.reply, agentResult);
-      const outputFiles = normalizeDifyOutputFiles(files, { sameOrigin: currentSameOrigin() });
+      const outputFiles = normalizeAiChatOutputFiles(files, { sameOrigin: currentSameOrigin() });
       return {
         ...rest,
         type: "done",
@@ -149,6 +154,7 @@ function parseFrame(frame: string): AiChatStreamEvent | null {
         ...(result ? { agentResult: result } : {}),
         ...(isCoverSync(coverSync) ? { coverSync } : {}),
         ...(outputFiles.length ? { files: outputFiles } : {}),
+        ...(sanitizeTeachingState(workflowState) ? {workflowState: sanitizeTeachingState(workflowState)} : {}),
       } as AiChatStreamEvent;
     }
     if (type === "error") return value as AiChatStreamEvent;
@@ -198,6 +204,7 @@ export async function readAiChatResponse(
       reply?: unknown;
       provider?: unknown;
       conversationId?: unknown;
+      workflowState?: unknown;
       responseId?: unknown;
       photos?: unknown;
       sources?: unknown;
@@ -208,14 +215,15 @@ export async function readAiChatResponse(
       files?: unknown;
     };
     const agentResult = parsedAgentResult(payload.reply, payload.agentResult);
-    const outputFiles = normalizeDifyOutputFiles(payload.files, { sameOrigin: currentSameOrigin() });
+    const outputFiles = normalizeAiChatOutputFiles(payload.files, { sameOrigin: currentSameOrigin() });
     return {
       reply: typeof payload.reply === "string" ? payload.reply : "",
-      ...(payload.provider === "dify" || payload.provider === "deepseek" || payload.provider === "fallback"
+      ...(payload.provider === "native" || payload.provider === "fallback"
         ? { provider: payload.provider }
         : {}),
       ...(isResponseId(payload.responseId) ? { responseId: payload.responseId } : {}),
       ...(typeof payload.conversationId === "string" && payload.conversationId ? { conversationId: payload.conversationId } : {}),
+      ...(sanitizeTeachingState(payload.workflowState) ? {workflowState: sanitizeTeachingState(payload.workflowState)} : {}),
       ...(Array.isArray(payload.photos) ? { photos: payload.photos as AiChatPhoto[] } : {}),
       ...(Array.isArray(payload.sources) ? { sources: payload.sources.filter((source): source is string => typeof source === "string") } : {}),
       ...(Array.isArray(payload.labLinks) ? { labLinks: payload.labLinks as ScienceLabLink[] } : {}),
@@ -239,6 +247,7 @@ export async function readAiChatResponse(
         ...(event.agentResult ? { agentResult: event.agentResult } : {}),
         ...(event.coverSync ? { coverSync: event.coverSync } : {}),
         ...(event.files ? { files: event.files } : {}),
+        ...(event.workflowState ? {workflowState: event.workflowState} : {}),
       };
     } else if (event.type === "delta") {
       result = { ...result, reply: `${result.reply}${event.delta}` };
@@ -256,6 +265,7 @@ export async function readAiChatResponse(
         ...(event.agentResult ? { agentResult: event.agentResult } : {}),
         ...(event.coverSync ? { coverSync: event.coverSync } : {}),
         ...(event.files ? { files: event.files } : {}),
+        ...(event.workflowState ? {workflowState: event.workflowState} : {}),
       };
     }
   }

@@ -40,7 +40,7 @@ describe("student work review", () => {
       id: "work-1",
       title: "纸片桥",
       description: "观察承重变化",
-      mediaUrl: "https://blob.example/work.png",
+      mediaUrl: "https://media.example/work.png",
       mimeType: "image/png",
       ownerId: "student-1",
       status: "PENDING",

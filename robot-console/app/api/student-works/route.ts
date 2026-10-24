@@ -1,7 +1,8 @@
-import { put } from "@vercel/blob";
+import { persistOssUpload } from "@/lib/oss-upload";
 import { NextResponse } from "next/server";
-import { getPublicActor, getSessionUser } from "@/lib/auth";
+import { getFreshSessionUser, getPublicActor, getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { resolveMediaUrl } from "@/lib/media-links";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const allowedMime = /^(image|video|audio)\//i;
@@ -42,8 +43,8 @@ function serializeWork(work: WorkWithCounts, includePrivate = false) {
     fileName: work.fileName,
     mimeType: work.mimeType,
     fileSize: work.fileSize ?? null,
-    mediaUrl: work.mediaUrl,
-    thumbnailUrl: work.thumbnailUrl ?? null,
+    mediaUrl: resolveMediaUrl(work.mediaUrl),
+    thumbnailUrl: work.thumbnailUrl ? resolveMediaUrl(work.thumbnailUrl) : null,
     status: work.status,
     visibility: work.visibility,
     ...(includePrivate ? { ownerId: work.ownerId, reviewNote: work.reviewNote ?? null } : {}),
@@ -53,10 +54,6 @@ function serializeWork(work: WorkWithCounts, includePrivate = false) {
     likesCount: work._count?.likes ?? 0,
     commentsCount: work._count?.comments ?? 0,
   };
-}
-
-function safeFileName(fileName: string) {
-  return fileName.replace(/[^a-zA-Z0-9._-]/g, "-").slice(-120) || "upload";
 }
 
 function acceptsFile(file: File) {
@@ -106,8 +103,12 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const session = await getSessionUser();
-  const actor = session ?? await getPublicActor();
+  let actor;
+  try { actor = await getFreshSessionUser(); }
+  catch { return NextResponse.json({ error: "暂时无法核对投稿权限，请稍后重试" }, { status: 503 }); }
+  if (!actor) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  // Teacher/parent verification is a separate workflow; ordinary signup never grants it.
+  if (actor.role !== "ADMIN" && !(actor.identityVerified && (actor.accountType === "TEACHER" || actor.accountType === "PARENT"))) return NextResponse.json({ error: "投稿需要园方核验教师或本园家长身份，请联系园方申请" }, { status: 403 });
 
   let form: FormData;
   try {
@@ -131,14 +132,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "文件类型不支持或文件超过 20MB" }, { status: 400 });
   }
 
-  const blobName = `student-works/${actor.id}/${crypto.randomUUID()}-${safeFileName(fileValue.name)}`;
-  let blob: { url: string };
+  let stored: { url: string };
   try {
-    blob = await put(blobName, fileValue, {
-      access: "public",
-      contentType: fileValue.type || "application/octet-stream",
-      addRandomSuffix: false,
-    });
+    stored = await persistOssUpload(fileValue, {folder: `student-works/${actor.id}`, maxBytes: MAX_FILE_SIZE});
   } catch {
     return NextResponse.json({ error: "文件暂时无法保存，请稍后重试" }, { status: 503 });
   }
@@ -154,10 +150,10 @@ export async function POST(request: Request) {
         fileName: fileValue.name,
         mimeType: fileValue.type || "application/octet-stream",
         fileSize: fileValue.size,
-        mediaUrl: blob.url,
-        thumbnailUrl: allowedMime.test(fileValue.type) && fileValue.type.startsWith("image/") ? blob.url : null,
-        status: "APPROVED",
-        visibility: "PUBLIC",
+        mediaUrl: stored.url,
+        thumbnailUrl: allowedMime.test(fileValue.type) && fileValue.type.startsWith("image/") ? stored.url : null,
+        status: "PENDING",
+        visibility: "TEACHER_ONLY",
       },
       include: { _count: { select: { likes: true, comments: true } } },
     });

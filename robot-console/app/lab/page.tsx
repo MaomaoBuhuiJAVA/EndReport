@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ScienceLab } from "@/components/ScienceLab";
 import { getScienceKnowledgeSummaries } from "@/lib/science-data";
 import type { ScienceKnowledgeSummary } from "@/lib/science-types";
+import { getSessionUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +36,8 @@ export default async function LabPage({
   }>;
 }) {
   const { item, resource, type } = await searchParams;
-  const items = (await getScienceKnowledgeSummaries()).map(listItem);
+  const [summaries, user] = await Promise.all([getScienceKnowledgeSummaries(), getSessionUser()]);
+  const items = summaries.map(listItem);
   const initialResourceId =
     typeof item === "string" ? item : typeof resource === "string" ? resource : undefined;
   const initialCategory = typeof type === "string" ? type : undefined;
@@ -46,6 +48,7 @@ export default async function LabPage({
       initialItems={items}
       initialResourceId={initialResourceId}
       initialCategory={initialCategory}
+      initialUser={user}
     />
   );
 }

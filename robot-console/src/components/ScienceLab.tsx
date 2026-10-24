@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { upload } from "@vercel/blob/client";
+import { uploadScienceMaterial } from "@/lib/science-upload-client";
 import { AnimatePresence, motion } from "motion/react";
 import {
   ArrowRight,
@@ -20,11 +20,12 @@ import {
   PlayCircle,
   RotateCcw,
   Search,
-  Sparkles,
   Upload,
   X,
 } from "lucide-react";
-import { GardenSeal } from "@/components/GardenSeal";
+import { BrandLogo } from "@/components/BrandLogo";
+import { AccountMenu } from "@/components/AccountMenu";
+import type { SessionUser } from "@/lib/auth";
 import Markdown from "react-markdown";
 import {
   useCallback,
@@ -40,6 +41,7 @@ import { GooeyNav, type GooeyNavItem } from "@/components/GooeyNav";
 import { MobileAppNav, type MobileAppNavItem } from "@/components/MobileAppNav";
 import { SciencePet } from "@/components/SciencePet";
 import type { AiChatCoverSync } from "@/lib/ai-chat-stream";
+import { isPlayableMediaUrl } from "@/lib/media-url";
 import {
   SCIENCE_AGE_GROUPS,
   type ScienceKnowledgeItem,
@@ -62,6 +64,7 @@ const labNavItems: GooeyNavItem[] = [
   { key: "overview", label: "科小贝首页", href: "/" },
   { key: "lab", label: "科小贝资源库", href: "/lab" },
   { key: "works", label: "作品展示", href: "/works" },
+  { key: "games", label: "科学乐园", href: "/games" },
 ];
 
 const labMobileNavItems: MobileAppNavItem[] = [
@@ -78,7 +81,6 @@ const labHeroPhotos = [
   "/gallery/campus-07.webp",
 ];
 
-type ExperimentAgentAction = "analyze" | "similar";
 
 function ResourceIcon({ type }: { type: string }) {
   if (type === "图片资源") return <ImageIcon size={14} />;
@@ -191,17 +193,12 @@ function dynamicLiteratureCover(item: ScienceKnowledgeSummary) {
 }
 
 function isDirectVideoUrl(value: string) {
-  try {
-    const url = new URL(value);
-    return /\.(?:mp4|webm|mov|m4v)(?:$|[?#])/iu.test(url.pathname);
-  } catch {
-    return false;
-  }
+  return isPlayableMediaUrl(value);
 }
 
 function videoMimeType(value: string) {
   try {
-    const pathname = new URL(value).pathname.toLowerCase();
+    const pathname = new URL(value, "https://local.invalid").pathname.toLowerCase();
     if (pathname.endsWith(".webm")) return "video/webm";
     if (pathname.endsWith(".mov")) return "video/quicktime";
     if (pathname.endsWith(".m4v")) return "video/x-m4v";
@@ -298,11 +295,9 @@ function StoryVideoCover({ source, fallback, onError }: { source: string; fallba
 function KnowledgeCard({
   item,
   onOpen,
-  onAgentAction,
 }: {
   item: ScienceKnowledgeSummary;
   onOpen: () => void;
-  onAgentAction: (item: ScienceKnowledgeSummary, action: ExperimentAgentAction) => void;
 }) {
   const thumbnail = publicImages(item)[0];
   const isLiterature = item.category === "科学诗" || item.category === "科学故事";
@@ -336,33 +331,6 @@ function KnowledgeCard({
     }
     setFailedStoryCover(storyCover);
   }, [item.coverUrl, storyCover, storyCoverFailed, storyVideoUrl]);
-  const [agentMenuOpen, setAgentMenuOpen] = useState(false);
-  const agentActionsRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!agentMenuOpen) return;
-
-    function closeAgentMenu(event: PointerEvent) {
-      if (!agentActionsRef.current?.contains(event.target as Node)) setAgentMenuOpen(false);
-    }
-
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setAgentMenuOpen(false);
-    }
-
-    document.addEventListener("pointerdown", closeAgentMenu);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeAgentMenu);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [agentMenuOpen]);
-
-  function chooseAgentAction(action: ExperimentAgentAction) {
-    setAgentMenuOpen(false);
-    onAgentAction(item, action);
-  }
-
   return (
     <div className="knowledge-card-shell">
     <button
@@ -386,7 +354,7 @@ function KnowledgeCard({
                 }}
               />
             ) : dynamicCover ? (
-              // Generated cover URLs can be served by Blob or Dify at runtime.
+              // Generated cover URLs can be served by OSS or Dify at runtime.
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={literatureImage}
@@ -464,31 +432,6 @@ function KnowledgeCard({
         </span>
       </span>
     </button>
-      {item.category === "科学实验" ? (
-        <div className="knowledge-card__agent-actions" ref={agentActionsRef}>
-          <button
-            type="button"
-            className="knowledge-card__agent-trigger"
-            aria-label={`打开《${item.title}》的 AI 操作`}
-            aria-expanded={agentMenuOpen}
-            aria-haspopup="menu"
-            title="AI 实验操作"
-            onClick={() => setAgentMenuOpen((isOpen) => !isOpen)}
-          >
-            <Sparkles size={15} />
-          </button>
-          {agentMenuOpen ? (
-            <div className="knowledge-card__agent-menu" role="menu" aria-label={`${item.title} 的 AI 操作`}>
-              <button type="button" role="menuitem" onClick={() => chooseAgentAction("analyze")}>
-                AI 解析这个实验
-              </button>
-              <button type="button" role="menuitem" onClick={() => chooseAgentAction("similar")}>
-                生成类似主题方案
-              </button>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -826,10 +769,6 @@ function summaryFromMaterialResponse(
   return result;
 }
 
-function uploadPathSegment(fileName: string) {
-  return fileName.replace(/[^a-zA-Z0-9._-]/g, "-").replace(/-+/g, "-").slice(-100) || "attachment";
-}
-
 /**
  * The story video is still local at this point, so its first decodable frame
  * can be safely rendered to a canvas and saved as the card cover.  A failed
@@ -943,22 +882,7 @@ async function uploadMaterialFile(
   folder: "poems" | "stories" | "supporting" | "covers",
   onProgress: (percentage: number | null) => void,
 ) {
-  try {
-    const blob = await upload(
-      `science-resources/${folder}/${crypto.randomUUID()}-${uploadPathSegment(file.name)}`,
-      file,
-      {
-        access: "public",
-        handleUploadUrl: "/api/science-resources/upload",
-        ...(file.type ? { contentType: file.type } : {}),
-        multipart: file.size > 8 * 1024 * 1024,
-        onUploadProgress: ({ percentage }) => onProgress(Math.round(percentage)),
-      },
-    );
-    return blob.url;
-  } catch {
-    throw new Error("文件暂时无法上传，请稍后重试");
-  }
+  return uploadScienceMaterial(file, folder, onProgress);
 }
 
 function ScienceMaterialDialog({
@@ -1247,10 +1171,12 @@ export function ScienceLab({
   initialItems,
   initialResourceId,
   initialCategory,
+  initialUser,
 }: {
   initialItems: ScienceKnowledgeSummary[];
   initialResourceId?: string;
   initialCategory?: string;
+  initialUser?: SessionUser | null;
 }) {
   const [items, setItems] = useState<ScienceKnowledgeSummary[]>(initialItems);
   const [selection, setSelection] = useState<ScienceSelection>(() =>
@@ -1414,30 +1340,6 @@ export function ScienceLab({
     }
   }, []);
 
-  const openExperimentAgent = useCallback(
-    (item: ScienceKnowledgeSummary, action: ExperimentAgentAction) => {
-      const prompt = action === "analyze"
-        ? `请解析科学实验《${item.title}》。年龄段：${item.ageLabel || "未指定"}；主题：${item.topic || "未指定"}；资源 ID：${item.id}。我会继续补充现场观察或图片。`
-        : `请参考科学实验《${item.title}》生成一份同主题活动方案。主题：《${item.title}》；班级（适用年龄段）：${item.ageLabel || "未指定"}；活动时长：20 分钟；输出格式：Word 文档。只输出当前主题方案，不附加其他实验链接或推荐资源。请同时导出为 DOCX 文件。参考资料主题：${item.topic || "未指定"}；资源 ID：${item.id}。`;
-      window.dispatchEvent(new CustomEvent("kexiaobei:open", {
-        detail: {
-          prompt,
-          ...(action === "similar"
-            ? {
-              lessonPlan: {
-                title: item.title,
-                ageGroup: item.ageLabel || "中班",
-                duration: "20 分钟",
-                wantsDocx: true,
-              },
-            }
-            : {}),
-        },
-      }));
-    },
-    [],
-  );
-
   const submitMaterial = useCallback(async ({
     category,
     form,
@@ -1550,19 +1452,8 @@ export function ScienceLab({
               item.id === createdSummary.id ? { ...item, coverUrl } : item
             )));
 
-            let persistedCoverUrl = coverUrl;
-            if (!coverSynced) {
-              const persistResponse = await fetch("/api/science-resources/sync-cover", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id: createdSummary.id, coverUrl }),
-              });
-              const persistedPayload = (await persistResponse.json().catch(() => null)) as unknown;
-              persistedCoverUrl = isRecord(persistedPayload)
-                ? firstText(persistedPayload, ["coverUrl", "cover_url"])
-                : "";
-              if (!persistResponse.ok || !persistedCoverUrl) throw new Error("cover persistence failed");
-            }
+            if (!coverSynced) throw new Error("cover persistence failed");
+            const persistedCoverUrl = coverUrl;
             const persisted = { ...createdSummary, coverUrl: persistedCoverUrl };
 
             setItems((current) => current.map((item) => item.id === persisted.id ? persisted : item));
@@ -1571,7 +1462,7 @@ export function ScienceLab({
               description: `《${persisted.title}》的卡通封面已自动生成`,
             });
           } catch {
-            setResourceNotice(`科学诗《${createdSummary.title}》已添加，封面暂时未能生成，可稍后重新提交生成。`);
+            setResourceNotice(`${category}《${createdSummary.title}》已添加，封面暂时未完成，请稍后重试。`);
           }
         })();
       }
@@ -1609,10 +1500,11 @@ export function ScienceLab({
       <header className="lab-site-header">
         <div className="lab-site-header__inner">
           <Link className="lab-brand" href="/">
-            <GardenSeal glyph="芽" tone="teal" />
-            <strong>国科温州二幼</strong>
+            <BrandLogo size={42} />
+            <strong>科小贝资源库</strong>
           </Link>
           <GooeyNav items={labNavItems} activeKey="lab" />
+          <AccountMenu initialUser={initialUser} />
         </div>
       </header>
 
@@ -1730,7 +1622,6 @@ export function ScienceLab({
                     key={item.id}
                     item={item}
                     onOpen={() => void openDetail(item)}
-                    onAgentAction={openExperimentAgent}
                   />
                 ))}
               </div>

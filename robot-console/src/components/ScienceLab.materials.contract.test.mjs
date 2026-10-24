@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 const component = fs.readFileSync(path.resolve("src/components/ScienceLab.tsx"), "utf8");
+const uploadClient = fs.readFileSync(path.resolve("src/lib/science-upload-client.ts"), "utf8");
 const styles = fs.readFileSync(path.resolve("app/globals.css"), "utf8");
 
 test("adds the material entry only for science poems and stories", () => {
@@ -34,10 +35,10 @@ test("offers an optional cover-image upload and includes it in the material subm
   assert.match(dialog, /category,\s*form,\s*coverFile,\s*poemFile,\s*videoFile,\s*supportingFile,/);
 });
 
-test("uploads files directly to Blob before saving catalogue metadata", () => {
-  assert.match(component, /import \{ upload \} from "@vercel\/blob\/client"/);
-  assert.match(component, /handleUploadUrl: "\/api\/science-resources\/upload"/);
-  assert.match(component, /multipart: file\.size > 8 \* 1024 \* 1024/);
+test("uploads files through the server-side OSS endpoint before saving catalogue metadata", () => {
+  assert.match(component, /import \{ uploadScienceMaterial \} from "@\/lib\/science-upload-client"/);
+  assert.match(uploadClient, /xhr\.open\("POST", "\/api\/science-resources\/upload"\)/);
+  assert.match(uploadClient, /xhr\.timeout = 180_000/);
   assert.match(component, /uploadMaterialFile\(videoFile, "stories", onUploadProgress\)/);
   assert.match(component, /requestBody\.set\("videoUrl", videoUrl\)/);
   assert.match(component, /requestBody\.set\("documentUrl", await uploadMaterialFile/);
@@ -72,8 +73,10 @@ test("uses the first story-video frame as a WebP cover before submitting the sto
 
 test("generates and persists a poem cover only when no user cover was uploaded", () => {
   const poemFlow = component.match(/if \(category === "科学诗" && !uploadedCoverReady\) \{[\s\S]*?\n      \}/)?.[0] ?? "";
-  assert.match(poemFlow, /\/api\/science-resources\/generate-cover/);
-  assert.match(poemFlow, /method: "PATCH"/);
+  assert.match(poemFlow, /fetch\("\/api\/science-resources\/generate-cover"/);
+  assert.match(poemFlow, /method: "POST"/);
+  assert.match(poemFlow, /coverPayload, \["coverUrl"\]/);
+  assert.match(poemFlow, /coverPayload\.synced === true/);
   assert.match(poemFlow, /卡通封面已自动生成/);
   assert.doesNotMatch(poemFlow, /DIFY_API_KEY/);
 });
@@ -99,7 +102,7 @@ test("does not repeat a user-submitted poem or story cover in its detail gallery
   assert.match(component, /const userSubmittedLiterature =/);
   assert.match(component, /display\.category === "科学诗" \|\| display\.category === "科学故事"/);
   assert.match(component, /item\?\.allocationBasis === "用户提交"/);
-  assert.match(component, /const detailImages = userSubmittedLiterature/);
+  assert.match(component, /const detailImages = display\.category === "科学故事" \|\| userSubmittedLiterature/);
   assert.match(component, /images\.filter\(\(image\) => !\/\(\?:封面\|cover\)\/iu\.test\(image\.title\)\)/);
 
   const literatureGallery = component.match(/\{detailImages\.length && display\.category !== "科学实验" \?[\s\S]*?\) : null\}/)?.[0] ?? "";

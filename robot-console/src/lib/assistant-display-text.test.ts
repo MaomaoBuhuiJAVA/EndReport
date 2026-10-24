@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { assistantDisplayText } from "./assistant-display-text";
+import { assistantDisplayText, hasVisibleAssistantText } from "./assistant-display-text";
 
 describe("assistantDisplayText", () => {
+  it("does not treat whitespace-only streaming content as a visible answer", () => {
+    expect(hasVisibleAssistantText(" \n\t")).toBe(false);
+    expect(hasVisibleAssistantText(" 先")).toBe(true);
+  });
+
   it("removes the structured result fence while keeping the readable reply", () => {
     const text = [
       "我先整理图片中能直接看到的内容。",

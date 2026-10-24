@@ -5,6 +5,8 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --font-geist-sans: Arial, "Microsoft YaHei", "PingFang SC", ui-sans-serif, system-ui, sans-serif;
+  --font-geist-mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
   --background: #f8f5ed;
   --foreground: #21312e;
   --card: oklch(1 0 0);
@@ -42,11 +44,9 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: "Geist", "Geist Fallback", "Microsoft YaHei", "PingFang SC",
-    ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
-  --font-heading: "Geist", "Geist Fallback", "Microsoft YaHei", "PingFang SC",
-    ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-geist-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -88,8 +88,7 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: "Geist", "Geist Fallback", "Microsoft YaHei", "PingFang SC",
-    Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans);
   text-rendering: optimizeLegibility;
 }
 
@@ -1371,67 +1370,6 @@ img {
   height: 100%;
 }
 
-.knowledge-card__agent-actions {
-  position: absolute;
-  z-index: 6;
-  right: 89px;
-  bottom: 17px;
-}
-
-.knowledge-card__agent-trigger {
-  display: grid;
-  width: 27px;
-  height: 27px;
-  place-items: center;
-  border: 1px solid #c5dfd7;
-  border-radius: 50%;
-  background: #f4faf7;
-  color: #1f6f62;
-  cursor: pointer;
-}
-
-.knowledge-card__agent-trigger:hover,
-.knowledge-card__agent-trigger[aria-expanded="true"] {
-  border-color: #6cae9f;
-  background: #e0f1ea;
-  color: #176052;
-}
-
-.knowledge-card__agent-menu {
-  position: absolute;
-  z-index: 7;
-  right: 0;
-  bottom: calc(100% + 8px);
-  display: grid;
-  width: max-content;
-  min-width: 164px;
-  padding: 5px;
-  border: 1px solid #cfe1db;
-  border-radius: 7px;
-  background: #fff;
-  box-shadow: 0 12px 25px rgba(31, 71, 67, 0.16);
-}
-
-.knowledge-card__agent-menu button {
-  min-height: 32px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  padding: 6px 8px;
-  color: #35514a;
-  cursor: pointer;
-  font-size: 12px;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.knowledge-card__agent-menu button:hover,
-.knowledge-card__agent-menu button:focus-visible {
-  background: #eaf5f0;
-  color: #176b5d;
-  outline: 0;
-}
-
 .load-more {
   display: block;
   min-width: 148px;
@@ -2544,16 +2482,41 @@ img {
 }
 
 .science-pet__sprite {
+  position: relative;
   display: block;
   width: 104px;
   height: 112px;
   margin: 4px auto 0;
-  background-image: url("/assets/kexiaobei-lab-spritesheet-v3.png");
-  background-repeat: no-repeat;
-  background-position: var(--pet-x) var(--pet-y);
-  background-size: 600% 800%;
   image-rendering: auto;
   pointer-events: none;
+  transition: transform 180ms ease-out;
+}
+
+.science-pet__artwork {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.science-pet__poster,
+.science-pet__playback {
+  position: absolute;
+  inset: 0;
+}
+
+.science-pet__artwork img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .science-pet__sprite {
+    transition: none;
+  }
 }
 
 .science-pet__button.is-dragging {
@@ -3254,6 +3217,15 @@ img {
 .pet-call__wave--muted i {
   animation-play-state: paused;
   opacity: 0.34;
+}
+
+.pet-call__notice {
+  flex: none;
+  margin: 0 0 10px;
+  color: #416b61;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .pet-call__messages {
@@ -4253,8 +4225,7 @@ img {
 }
 
 .pet-chat__more-trigger:focus-visible,
-.pet-chat__attachment-remove:focus-visible,
-.knowledge-card__agent-trigger:focus-visible {
+.pet-chat__attachment-remove:focus-visible {
   outline: 2px solid #a4cfc4;
   outline-offset: 2px;
 }
@@ -5473,6 +5444,14 @@ img {
 
   .home-site-header,
   .lab-site-header {
+    display: block;
+  }
+
+  .home-site-header nav {
+    flex-shrink: 0;
+  }
+
+  .home-site-header nav > a[href="/lab"] {
     display: none;
   }
 
@@ -5574,13 +5553,13 @@ img {
   }
 
   .lab-page main {
-    padding-top: 0;
+    padding-top: calc(64px + env(safe-area-inset-top));
   }
 
   .lab-hero {
     position: sticky;
     z-index: 45;
-    top: 0;
+    top: calc(64px + env(safe-area-inset-top));
     min-height: 0;
     border-bottom: 1px solid #dfe7e3;
     background: rgba(246, 249, 247, 0.96);
@@ -5611,7 +5590,7 @@ img {
   }
 
   #lab-results {
-    scroll-margin-top: 76px;
+    scroll-margin-top: calc(140px + env(safe-area-inset-top));
   }
 
   .filter-panel {
@@ -5770,6 +5749,23 @@ img {
 }
 
 @media (max-width: 720px) {
+  .knowledge-card--literature {
+    display: grid;
+    grid-template-columns: clamp(112px, 30vw, 140px) minmax(0, 1fr);
+  }
+
+  .knowledge-card--literature .knowledge-card__media {
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    aspect-ratio: auto;
+  }
+
+  .knowledge-card--literature .knowledge-card__body {
+    min-width: 0;
+    min-height: 138px;
+  }
+
   .lab-page .knowledge-grid.knowledge-grid--literature {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -5779,19 +5775,19 @@ img {
   }
 
   .knowledge-grid--literature .knowledge-card--literature {
+    display: flex;
     flex-direction: column;
   }
 
   .knowledge-grid--literature .knowledge-card--literature .knowledge-card__media {
     width: 100%;
     min-width: 0;
+    height: auto;
+    aspect-ratio: 1 / 1.08;
   }
-}
 
-@media (max-width: 1023px) {
-  .knowledge-card__agent-actions {
-    right: 76px;
-    bottom: 14px;
+  .knowledge-grid--literature .knowledge-card--literature .knowledge-card__body {
+    min-height: 66px;
   }
 }
 

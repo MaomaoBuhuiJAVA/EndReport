@@ -8,6 +8,7 @@ type LessonSections = {
   keyPoints: string[];
   field: string;
   source: string;
+  activityName: string;
   notes: string[];
   fallback: string[];
 };
@@ -52,6 +53,7 @@ function canonicalSection(value: string) {
   if (/^(重点难点|重点和难点|重点|难点)$/u.test(label)) return "keyPoints" as const;
   if (/^领域$/u.test(label)) return "field" as const;
   if (/^来源$/u.test(label)) return "source" as const;
+  if (/^(教学活动|活动名称)$/u.test(label)) return "activityName" as const;
   if (/^(备注|活动提示|延伸与安全提示|安全提示)$/u.test(label)) return "notes" as const;
   return null;
 }
@@ -65,6 +67,7 @@ function createSections(): LessonSections {
     keyPoints: [],
     field: "",
     source: "",
+    activityName: "",
     notes: [],
     fallback: [],
   };
@@ -73,7 +76,7 @@ function createSections(): LessonSections {
 function appendSection(sections: LessonSections, section: keyof LessonSections | "fallback", value: string) {
   const cleaned = cleanMarkdown(value);
   if (!cleaned) return;
-  if (section === "field" || section === "source") {
+  if (section === "field" || section === "source" || section === "activityName") {
     sections[section] = cleaned;
     return;
   }
@@ -106,7 +109,9 @@ function parseLessonMarkdown(markdown: string): LessonSections {
         continue;
       }
 
-      if (tableSections.some(Boolean)) {
+      // Only a table consisting entirely of template fields is a field mapping table.
+      // A process table may also have an "活动内容" column, alongside questions/responses.
+      if (tableSections.some(Boolean) && tableCells.every((cell, index) => !cell || tableSections[index] || /^(主题|班级|时间|教师)$/u.test(cell))) {
         pendingTableSections = tableSections;
         continue;
       }
@@ -116,24 +121,29 @@ function parseLessonMarkdown(markdown: string): LessonSections {
           const section = pendingTableSections[index];
           if (section) appendSection(sections, section, tableCells[index] ?? "");
         }
-        pendingTableSections = null;
+      } else {
+        // Non-field tables (e.g. observation records) must retain all their cells.
+        appendSection(sections, current, tableCells.join("　|　"));
       }
       continue;
     }
 
     pendingTableSections = null;
-    const line = sourceLine.trim();
+    const line = cleanMarkdown(sourceLine);
     if (!line) continue;
+    // Markdown dividers separate sections in chat; they are not page commands in this form.
+    if (/^(?:-{3,}|<!--\s*page-?break\s*-->)$/iu.test(line)) continue;
 
     const headingMatch = line.match(/^#{1,6}\s*(.+?)\s*#*$/u);
     const labelMatch = line.match(/^(?:#{1,6}\s*)?([^：:]{1,12})\s*[：:]\s*(.*)$/u);
     const heading = headingMatch?.[1] ?? null;
-    const label = heading ? canonicalSection(heading) : labelMatch ? canonicalSection(labelMatch[1]) : null;
+    const label = heading ? canonicalSection(heading) : labelMatch ? canonicalSection(labelMatch[1]) : canonicalSection(line);
 
     if (label) {
       current = label;
       const inlineValue = heading ? "" : labelMatch?.[2] ?? "";
       appendSection(sections, current, inlineValue);
+      if (inlineValue && (current === "field" || current === "source" || current === "activityName")) current = "fallback";
       continue;
     }
 
@@ -152,9 +162,11 @@ function removeGeneratedFieldAppendix(markdown: string) {
   return markdown.replace(/(?:^|\n)\s*#{1,6}\s*备课表字段\s*\n[\s\S]*$/u, "").trim();
 }
 
+type ParagraphOptions = { align?: "left" | "center"; bold?: boolean; size?: number; font?: "黑体" | "宋体"; keepNext?: boolean; keepLines?: boolean; title?: boolean };
+
 function paragraphXml(
   value: string,
-  options: { align?: "left" | "center"; bold?: boolean; size?: number; font?: "黑体" | "宋体" } = {},
+  options: ParagraphOptions = {},
 ) {
   const align = options.align ?? "left";
   const bold = options.bold ? "<w:b/><w:bCs/>" : "";
@@ -162,34 +174,103 @@ function paragraphXml(
   const font = options.font ?? (options.bold ? "黑体" : "宋体");
   const text = escapeXml(value);
   const textNode = value.startsWith(" ") || value.endsWith(" ") ? `<w:t xml:space="preserve">${text}</w:t>` : `<w:t>${text}</w:t>`;
-  return `<w:p><w:pPr><w:spacing w:after="0" w:line="360" w:lineRule="auto"/><w:jc w:val="${align}"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="${font}" w:hAnsi="${font}" w:eastAsia="${font}"/><w:sz w:val="${size}"/><w:szCs w:val="${size}"/>${bold}</w:rPr>${textNode}</w:r></w:p>`;
+  return `<w:p><w:pPr>${options.title ? '<w:pStyle w:val="Title"/>' : ""}${options.keepNext ? "<w:keepNext/>" : ""}${options.keepLines ? "<w:keepLines/>" : ""}<w:widowControl/><w:snapToGrid w:val="0"/><w:spacing w:before="0" w:after="0" w:line="300" w:lineRule="auto"/><w:jc w:val="${align}"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="${font}" w:hAnsi="${font}" w:eastAsia="${font}"/><w:sz w:val="${size}"/><w:szCs w:val="${size}"/>${bold}</w:rPr>${textNode}</w:r></w:p>`;
+}
+
+function stageHeading(value: string) {
+  if (/^#{1,6}\s/u.test(value)) return true;
+  return Array.from(value).length <= 80 && /^[（(][一二三四五六七八九十]+[）)]\s*\S/u.test(value);
+}
+
+function standaloneLabel(value: string) {
+  return /^(?:[-+•]\s*)?(?:教师行为|教师回应|幼儿可能回应(?:或表现)?|预设幼儿(?:回答|表现)|设计意图|活动过程)[：:]?$/u.test(value);
 }
 
 function valueParagraphs(
   values: string[],
-  options: { align?: "left" | "center"; bold?: boolean; size?: number; font?: "黑体" | "宋体" } = {},
+  options: ParagraphOptions = {},
 ) {
   if (!values.length) return paragraphXml("", options);
-  return values.map((value) => paragraphXml(value, options)).join("");
+  return values.map((value, index) => {
+    const heading = value.match(/^#{1,6}\s*(.+)$/u);
+    const text = heading?.[1] ?? value;
+    const short = Array.from(text).length <= 80;
+    const label = short && standaloneLabel(text);
+    const stage = stageHeading(value);
+    return paragraphXml(text, { ...options, keepLines: short,
+      ...((stage || label) ? { bold: stage || options.bold, keepNext: index < values.length - 1 } : {}),
+    });
+  }).join("");
 }
 
 function cellXml(
   values: string | string[],
   width: number,
-  options: { label?: boolean; gridSpan?: number; align?: "left" | "center"; verticalAlign?: "center" | "top" } = {},
+  options: { label?: boolean; gridSpan?: number; align?: "left" | "center"; verticalAlign?: "center" | "top"; merge?: "restart" | "continue" } = {},
 ) {
   const valueList = Array.isArray(values) ? values : [values];
   const gridSpan = options.gridSpan && options.gridSpan > 1 ? `<w:gridSpan w:val="${options.gridSpan}"/>` : "";
-  return `<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/>${gridSpan}<w:vAlign w:val="${options.verticalAlign ?? "center"}"/></w:tcPr>${valueParagraphs(valueList, { align: options.align ?? (options.label ? "center" : "left"), bold: options.label, size: 24, font: "宋体" })}</w:tc>`;
+  const merge = options.merge ? `<w:vMerge w:val="${options.merge}"/>` : "";
+  return `<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/>${gridSpan}${merge}<w:vAlign w:val="${options.verticalAlign ?? "center"}"/></w:tcPr>${valueParagraphs(valueList, { align: options.align ?? (options.label ? "center" : "left"), bold: options.label, size: 24, font: "宋体" })}</w:tc>`;
 }
 
-function tableRowXml(cells: string[]) {
-  return `<w:tr><w:trPr><w:cantSplit/></w:trPr>${cells.join("")}</w:tr>`;
+function tableRowXml(cells: string[], header = false, keepTogether = false) {
+  // Metadata and bounded activity groups stay together; other narrative cells may continue.
+  return `<w:tr><w:trPr>${header || keepTogether ? "<w:cantSplit/>" : ""}${header ? "<w:tblHeader/>" : ""}</w:trPr>${cells.join("")}</w:tr>`;
+}
+
+function continuationGroups(values: string[], capacity: number): string[][] {
+  // Bound rows by wrapped line count, then keep headings/labels with their first body paragraph.
+  const fragments = values.flatMap(value => {
+    const parts: string[] = [];
+    let remaining = Array.from(value);
+    while (remaining.length > capacity) {
+      const candidate = remaining.slice(0, capacity);
+      const boundary = candidate.reduce((last, char, i) => /[。！？；，、\s]/u.test(char) ? i + 1 : last, 0);
+      const count = boundary >= capacity / 2 ? boundary : capacity;
+      parts.push(remaining.slice(0, count).join("")); remaining = remaining.slice(count);
+    }
+    if (remaining.length) parts.push(remaining.join(""));
+    return parts;
+  });
+  const groups: string[][] = [];
+  let pending: string[] = [];
+  const weight = (items: string[]) => items.reduce((sum, item) => sum + Array.from(item).length + 24, 0);
+  for (const value of fragments) {
+    const heading = stageHeading(value);
+    const previousIsLabel = pending.length && (stageHeading(pending.at(-1)!) || standaloneLabel(pending.at(-1)!));
+    if (pending.length && !previousIsLabel && (heading || weight([...pending, value]) > capacity)) {
+      groups.push(pending); pending = [];
+    }
+    pending.push(value);
+  }
+  if (pending.length) groups.push(pending);
+  return groups.length ? groups : [[]];
+}
+
+function lessonPreface(values: string[], title: string) {
+  const normalized = (value: string) => cleanMarkdown(value).replace(/^#{1,6}\s*/u, "").replace(/[《》\s]/gu, "");
+  const topic = normalized(title);
+  return values.filter(value => {
+    const text = normalized(value);
+    return !/^(主题|班级|时间|教师)[：:]/u.test(text)
+      && ![topic, `${topic}教案`, `${topic}完整教案`, "完整教案", "教案", "教学活动设计表"].includes(text);
+  });
 }
 
 function buildTableXml(title: string, ageGroup: string, duration: string, sections: LessonSections) {
   const [c1, c2, c3, c4, c5, c6, c7, c8] = COLUMN_WIDTHS;
   const tableGrid = COLUMN_WIDTHS.map((width) => `<w:gridCol w:w="${width}"/>`).join("");
+  const activity = continuationGroups([...lessonPreface(sections.fallback, title), ...sections.activity], 240);
+  const notes = continuationGroups(sections.notes, 72);
+  const groupCount = Math.max(activity.length, notes.length);
+  const activityRows = Array.from({length: groupCount}, (_, index) => {
+    return tableRowXml([
+      cellXml(index ? "" : ["活", "动", "内", "容"], c1, {label: true, verticalAlign: "top", merge: index ? "continue" : "restart"}),
+      cellXml(activity[index] ?? [], c2 + c3 + c4 + c5 + c6, {gridSpan: 5, verticalAlign: "top"}),
+      cellXml(index ? "" : ["备注:", ...sections.notes], c7 + c8, {gridSpan: 2, verticalAlign: "top", merge: index ? "continue" : "restart"}),
+    ], false, true);
+  }).join("");
   const rows = [
     tableRowXml([
       cellXml("主题", c1, { label: true }),
@@ -200,15 +281,15 @@ function buildTableXml(title: string, ageGroup: string, duration: string, sectio
       cellXml(ageGroup, c6, { align: "center" }),
       cellXml("来源", c7, { label: true }),
       cellXml(sections.source || "科小贝智能体", c8, { align: "center" }),
-    ]),
+    ], true),
     tableRowXml([
       cellXml("教学活动", c1, { label: true }),
-      cellXml(title, c2, { align: "center" }),
+      cellXml(sections.activityName || title, c2, { align: "center" }),
       cellXml("时间", c3, { label: true }),
       cellXml(duration, c4, { align: "center" }),
       cellXml("教师", c5, { label: true }),
       cellXml("", c6 + c7 + c8, { gridSpan: 3, align: "center" }),
-    ]),
+    ], true),
     tableRowXml([
       cellXml(["活 动", "目 标"], c1, { label: true }),
       cellXml(sections.goals, c2 + c3 + c4, { gridSpan: 3, verticalAlign: "top" }),
@@ -219,11 +300,7 @@ function buildTableXml(title: string, ageGroup: string, duration: string, sectio
       cellXml(["活 动", "准 备"], c1, { label: true }),
       cellXml(sections.preparation, c2 + c3 + c4 + c5 + c6 + c7 + c8, { gridSpan: 7, verticalAlign: "top" }),
     ]),
-    tableRowXml([
-      cellXml(["活", "动", "内", "容"], c1, { label: true, verticalAlign: "top" }),
-      cellXml(sections.activity.length ? sections.activity : sections.fallback, c2 + c3 + c4 + c5 + c6, { gridSpan: 5, verticalAlign: "top" }),
-      cellXml(["备注:", ...sections.notes], c7 + c8, { gridSpan: 2, verticalAlign: "top", align: "left" }),
-    ]),
+    activityRows,
     tableRowXml([
       cellXml(["活", "动", "反", "思"], c1, { label: true, verticalAlign: "top" }),
       cellXml(sections.reflection, c2 + c3 + c4 + c5 + c6 + c7 + c8, { gridSpan: 7, verticalAlign: "top" }),
@@ -235,13 +312,13 @@ function buildTableXml(title: string, ageGroup: string, duration: string, sectio
 
 function buildDocumentXml(title: string, ageGroup: string, duration: string, markdown: string) {
   const sections = parseLessonMarkdown(markdown);
-  const heading = paragraphXml("温州市龙湾区国科温州第二幼儿园教育教学活动设计表", { align: "center", bold: true, size: 32, font: "黑体" });
+  const heading = paragraphXml("温州市龙湾区国科温州第二幼儿园教育教学活动设计表", { align: "center", bold: true, size: 32, font: "黑体", keepNext: true, title: true });
   const table = buildTableXml(title, ageGroup, duration, sections);
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="${WORD_NS}" xmlns:r="${OFFICE_REL_NS}"><w:body>${heading}${table}<w:sectPr><w:pgSz w:w="11906" w:h="16838" w:orient="portrait"/><w:pgMar w:top="1440" w:right="1800" w:bottom="1440" w:left="1800" w:header="851" w:footer="992" w:gutter="0"/><w:cols w:space="425" w:num="1"/><w:docGrid w:linePitch="312"/></w:sectPr></w:body></w:document>`;
 }
 
 function stylesXml() {
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="${WORD_NS}"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="宋体" w:hAnsi="宋体" w:eastAsia="宋体"/><w:lang w:val="zh-CN" w:eastAsia="zh-CN"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="360" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="0" w:line="360" w:lineRule="auto"/></w:pPr></w:style></w:styles>`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="${WORD_NS}"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="宋体" w:hAnsi="宋体" w:eastAsia="宋体"/><w:lang w:val="zh-CN" w:eastAsia="zh-CN"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:widowControl/><w:snapToGrid w:val="0"/><w:spacing w:after="0" w:line="300" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/></w:pPr><w:rPr><w:color w:val="000000"/></w:rPr></w:style></w:styles>`;
 }
 
 function settingsXml() {

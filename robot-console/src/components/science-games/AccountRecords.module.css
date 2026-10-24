@@ -1,0 +1,28 @@
+.records { border-top:1px solid #dcded3; border-bottom:1px solid #dcded3; padding:21px 0; margin-top:26px; color:#2b3a4a; }
+.heading { display:flex; align-items:center; gap:12px; }
+.icon { display:grid; place-items:center; width:40px; height:40px; flex-shrink:0; border-radius:11px; background:#e9ece1; color:#788b73; }
+.heading>div { flex:1; min-width:0; }
+.records .heading h2 { font-size:14px; font-weight:600; margin:0; }
+.records .heading p { font-size:11px; color:#7e897e; line-height:1.8; margin:5px 0 0; overflow-wrap:anywhere; }
+.saved { color:#788b73; flex-shrink:0; }
+.actions { display:flex; gap:9px; flex-wrap:wrap; margin:14px 0 0 52px; }
+.actions button,.actions a { min-height:44px; border:1px solid #dadfd0; border-radius:7px; padding:9px 13px; background:#fffdf6; color:#526753; font-size:11px; display:inline-flex; align-items:center; justify-content:center; gap:9px; text-decoration:none; overflow-wrap:anywhere; }
+.actions button:disabled { opacity:.5; cursor:wait; }
+.records .note { color:#8d968b; font-size:10px; line-height:1.9; margin:12px 0 0 52px; }
+.records .error { font-size:11px; line-height:1.9; color:#aa6248; background:#f3e9de; border-radius:7px; padding:9px 12px; margin-top:12px; }
+.syncNotice { display:flex; align-items:center; gap:9px; color:#806a4c; background:#f1eadd; border:1px solid #e3d9c4; border-radius:9px; padding:9px 12px; margin:0 0 17px; font-size:11px; line-height:1.7; }
+.syncNotice>svg { flex-shrink:0; }
+.syncNotice>span { flex:1; }
+.syncNotice>button { border:0; background:transparent; color:#44698a; min-height:44px; padding:5px; flex-shrink:0; }
+.actions button:focus-visible,.actions a:focus-visible,.syncNotice button:focus-visible { outline:2px solid #547aae; outline-offset:3px; }
+@media(max-width:600px) {
+  .records { padding:19px 0; margin-top:22px; }
+  .icon { width:35px; height:35px; border-radius:9px; }
+  .heading { gap:10px; }
+  .records .heading h2 { font-size:13px; }
+  .records .heading p { font-size:10px; }
+  .actions { margin-left:0; }
+  .actions button,.actions a { font-size:10px; flex:1 1 auto; }
+  .records .note { margin-left:0; font-size:9px; }
+  .syncNotice { font-size:10px; padding:5px 10px; }
+}

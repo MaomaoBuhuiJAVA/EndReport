@@ -398,7 +398,6 @@ Expected: 启动本地应用。验证以下情形：
 git add robot-console/src/components/ScienceLab.tsx
 git commit -m "feat: open lab details from chat links"
 git push origin HEAD:master
-vercel --prod
 ~~~
 
-Expected: GitHub master contains all feature commits and Vercel returns a production deployment URL.
+Expected: GitHub master contains the validated feature commit; production release follows the existing Aliyun ECS release procedure.

@@ -1,6 +1,7 @@
 import fallbackPayload from "@/data/science-knowledge.json";
 import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { resolveMediaReferences } from "@/lib/media-links";
 import type {
   ScienceKnowledgeItem,
   ScienceKnowledgeSummary,
@@ -511,7 +512,7 @@ const getCachedDatabaseItem = unstable_cache(
   { revalidate: SCIENCE_DATA_CACHE_SECONDS, tags: [SCIENCE_DATA_CACHE_TAG] },
 );
 
-export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSummary[]> {
+async function getScienceKnowledgeSummariesInternal(): Promise<ScienceKnowledgeSummary[]> {
   const packagedSummaries = fallbackItems.map((item) => applyScienceContentCorrection(toSummary(item)));
 
   try {
@@ -524,7 +525,7 @@ export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSu
   }
 }
 
-export async function getScienceKnowledgeItem(id: string): Promise<ScienceKnowledgeItem | null> {
+async function getScienceKnowledgeItemInternal(id: string): Promise<ScienceKnowledgeItem | null> {
   const fallback = fallbackItems.find((entry) => entry.id === id);
 
   try {
@@ -543,4 +544,12 @@ export async function getScienceKnowledgeItem(id: string): Promise<ScienceKnowle
   } catch {
     return fallback ? normalizeFallbackItem(fallback) : null;
   }
+}
+
+export async function getScienceKnowledgeSummaries(): Promise<ScienceKnowledgeSummary[]> {
+  return resolveMediaReferences(await getScienceKnowledgeSummariesInternal());
+}
+
+export async function getScienceKnowledgeItem(id: string): Promise<ScienceKnowledgeItem | null> {
+  return resolveMediaReferences(await getScienceKnowledgeItemInternal(id));
 }

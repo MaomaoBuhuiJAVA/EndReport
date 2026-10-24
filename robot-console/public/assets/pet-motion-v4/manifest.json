@@ -1,0 +1,57 @@
+{
+  "version": 4,
+  "source": "public\\assets\\kexiaobei-lab-spritesheet-v3.png",
+  "method": "original raster artwork, continuous mesh deformation and optical-flow inbetweens; no AI generation",
+  "size": [
+    240,
+    260
+  ],
+  "playbackSize": [
+    192,
+    208
+  ],
+  "states": {
+    "idle": {
+      "frames": 120,
+      "fps": 25,
+      "durationMs": 4800,
+      "bytes": 615852
+    },
+    "waiting": {
+      "frames": 100,
+      "fps": 25,
+      "durationMs": 4000,
+      "bytes": 526718
+    },
+    "working": {
+      "frames": 80,
+      "fps": 25,
+      "durationMs": 3200,
+      "bytes": 454920
+    },
+    "speaking": {
+      "frames": 80,
+      "fps": 25,
+      "durationMs": 3200,
+      "bytes": 451634
+    },
+    "moving": {
+      "frames": 60,
+      "fps": 25,
+      "durationMs": 2400,
+      "bytes": 361436
+    },
+    "running-right": {
+      "frames": 24,
+      "fps": 25,
+      "durationMs": 960,
+      "bytes": 132106
+    },
+    "running-left": {
+      "frames": 24,
+      "fps": 25,
+      "durationMs": 960,
+      "bytes": 132012
+    }
+  }
+}

@@ -1,0 +1,4 @@
+BEGIN;
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "username" VARCHAR(24);
+CREATE UNIQUE INDEX IF NOT EXISTS "User_username_key" ON "User"("username");
+COMMIT;

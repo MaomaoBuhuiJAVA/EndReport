@@ -257,7 +257,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === pat
   const result = await writeDifyKnowledgeDocuments({
     catalogPath: path.join(projectRoot, "src", "data", "science-knowledge.json"),
     outputDir: path.join(projectRoot, "dify", "knowledge"),
-    publicBaseUrl: process.env.DIFY_PUBLIC_BASE_URL ?? "https://www.qyfck.icu",
+    publicBaseUrl: process.env.DIFY_PUBLIC_BASE_URL ?? "https://guokeey.cn",
   });
 
   console.log(`已生成 ${result.documents.length} 个 Dify 知识文件，包含 ${result.totalItems} 条教学资料。`);

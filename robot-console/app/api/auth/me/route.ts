@@ -3,5 +3,5 @@ import { getFreshSessionUser } from "@/lib/auth";
 
 export async function GET() {
   const user = await getFreshSessionUser();
-  return NextResponse.json({ user });
+  return NextResponse.json({ user }, {headers: {"Cache-Control": "private, no-store"}});
 }

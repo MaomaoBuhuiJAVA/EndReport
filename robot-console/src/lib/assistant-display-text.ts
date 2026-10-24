@@ -6,6 +6,10 @@ const agentResultFence = /```agent-result\s*\n[\s\S]*?\n```/giu;
 const markdownImage = /!\[[^\]]*\]\([^)]*\)/gu;
 const lessonPlanFieldTable = /(?:^|\n)#{1,6}\s*备课表字段\s*\n[\s\S]*$/u;
 
+export function hasVisibleAssistantText(text: string) {
+  return text.trim().length > 0;
+}
+
 export function assistantFallbackText(kind?: StructuredResultKind) {
   switch (kind) {
     case "vision_observation":

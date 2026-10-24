@@ -170,21 +170,12 @@ test("ignores stale recognition callbacks and applies call errors only to the cu
   );
 });
 
-test("buffers final recognition fragments while listening and sends one debounced request", () => {
-  assert.match(component, /const callFinalTranscriptRef = useRef\(""\)/);
-  assert.match(
-    component,
-    /recognition\.onresult = \(event\) => \{\s*if \(callRecognitionRef\.current !== recognition \|\| !isCurrentVoiceCallListening\(sessionId\)\) return;\s*const fragment = extractFinalTranscript\(event\)\.trim\(\);\s*if \(!fragment\) return;\s*callFinalTranscriptRef\.current \+= fragment;/,
-  );
-  assert.match(
-    component,
-    /const transcript = callFinalTranscriptRef\.current\.trim\(\);\s*callFinalTranscriptRef\.current = "";\s*void processVoiceCallTranscript\(transcript, sessionId\);/,
-  );
-  assert.match(component, /const clearCallTimers = useCallback\(\(\) => \{\s*callFinalTranscriptRef\.current = "";/);
-  assert.match(
-    component,
-    /async function processVoiceCallTranscript\(transcript: string, sessionId: number\) \{\s*const session = callSessionRef\.current;\s*if \(!session \|\| !isCurrentVoiceCallListening\(sessionId\)\) return;\s*callFinalTranscriptRef\.current = "";/,
-  );
+test("wires call recognition to the tested transcript buffer and cancels it during cleanup", () => {
+  // Timing, cumulative snapshots and cancellation are exercised in voice-transcript.test.ts.
+  assert.match(component, /import \{ createVoiceTranscriptBuffer \} from "@\/lib\/voice-transcript"/);
+  assert.match(component, /onFinal: text => \{void processVoiceCallTranscript\(text, sessionId\);\}/);
+  assert.match(component, /recognition\.onresult = \(event\) => \{\s*if \(callRecognitionRef\.current !== recognition \|\| !isCurrentVoiceCallListening\(sessionId\)\) return;\s*transcriptBuffer\.update\(event\);/);
+  assert.match(component, /const clearCallTimers = useCallback\(\(\) => \{\s*callTranscriptBufferRef\.current\?\.cancel\(\)/);
 });
 
 test("does not race recognition restart with the pending final call transcript", () => {
@@ -195,7 +186,7 @@ test("does not race recognition restart with the pending final call transcript",
   );
   assert.match(
     component,
-    /current\.phase !== "listening"[\s\S]*?callFinalTimerRef\.current !== null[\s\S]*?callFinalTranscriptRef\.current\.trim\(\)/,
+    /current\.phase !== "listening"[\s\S]*?if \(transcriptBuffer\.end\(\)\) return;[\s\S]*?scheduleCallRecognitionRestart\(sessionId\)/,
   );
   assert.match(component, /if \(!isCurrentVoiceCallListening\(sessionId\) \|\| callRecognitionRef\.current\) return;/);
 });
@@ -278,7 +269,7 @@ test("starts each new voice turn with a fresh reply while retaining the latest c
     component,
     /setCallPhase\("thinking"\);\s*setCallReply\(""\);\s*setCallTranscript\(transcript\);/,
   );
-  assert.match(component, /const history = messagesRef\.current\.slice\(-12\)\.map\(\(message\) => \(\{/);
+  assert.match(component, /const history = messagesRef\.current\.filter\(message => message\.text\.trim\(\)\)\.slice\(-6\)\.map\(\(message\) => \(\{/);
 });
 
 test("uses the latest call speaker setting when a later TTS response begins", () => {

@@ -10,6 +10,7 @@ import {
   Search,
   X,
 } from "lucide-react";
+import { BrandLogo } from "@/components/BrandLogo";
 import { GardenSeal } from "@/components/GardenSeal";
 import { GooeyNav, type GooeyNavItem } from "@/components/GooeyNav";
 import { MobileAppNav, type MobileAppNavItem } from "@/components/MobileAppNav";
@@ -25,7 +26,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 
-type SessionUser = { id: string; email: string; name: string; role: "USER" | "ADMIN" };
+type SessionUser = import("@/lib/auth").SessionUser;
 
 type SiteData = {
   profile: {
@@ -203,7 +204,7 @@ export function SchoolPortal({ data, initialUser }: Props) {
       <header className="home-app-header fixed inset-x-0 top-0 z-40 px-2 pt-2 md:px-3 md:pt-3">
         <div className="home-app-header__bar mx-auto flex max-w-7xl items-center gap-2 rounded-[8px] border border-white/72 bg-white/88 px-2 py-2 shadow-[0_14px_42px_rgba(38,58,54,0.10)] backdrop-blur-2xl md:gap-3 md:px-3 md:py-3">
           <Link className="home-app-brand flex min-w-0 flex-1 items-center gap-2 rounded-[8px] px-1 py-1 transition hover:bg-[#f3efe4] md:flex-none md:gap-3 md:px-2" href="/auth">
-            <GardenSeal glyph="芽" tone="teal" />
+            <BrandLogo size={44} />
             <span className="min-w-0">
               <span className="block truncate text-sm font-semibold">{data.profile.shortName}</span>
               <span className="home-app-brand__meta block truncate text-[11px] text-[#64736f]">{user ? `${user.name} · ${user.role === "ADMIN" ? "管理员" : "普通用户"}` : "登录 / 注册"}</span>

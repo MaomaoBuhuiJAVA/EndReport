@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseAiChatStream, readAiChatResponse, type AiChatStreamEvent } from "./ai-chat-stream";
+
+beforeEach(() => vi.stubGlobal("location", {origin: "https://app.local"}));
+afterEach(() => vi.unstubAllGlobals());
 
 describe("parseAiChatStream", () => {
   it("parses SSE events even when frames arrive across chunks", async () => {
@@ -8,7 +11,7 @@ describe("parseAiChatStream", () => {
         const encoder = new TextEncoder();
         controller.enqueue(encoder.encode('data: {"type":"meta","sources":[]}\n'));
         controller.enqueue(encoder.encode('\ndata: {"type":"delta","delta":"你好"}\n\n'));
-        controller.enqueue(encoder.encode('data: {"type":"done","provider":"dify","reply":"你好"}\n\n'));
+        controller.enqueue(encoder.encode('data: {"type":"done","provider":"native","reply":"你好"}\n\n'));
         controller.close();
       },
     });
@@ -19,7 +22,7 @@ describe("parseAiChatStream", () => {
     expect(events).toEqual([
       { type: "meta", sources: [] },
       { type: "delta", delta: "你好" },
-      { type: "done", provider: "dify", reply: "你好" },
+      { type: "done", provider: "native", reply: "你好" },
     ]);
   });
 
@@ -33,14 +36,14 @@ describe("parseAiChatStream", () => {
     const response = new Response(
       'data: {"type":"meta","photos":[]}\n\n' +
         'data: {"type":"delta","delta":"先到"}\n\n' +
-        'data: {"type":"done","provider":"dify","reply":"先到后续","conversationId":"c-1","responseId":"2b7aec24-b5d5-4e53-8d29-ddf98c8421a9"}\n\n',
+        'data: {"type":"done","provider":"native","reply":"先到后续","conversationId":"c-1","responseId":"2b7aec24-b5d5-4e53-8d29-ddf98c8421a9"}\n\n',
       { headers: { "Content-Type": "text/event-stream" } },
     );
     const updates: AiChatStreamEvent[] = [];
 
     await expect(readAiChatResponse(response, (event) => updates.push(event))).resolves.toEqual({
       reply: "先到后续",
-      provider: "dify",
+      provider: "native",
       conversationId: "c-1",
       responseId: "2b7aec24-b5d5-4e53-8d29-ddf98c8421a9",
       photos: [],
@@ -53,7 +56,7 @@ describe("parseAiChatStream", () => {
       'data: {"type":"meta","attachment":{"name":"experiment.png","status":"uploaded"}}\n\n' +
         'data: {"type":"status","message":"图片正在识别，请保持页面打开。"}\n\n' +
         'data: {"type":"delta","delta":"已识别实验材料。"}\n\n' +
-        'data: {"type":"done","provider":"dify","reply":"已识别实验材料。"}\n\n',
+        'data: {"type":"done","provider":"native","reply":"已识别实验材料。"}\n\n',
       { headers: { "Content-Type": "text/event-stream" } },
     );
     const updates: AiChatStreamEvent[] = [];
@@ -78,11 +81,11 @@ describe("parseAiChatStream", () => {
   it("preserves the DeepSeek secondary-provider marker", async () => {
     await expect(
       readAiChatResponse(
-        new Response(JSON.stringify({ reply: "二级模型回复", provider: "deepseek" }), {
+        new Response(JSON.stringify({ reply: "二级模型回复", provider: "native" }), {
           headers: { "Content-Type": "application/json" },
         }),
       ),
-    ).resolves.toMatchObject({ reply: "二级模型回复", provider: "deepseek" });
+    ).resolves.toMatchObject({ reply: "二级模型回复", provider: "native" });
   });
 
   it("keeps a validated persisted science-poem cover from a JSON response", async () => {
@@ -90,11 +93,11 @@ describe("parseAiChatStream", () => {
       readAiChatResponse(
         new Response(JSON.stringify({
           reply: "科学诗封面已同步到资源库。",
-          provider: "dify",
+          provider: "native",
           coverSync: {
             itemId: "POEM-wind-trip",
             title: "风的旅行",
-            coverUrl: "https://blob.vercel-storage.com/science-resource-covers/wind-trip.png",
+            coverUrl: "https://app.local/api/media/uploads/science-resource-covers/wind-trip.png",
           },
         }), { headers: { "Content-Type": "application/json" } }),
       ),
@@ -102,14 +105,14 @@ describe("parseAiChatStream", () => {
       coverSync: {
         itemId: "POEM-wind-trip",
         title: "风的旅行",
-        coverUrl: "https://blob.vercel-storage.com/science-resource-covers/wind-trip.png",
+        coverUrl: "https://app.local/api/media/uploads/science-resource-covers/wind-trip.png",
       },
     });
   });
 
   it("keeps a validated persisted science-poem cover from a streaming done event", async () => {
     const response = new Response(
-      'data: {"type":"done","provider":"dify","reply":"科学诗封面已同步到资源库。","coverSync":{"itemId":"POEM-wind-trip","title":"风的旅行","coverUrl":"https://blob.vercel-storage.com/science-resource-covers/wind-trip.png"}}\n\n',
+      'data: {"type":"done","provider":"native","reply":"科学诗封面已同步到资源库。","coverSync":{"itemId":"POEM-wind-trip","title":"风的旅行","coverUrl":"https://app.local/api/media/uploads/science-resource-covers/wind-trip.png"}}\n\n',
       { headers: { "Content-Type": "text/event-stream" } },
     );
 
@@ -117,7 +120,7 @@ describe("parseAiChatStream", () => {
       coverSync: {
         itemId: "POEM-wind-trip",
         title: "风的旅行",
-        coverUrl: "https://blob.vercel-storage.com/science-resource-covers/wind-trip.png",
+        coverUrl: "https://app.local/api/media/uploads/science-resource-covers/wind-trip.png",
       },
     });
   });
@@ -131,7 +134,7 @@ describe("parseAiChatStream", () => {
               type: "document",
               mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
               name: "玩转纸片完整教案.docx",
-              url: "https://upload.dify.ai/files/paper-plan.docx",
+              url: "https://app.local/files/paper-plan.docx",
             },
             {
               type: "document",
@@ -146,14 +149,14 @@ describe("parseAiChatStream", () => {
         type: "document",
         mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         name: "玩转纸片完整教案.docx",
-        url: "https://upload.dify.ai/files/paper-plan.docx",
+        url: "https://app.local/files/paper-plan.docx",
       },
     ]);
   });
 
   it("preserves safe Dify document downloads from streaming done events", async () => {
     const response = new Response(
-      'data: {"type":"done","provider":"dify","reply":"教案已生成。","files":[{"type":"document","mimeType":"application/vnd.openxmlformats-officedocument.wordprocessingml.document","name":"玩转纸片完整教案.docx","url":"https://upload.dify.ai/files/paper-plan.docx"},{"type":"document","name":"不应显示的文件.docx","url":"https://untrusted.example/files/unsafe.docx"}]}\n\n',
+      'data: {"type":"done","provider":"native","reply":"教案已生成。","files":[{"type":"document","mimeType":"application/vnd.openxmlformats-officedocument.wordprocessingml.document","name":"玩转纸片完整教案.docx","url":"https://app.local/files/paper-plan.docx"},{"type":"document","name":"不应显示的文件.docx","url":"https://untrusted.example/files/unsafe.docx"}]}\n\n',
       { headers: { "Content-Type": "text/event-stream" } },
     );
 
@@ -163,7 +166,7 @@ describe("parseAiChatStream", () => {
         type: "document",
         mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         name: "玩转纸片完整教案.docx",
-        url: "https://upload.dify.ai/files/paper-plan.docx",
+        url: "https://app.local/files/paper-plan.docx",
       },
     ]);
   });

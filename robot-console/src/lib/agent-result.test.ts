@@ -60,7 +60,7 @@ describe("parseAgentResult", () => {
     });
   });
 
-  it("accepts Dify's string boolean privacy-risk in a visual result", () => {
+  it("accepts model output's string boolean privacy-risk in a visual result", () => {
     const result = parseAgentResult({
       text: [
         "```agent-result",
@@ -159,7 +159,7 @@ describe("parseAgentResult", () => {
       metadata: {
         agent_result: {
           kind: "poetry_cover",
-          cover_url: "https://upload.dify.ai/files/wind-trip-square.png",
+          cover_url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip-square.png",
           title: "风的旅行",
           author: "林漪",
           aspect_ratio: "1:1",
@@ -247,7 +247,7 @@ describe("parseAgentResult", () => {
     });
   });
 
-  it("parses an experiment recap from Dify's plain JSON code fence", () => {
+  it("parses an experiment recap from model output's plain JSON code fence", () => {
     const result = parseAgentResult({
       text: [
         "本次复盘如下：",
@@ -306,7 +306,7 @@ describe("parseAgentResult", () => {
     });
   });
 
-  it("infers an experiment recap when Dify omits the kind discriminator", () => {
+  it("infers an experiment recap when model output omits the kind discriminator", () => {
     const result = parseAgentResult({
       text: [
         "复盘结果：",
@@ -413,7 +413,7 @@ describe("parseAgentResult", () => {
     expect(result).toEqual(expected);
   });
 
-  it("parses a document diagnosis result delivered through Dify metadata", () => {
+  it("parses a document diagnosis result delivered through model output metadata", () => {
     const result = parseAgentResult({
       metadata: {
         agent_result: JSON.stringify({
@@ -470,7 +470,7 @@ describe("parseAgentResult", () => {
     });
   });
 
-  it("infers document diagnosis when Dify omits the kind field", () => {
+  it("infers document diagnosis when model output omits the kind field", () => {
     const result = parseAgentResult({
       text: [
         "已完成对上传文件的解析与整理：",
@@ -499,7 +499,7 @@ describe("parseAgentResult", () => {
     });
   });
 
-  it("parses an explicit degraded result from Dify metadata", () => {
+  it("parses an explicit degraded result from model output metadata", () => {
     const result = parseAgentResult({
       metadata: {
         agent_result: {
@@ -524,7 +524,7 @@ describe("parseAgentResult", () => {
   it.each([
     ["true", true],
     ["false", false],
-  ] as const)("parses clear string boolean retry value %s from Dify degraded metadata", (retryValue, expectedRetry) => {
+  ] as const)("parses clear string boolean retry value %s from model output degraded metadata", (retryValue, expectedRetry) => {
     const result = parseAgentResult({
       metadata: {
         agent_result: {
@@ -544,7 +544,7 @@ describe("parseAgentResult", () => {
     });
   });
 
-  it("rejects non-boolean retry strings from Dify degraded metadata", () => {
+  it("rejects non-boolean retry strings from model output degraded metadata", () => {
     const result = parseAgentResult({
       metadata: {
         agent_result: {
@@ -586,11 +586,11 @@ describe("parseAgentResult", () => {
       code: "untrusted_url",
       message: "封面图片地址不受信任，请重新生成。",
       retry: true,
-      retry_reason: "仅支持本站或 Dify 返回的图片地址。",
+      retry_reason: "仅支持本站或千问 API 返回的图片地址。",
     });
   });
 
-  it("degrades malformed agent-result JSON received through Dify metadata", () => {
+  it("degrades malformed agent-result JSON received through model output metadata", () => {
     const result = parseAgentResult({ metadata: { agent_result: "{not valid json" } });
 
     expect(result).toEqual({
@@ -601,12 +601,12 @@ describe("parseAgentResult", () => {
     });
   });
 
-  it("accepts a Dify-hosted cover URL without a same-origin setting", () => {
+  it("accepts a Qwen-hosted cover URL without a same-origin setting", () => {
     const result = parseAgentResult({
       metadata: {
         agent_result: {
           kind: "poetry_cover",
-          cover_url: "https://api.dify.ai/v1/files/cover.png",
+          cover_url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/cover.png",
           alt_text: "风吹动纸片的绘本画面",
           theme_keywords: ["风", "纸片"],
           generation_prompt: "幼儿绘本卡通风格，无文字",
@@ -618,23 +618,23 @@ describe("parseAgentResult", () => {
 
     expect(result).toMatchObject({
       kind: "poetry_cover",
-      cover_url: "https://api.dify.ai/v1/files/cover.png",
+      cover_url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/cover.png",
     });
   });
 
-  it("turns a Tongyi Dify cover Markdown image into a safe poetry-cover result", () => {
+  it("turns a Tongyi model output cover Markdown image into a safe poetry-cover result", () => {
     const result = parseAgentResult({
       text: [
         "## 科学诗封面",
         "已由通义 AIGC 生成封面图片：",
-        "![风的旅行幼儿绘本封面](https://upload.dify.ai/files/wind-trip.png)",
+        "![风的旅行幼儿绘本封面](https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip.png)",
         "封面按幼儿绘本风格生成。",
       ].join("\n"),
     });
 
     expect(result).toMatchObject({
       kind: "poetry_cover",
-      cover_url: "https://upload.dify.ai/files/wind-trip.png",
+      cover_url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip.png",
       alt_text: "风的旅行幼儿绘本封面",
       model_name: "通义 AIGC",
       retry: false,
@@ -657,15 +657,15 @@ describe("parseAgentResult", () => {
       text: [
         "## 科学诗封面",
         "已由通义 AIGC 生成封面图片：",
-        "![风的旅行幼儿绘本封面](https://upload.dify.ai/files/wind-trip-signed.png?timestamp=1&sign=test=)",
+        "![风的旅行幼儿绘本封面](https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip-signed.png?timestamp=1&sign=test=)",
       ].join("\n"),
       sameOrigin: "https://www.qyfck.icu/api/ai-chat",
-      difyApiUrl: "https://api.dify.ai/v1/chat-messages",
+
     });
 
     expect(result).toMatchObject({
       kind: "poetry_cover",
-      cover_url: "https://upload.dify.ai/files/wind-trip-signed.png?timestamp=1&sign=test=",
+      cover_url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip-signed.png?timestamp=1&sign=test=",
       retry: false,
     });
   });
@@ -675,19 +675,19 @@ describe("parseAgentResult", () => {
       text: [
         "## 科学诗封面",
         "已由通义 AIGC 生成封面图片：",
-        "![风的旅行幼儿绘本封面](https://upload.dify.ai/files/wind-trip-current.png?timestamp=2&sign=test=)",
+        "![风的旅行幼儿绘本封面](https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip-current.png?timestamp=2&sign=test=)",
       ].join("\n"),
       files: [{
         type: "image",
         remote_url: "https://internal.dify.local/files/stale-cover.png",
       }],
       sameOrigin: "https://www.qyfck.icu/api/ai-chat",
-      difyApiUrl: "https://api.dify.ai/v1/chat-messages",
+
     });
 
     expect(result).toMatchObject({
       kind: "poetry_cover",
-      cover_url: "https://upload.dify.ai/files/wind-trip-current.png?timestamp=2&sign=test=",
+      cover_url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip-current.png?timestamp=2&sign=test=",
       retry: false,
     });
   });
@@ -697,19 +697,19 @@ describe("parseAgentResult", () => {
       text: [
         "## 科学诗封面",
         "已由通义 AIGC 生成封面图片：",
-        "![风的旅行幼儿绘本封面](https://upload.dify.ai/files/wind-trip-current.png?timestamp=2&sign=test=)",
+        "![风的旅行幼儿绘本封面](https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip-current.png?timestamp=2&sign=test=)",
       ].join("\n"),
       files: [{
         type: "image",
         remote_url: "https://internal.dify.local/files/stale-cover.png",
       }],
       sameOrigin: "https://www.qyfck.icu/api/ai-chat",
-      difyApiUrl: "https://api.dify.ai/v1/chat-messages",
+
     });
 
     expect(result).toMatchObject({
       kind: "poetry_cover",
-      cover_url: "https://upload.dify.ai/files/wind-trip-current.png?timestamp=2&sign=test=",
+      cover_url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip-current.png?timestamp=2&sign=test=",
       retry: false,
     });
   });
@@ -730,14 +730,14 @@ describe("parseAgentResult", () => {
     });
   });
 
-  it("turns a Tongyi Dify image file output into a safe poetry-cover result", () => {
+  it("turns a Tongyi model output image file output into a safe poetry-cover result", () => {
     const result = parseAgentResult({
       text: "## 科学诗封面\n已由通义 AIGC 生成封面图片：",
       files: [
         {
           type: "image",
           transfer_method: "remote_url",
-          remote_url: "https://upload.dify.ai/files/wind-trip.png",
+          remote_url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip.png",
           name: "风的旅行幼儿绘本封面.png",
         },
       ],
@@ -745,7 +745,7 @@ describe("parseAgentResult", () => {
 
     expect(result).toMatchObject({
       kind: "poetry_cover",
-      cover_url: "https://upload.dify.ai/files/wind-trip.png",
+      cover_url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip.png",
       alt_text: "风的旅行幼儿绘本封面.png",
       model_name: "通义 AIGC",
       retry: false,
@@ -759,7 +759,7 @@ describe("parseAgentResult", () => {
       files: [
         {
           type: "image",
-          remote_url: "https://upload.dify.ai/files/wind-trip-landscape.png",
+          remote_url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip-landscape.png",
           metadata: {
             title: "风的旅行",
             author: "中班科学组",
@@ -784,7 +784,7 @@ describe("parseAgentResult", () => {
       metadata: {
         agent_result: {
           kind: "poetry_cover",
-          cover_url: "https://upload.dify.ai/files/wind-trip.png",
+          cover_url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip.png",
           alt_text: "一阵风带着蒲公英种子飞过草地",
           theme_keywords: ["风", "蒲公英"],
           generation_prompt: "幼儿绘本卡通风格，无文字",
@@ -794,7 +794,7 @@ describe("parseAgentResult", () => {
         files: [
           {
             type: "image",
-            remote_url: "https://upload.dify.ai/files/wind-trip.png",
+            remote_url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip.png",
             metadata: {
               title: "风的旅行",
               author: "中班科学组",
@@ -814,21 +814,21 @@ describe("parseAgentResult", () => {
     });
   });
 
-  it("uses the original cover request when Dify returns an image file without answer text", () => {
+  it("uses the original cover request when model output returns an image file without answer text", () => {
     const result = parseAgentResult({
       query: "生成《风的旅行》科学诗封面",
       files: [{
         type: "image",
         belongs_to: "assistant",
-        url: "https://upload.dify.ai/files/wind-trip.png",
+        url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip.png",
       }],
       sameOrigin: "https://www.qyfck.icu/api/ai-chat",
-      difyApiUrl: "https://api.dify.ai/v1/chat-messages",
+
     });
 
     expect(result).toMatchObject({
       kind: "poetry_cover",
-      cover_url: "https://upload.dify.ai/files/wind-trip.png",
+      cover_url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip.png",
       title: "风的旅行",
       aspect_ratio: "3:4",
       theme_keywords: ["科学诗", "风的旅行", "幼儿绘本"],
@@ -840,7 +840,7 @@ describe("parseAgentResult", () => {
       query: "请为《风的旅行》生成科学诗封面，作者：林漪，3:4竖版",
       files: [{
         type: "image",
-        remote_url: "https://upload.dify.ai/files/wind-trip-no-metadata.png",
+        remote_url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip-no-metadata.png",
       }],
     });
 
@@ -856,7 +856,7 @@ describe("parseAgentResult", () => {
       query: "请为《风的旅行》生成科学诗封面，作者为林漪，3:4竖版",
       files: [{
         type: "image",
-        remote_url: "https://upload.dify.ai/files/wind-trip-with-metadata.png",
+        remote_url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip-with-metadata.png",
         metadata: { author: "中班科学组" },
       }],
     });
@@ -872,7 +872,7 @@ describe("parseAgentResult", () => {
       query: "请为《风的旅行》生成科学诗封面，3:4竖版",
       files: [{
         type: "image",
-        remote_url: "https://upload.dify.ai/files/wind-trip-no-author.png",
+        remote_url: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/files/wind-trip-no-author.png",
       }],
     });
 
@@ -894,7 +894,7 @@ describe("parseAgentResult", () => {
       code: "generation_failed",
       message: "通义 AIGC 已执行，但没有返回可用的封面图片，请重试。",
       retry: true,
-      retry_reason: "请确认 Dify 的 Qwen-文生图节点输出已连接到文件交付节点。",
+      retry_reason: "请检查千问图片模型配置，并确认 API 返回了实际图片文件。",
     });
   });
 
@@ -913,11 +913,11 @@ describe("parseAgentResult", () => {
       code: "model_unavailable",
       message: "通义 AIGC 当前账户状态受限，暂时无法生成封面图片。",
       retry: true,
-      retry_reason: "请在 Dify 通义 AIGC 插件凭据对应的阿里云账户恢复服务后重试。",
+      retry_reason: "请检查千问 API 的账户余额和可用配额后重试。",
     });
   });
 
-  it("rejects an untrusted Tongyi Dify image file output", () => {
+  it("rejects an untrusted Tongyi model output image file output", () => {
     const result = parseAgentResult({
       text: "## 科学诗封面\n已由通义 AIGC 生成封面图片：",
       files: [

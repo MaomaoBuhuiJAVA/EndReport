@@ -7,6 +7,8 @@ import {
   stopAudioPlayback,
   transitionCallPhase,
   invalidateVoiceSession,
+  prepareSpeechAudio,
+  shouldRestartPressAndHoldRecognition,
 } from "./voice-session";
 
 describe("voice session lifecycle", () => {
@@ -56,6 +58,50 @@ describe("voice session lifecycle", () => {
 });
 
 describe("voice session browser boundaries", () => {
+  it("restarts press-and-hold recognition after a natural browser pause", () => {
+    expect(shouldRestartPressAndHoldRecognition({held: true, released: false, cancelled: false, failed: false})).toBe(true);
+    expect(shouldRestartPressAndHoldRecognition({held: false, released: true, cancelled: false, failed: false})).toBe(false);
+    expect(shouldRestartPressAndHoldRecognition({held: true, released: false, cancelled: false, failed: true})).toBe(false);
+  });
+
+  it("plays Qwen speech faster without raising its pitch and keeps that speed for new clips", () => {
+    const audio = {
+      preload: "auto" as const, src: "blob:previous", muted: true, volume: 0,
+      playbackRate: 1, defaultPlaybackRate: 1, preservesPitch: false,
+    };
+
+    prepareSpeechAudio(audio, "blob:qwen-reply", false);
+
+    expect(audio.playbackRate).toBe(1.2);
+    expect(audio.defaultPlaybackRate).toBe(1.2);
+    expect(audio.preservesPitch).toBe(true);
+  });
+
+  it("loads the next speech clip into the reusable audio player", () => {
+    const audio = {
+      preload: "" as const, src: "blob:previous", muted: true, volume: 1,
+      playbackRate: 1, defaultPlaybackRate: 1, preservesPitch: true,
+    };
+
+    prepareSpeechAudio(audio, "blob:next", false);
+
+    expect(audio.src).toBe("blob:next");
+    expect(audio.preload).toBe("auto");
+    expect(audio.muted).toBe(false);
+  });
+
+  it.each([false, true])("restores the silently unlocked call player while respecting speaker mute=%s", muted => {
+    const audio = {
+      preload: "auto" as const, src: "data:audio/wav,silent", muted: true, volume: 0,
+      playbackRate: 1, defaultPlaybackRate: 1, preservesPitch: true,
+    };
+
+    prepareSpeechAudio(audio, "blob:call-reply", muted);
+
+    expect(audio.volume).toBe(1);
+    expect(audio.muted).toBe(muted);
+  });
+
   it("extracts only final recognition text from newly reported results", () => {
     const transcript = extractFinalTranscript({
       resultIndex: 1,
@@ -97,5 +143,13 @@ describe("voice session browser boundaries", () => {
     expect(previousAudio.onerror).toBeNull();
     expect(load).toHaveBeenCalledOnce();
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:old-response");
+  });
+
+  it("settles an interrupted playback even after its media event handlers are removed", async () => {
+    let finish!: (played: boolean) => void;
+    const playback = new Promise<boolean>(resolve => {finish = resolve;});
+    stopAudioPlayback({audio: {src: "blob:playing", onended: null, onerror: null}, onStopped: () => finish(false)});
+    const result = await Promise.race([playback, new Promise<string>(resolve => setTimeout(() => resolve("unsettled"), 50))]);
+    expect(result).toBe(false);
   });
 });

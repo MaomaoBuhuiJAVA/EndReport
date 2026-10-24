@@ -1,6 +1,6 @@
-import { normalizeDifyOutputFiles, type AiChatOutputFile } from "./ai-chat-files";
+import { normalizeAiChatOutputFiles, type AiChatOutputFile } from "./ai-chat-files";
 
-const DOWNLOAD_ROUTE = "/api/ai-chat/download";
+const ARTIFACT_ROUTE = "/api/ai-chat/artifact";
 export const MAX_AI_CHAT_DOWNLOAD_BYTES = 12 * 1024 * 1024;
 
 const DOCUMENT_CONTENT_TYPES: ReadonlyMap<string, string> = new Map([
@@ -14,8 +14,8 @@ const DOCUMENT_EXTENSIONS_BY_CONTENT_TYPE: ReadonlyMap<string, string> = new Map
   [...DOCUMENT_CONTENT_TYPES.entries()].map(([extension, contentType]) => [contentType, extension]),
 );
 
-type DifyDocumentDownloadOptions = {
-  difyApiUrl?: string;
+type AiChatDocumentDownloadOptions = {
+  sameOrigin?: string;
 };
 
 function outputFileCandidate(file: AiChatOutputFile) {
@@ -51,11 +51,11 @@ function normalizedMimeType(value: string | undefined) {
  * Revalidates a document before it is rendered as a download or fetched by
  * the server. No same-origin exception is available to this path.
  */
-export function normalizeDifyDocumentDownload(
+export function normalizeAiChatDocumentDownload(
   file: AiChatOutputFile,
-  options: DifyDocumentDownloadOptions = {},
+  options: AiChatDocumentDownloadOptions = {},
 ) {
-  return normalizeDifyOutputFiles([outputFileCandidate(file)], options).find(
+  return normalizeAiChatOutputFiles([outputFileCandidate(file)], options).find(
     (outputFile) => outputFile.type === "document",
   ) ?? null;
 }
@@ -79,15 +79,23 @@ export function buildAiChatDocumentDownloadUrl(file: AiChatOutputFile) {
     return null;
   }
   if (!currentOrigin && /^[a-z][a-z\d+.-]*:/iu.test(file.url)) return null;
-  if (parsed.pathname !== DOWNLOAD_ROUTE) return null;
+  if (parsed.pathname !== ARTIFACT_ROUTE) return null;
   if (currentOrigin && parsed.origin !== currentOrigin) return null;
+  if (parsed.username || parsed.password || parsed.hash) return null;
 
   const token = parsed.searchParams.get("token");
-  if (!token || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(token)) return null;
+  const tokenPattern = /^[a-f0-9]{48}\.\d{13}\.[A-Za-z0-9_-]{43}$/u;
+  if (!token || !tokenPattern.test(token)) return null;
   for (const key of parsed.searchParams.keys()) {
     if (key !== "token") return null;
   }
-  return `${DOWNLOAD_ROUTE}?token=${encodeURIComponent(token)}`;
+  return `${parsed.pathname}?token=${encodeURIComponent(token)}`;
+}
+
+export function buildAiChatImageDownloadUrl(file: AiChatOutputFile) {
+  if (file.type !== "image") return null;
+  return normalizeAiChatOutputFiles([outputFileCandidate(file)], {sameOrigin: globalThis.location?.origin})
+    .find(output => output.type === "image")?.url ?? null;
 }
 
 export function documentDownloadContentType(file: AiChatOutputFile) {

@@ -13,6 +13,11 @@ enum UserRole {
   ADMIN
 }
 
+enum AccountType {
+  PARENT
+  TEACHER
+}
+
 enum AssetKind {
   CAMPUS
   ROOM
@@ -74,9 +79,19 @@ enum StudentWorkVisibility {
 model User {
   id           String   @id @default(cuid())
   name         String
+  avatarKey    String?  @db.VarChar(64)
+  avatarImage  Bytes?
   role         UserRole @default(USER)
   email        String   @unique
+  phone        String?  @unique @db.VarChar(11)
+  username     String?  @unique @db.VarChar(24)
+  accountType  AccountType?
+  identityVerified Boolean @default(false)
+  phoneVerified Boolean @default(false)
   passwordHash String
+  sessionVersion Int @default(0)
+  lastLoginAt DateTime?
+  lastLoginMethod String? @db.VarChar(16)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -88,6 +103,71 @@ model User {
   studentWorkComments  StudentWorkComment[]
   studentWorkLikes     StudentWorkLike[]
   growthRecords        StudentGrowthRecord[]
+  scienceGameProfiles  ScienceGameProfile[]
+  scienceGameCompletions ScienceGameCompletion[]
+  scienceGameEvents    ScienceGameEvent[]
+}
+
+model ScienceGameProfile {
+  id          String @id @default(cuid())
+  ownerId     String
+  owner       User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name        String @db.VarChar(12)
+  age         String @db.VarChar(16)
+  avatar      String @db.VarChar(16)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+  completions ScienceGameCompletion[]
+  @@unique([id, ownerId])
+  @@index([ownerId])
+}
+
+model ScienceGameCompletion {
+  id          String @id @default(cuid())
+  ownerId     String
+  owner       User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  profileId   String
+  profile     ScienceGameProfile @relation(fields: [profileId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  gameId      String @db.VarChar(16)
+  day         DateTime @db.Date
+  completedAt DateTime @default(now()) @db.Timestamptz(3)
+  points      Int
+  events      ScienceGameEvent[]
+  @@unique([profileId, gameId, day])
+  @@unique([id, ownerId, profileId, gameId])
+  @@index([ownerId, completedAt])
+  @@index([day, profileId])
+}
+
+model ScienceGameEvent {
+  ownerId      String
+  owner        User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  eventId      String @db.VarChar(128)
+  profileId    String
+  gameId       String @db.VarChar(16)
+  completionId String
+  completion   ScienceGameCompletion @relation(fields: [completionId, ownerId, profileId, gameId], references: [id, ownerId, profileId, gameId], onDelete: Cascade)
+  points       Int
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  @@id([ownerId, eventId])
+  @@index([completionId])
+}
+
+model SmsVerification {
+  id          String @id
+  phone       String @db.VarChar(11)
+  purpose     String @db.VarChar(24)
+  principal   String @default("")
+  codeHash    String @db.VarChar(64)
+  senderKey   String @db.VarChar(64)
+  attempts    Int @default(0)
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime
+  deliveredAt DateTime?
+  consumedAt  DateTime?
+  @@index([createdAt])
+  @@index([phone, createdAt])
+  @@index([senderKey, createdAt])
 }
 
 model SchoolProfile {

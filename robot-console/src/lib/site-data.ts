@@ -102,7 +102,7 @@ export async function getSiteData(viewerRole?: "USER" | "ADMIN"): Promise<SiteDa
   }
 }
 
-function getFallbackSiteData(viewerRole?: "USER" | "ADMIN"): SiteData {
+export function getFallbackSiteData(viewerRole?: "USER" | "ADMIN"): SiteData {
   const isAdmin = viewerRole === "ADMIN";
 
   return {

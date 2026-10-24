@@ -157,7 +157,7 @@
 
 - [ ] **Step 2: Start a fresh local server**
 
-  Stop any stale Next process, then run `npm run dev -- --webpack` from the app root. Use the first free local port and report the exact URL. Do not run Git, Vercel, deployment, or commit commands.
+  Stop any stale Next process, then run `npm run dev -- --webpack` from the app root. Use the first free local port and report the exact URL. Do not run deployment or commit commands.
 
 - [ ] **Step 3: Browser-check the target flow**
 

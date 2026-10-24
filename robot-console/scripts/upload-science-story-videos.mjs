@@ -1,7 +1,8 @@
 import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { put } from "@vercel/blob";
+import { loadNativeUploadEnv, ossUploadClient, putPrivateMedia } from "./lib/native-uploads.mjs";
+await loadNativeUploadEnv();
 
 const repoRoot = process.cwd();
 const catalogPath = path.resolve(
@@ -11,13 +12,10 @@ const sourceRoot = path.resolve(
   process.env.SCIENCE_SOURCE_DIR || path.join(repoRoot, "..", "..", "科学诗、科学故事、科学教案、科学实验"),
 );
 const storyRoot = path.join(sourceRoot, "科学故事");
-const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
 const dryRun = process.argv.includes("--dry-run");
 const supportedVideo = /\.(mp4|webm|mov|m4v|avi)$/iu;
 
-if (!token && !dryRun) {
-  throw new Error("BLOB_READ_WRITE_TOKEN is required");
-}
+if (!dryRun) ossUploadClient();
 
 function normalizeTitle(value) {
   return String(value || "")
@@ -72,14 +70,10 @@ for (const [index, story] of stories.entries()) {
   const pathname = `science-stories/${story.id}${extension}`;
   const result = dryRun
     ? { url: `dry-run://${pathname}` }
-    : await put(pathname, createReadStream(filePath), {
-        access: "public",
-        token,
-        addRandomSuffix: false,
-        allowOverwrite: true,
+    : await putPrivateMedia(pathname, createReadStream(filePath), {
+
         contentType: contentType(filePath),
-        cacheControlMaxAge: 31536000,
-        multipart: true,
+
       });
 
   story.videoUrl = result.url;
@@ -95,4 +89,6 @@ if (!dryRun) {
   await fs.writeFile(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`, "utf8");
 }
 
-console.log(JSON.stringify({ stories: stories.length, videos: videoFiles.length, dryRun, uploaded }, null, 2));
+console.log(JSON.stringify({ stories: stories.length, videos: videoFiles.length, dryRun, uploaded,
+  ...(!dryRun ? {databaseSyncPending: true, syncCommand: `npm run sync:science-media -- --item=${uploaded.map(item => item.id).join(",")} --catalog='${catalogPath.replaceAll("'", "''")}'`} : {}),
+}, null, 2));

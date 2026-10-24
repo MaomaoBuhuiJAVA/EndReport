@@ -16,7 +16,7 @@
 - 浏览器继续使用已有的中文 `SpeechRecognition` 能力获取用户语音，避免把豆包凭证暴露给客户端。
 - 服务端新增语音合成路由，使用 WebSocket 连接豆包双向 TTS 接口，固定传入 `x4_doudou`，返回 `audio/mpeg`。
 - 通话每轮复用现有 `/api/ai-chat`，所以资料库检索、DeepSeek 回复、实验详情链接和文字兜底保持一致。
-- Vercel Serverless 不承载浏览器到豆包的长连接；每次播报使用一次短生命周期的服务端 WebSocket 请求。通话长生命周期只存在于浏览器状态机中。
+- 每次播报使用一次短生命周期的服务端 WebSocket 请求；通话长生命周期只存在于浏览器状态机中。
 
 ## 交互设计
 
@@ -72,4 +72,4 @@
 
 - 不把 AppID、APIKey、APISecret 写入前端 bundle、Git、日志或 API 响应。
 - 不改变现有资料库检索、DeepSeek 对话和实验详情跳转协议。
-- 不在 Vercel 上维护跨请求的永久 WebSocket；每轮语音请求独立关闭。
+- 每轮语音请求独立关闭，不在服务端维护跨请求的永久 WebSocket。

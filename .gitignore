@@ -1,4 +1,22 @@
 .worktrees/
 
-.vercel
+# Local dependencies and build output
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+
+# Local experiments, generated evidence, and deployment scratch space
+tmp/
+**/tmp/
+output/
+recordings/
+.superpowers/
+*.sse
+*.tgz
+gcm-diagnose.log
+tmp-live-home.html
+robot-console/robot-console
+robot-console/tmp-*
+
 .env*

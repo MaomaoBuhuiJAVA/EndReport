@@ -1,3 +1,5 @@
+import { isGeneratedImageUrl } from "./generated-image-url";
+
 export type PrivacyVisibility = "teacher_only" | "public_after_review";
 
 export type VisionPrivacyVisibility = "teacher_only" | "internal_team" | "safe_to_share";
@@ -141,7 +143,6 @@ export type AgentResultParseInput = {
   metadata?: unknown;
   files?: unknown;
   sameOrigin?: string;
-  difyApiUrl?: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -159,7 +160,7 @@ function optionalStringArray(value: Record<string, unknown>, key: string): strin
 }
 
 function parseVisionPrivacyRisk(value: unknown): boolean | VisionPrivacyRisk | null {
-  // Dify's structured-output renderer may serialize booleans as the strings
+  // A structured-output renderer may serialize booleans as the strings
   // "true" or "false" inside a code fence. Normalize only those exact
   // values so an otherwise complete visual observation is still usable.
   const booleanValue = parseBoolean(value);
@@ -372,11 +373,7 @@ function parseBoolean(value: unknown): boolean | null {
   return null;
 }
 
-function isDifyHost(hostname: string) {
-  return hostname === "dify.ai" || hostname.endsWith(".dify.ai") || hostname === "udify.app" || hostname.endsWith(".udify.app");
-}
-
-function safeResultUrl(value: unknown, { sameOrigin, difyApiUrl }: AgentResultParseInput): string | null {
+function safeResultUrl(value: unknown, { sameOrigin }: AgentResultParseInput): string | null {
   const raw = requiredString(value);
   if (!raw) return null;
 
@@ -398,16 +395,8 @@ function safeResultUrl(value: unknown, { sameOrigin, difyApiUrl }: AgentResultPa
   if (url.protocol !== "http:" && url.protocol !== "https:") return null;
   if (url.username || url.password) return null;
   if (sameOriginUrl && url.origin === sameOriginUrl.origin) return url.toString();
-  if (url.protocol === "https:" && isDifyHost(url.hostname)) return url.toString();
+  if (isGeneratedImageUrl(url)) return url.toString();
 
-  if (typeof difyApiUrl === "string" && difyApiUrl.trim()) {
-    try {
-      const difyOrigin = new URL(difyApiUrl).origin;
-      if (url.protocol === "https:" && url.origin === difyOrigin) return url.toString();
-    } catch {
-      return null;
-    }
-  }
   return null;
 }
 
@@ -623,7 +612,7 @@ function parseFailureResult(value: Record<string, unknown>): AgentFailureResult 
 
 function parseCandidate(value: unknown, input: AgentResultParseInput): AgentResult | null {
   if (!isRecord(value)) return null;
-  // Dify structured-output responses can contain the complete document schema
+  // Structured model responses can contain the complete document schema
   // without echoing its discriminator. Recap responses have the same legacy
   // omission, so identify that strict shape before trying document diagnosis.
   if (!("kind" in value)) return parseExperimentRecap(value) ?? parseDocumentDiagnosis(value);
@@ -662,7 +651,7 @@ function parseTongyiCoverMarkdown(text: string, input: AgentResultParseInput): A
       "untrusted_url",
       "封面图片地址不受信任，请重新生成。",
       true,
-      "仅支持本站或 Dify 返回的图片地址。",
+      "仅支持本站或千问 API 返回的图片地址。",
     );
   }
 
@@ -690,7 +679,7 @@ function parseTongyiCoverDegraded(text: string): AgentFailureResult | null {
       "model_unavailable",
       "通义 AIGC 当前账户状态受限，暂时无法生成封面图片。",
       true,
-      "请在 Dify 通义 AIGC 插件凭据对应的阿里云账户恢复服务后重试。",
+      "请检查千问 API 的账户余额和可用配额后重试。",
     );
   }
 
@@ -698,7 +687,7 @@ function parseTongyiCoverDegraded(text: string): AgentFailureResult | null {
     "generation_failed",
     "通义 AIGC 已执行，但没有返回可用的封面图片，请重试。",
     true,
-    "请确认 Dify 的 Qwen-文生图节点输出已连接到文件交付节点。",
+    "请检查千问图片模型配置，并确认 API 返回了实际图片文件。",
   );
 }
 
@@ -782,7 +771,7 @@ function parseTongyiCoverFiles(files: unknown, input: AgentResultParseInput, tex
       "untrusted_url",
       "封面图片地址不受信任，请重新生成。",
       true,
-      "仅支持本站或 Dify 返回的图片地址。",
+      "仅支持本站或千问 API 返回的图片地址。",
     )
     : null;
 }
@@ -811,7 +800,7 @@ function invalidCandidateResult(candidate: unknown, input: AgentResultParseInput
       "untrusted_url",
       "封面图片地址不受信任，请重新生成。",
       true,
-      "仅支持本站或 Dify 返回的图片地址。",
+      "仅支持本站或千问 API 返回的图片地址。",
     );
   }
   return degradedResult(
@@ -853,7 +842,7 @@ function parseMetadataCandidate(metadata: unknown, input: AgentResultParseInput)
 
 export function parseAgentResult(input: AgentResultParseInput): AgentResult | null {
   const metadataResult = parseMetadataCandidate(input.metadata, input);
-  // Dify can retain a stale structured cover result while the current
+  // A prior reply can retain a stale structured cover result while the current
   // response carries a fresh, trusted image file or Markdown URL. Keep
   // metadata failures as a fallback so those concrete outputs can win.
   const metadataFailure = metadataResult &&

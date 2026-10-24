@@ -1,10 +1,10 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { ArrowUpRight, Bot, CornerDownLeft, MessageCircle, Minus, Sparkles } from "lucide-react";
 import { readAiChatResponse } from "@/lib/ai-chat-stream";
-import { createDifyWebUserId } from "@/lib/dify-session";
+import { createWebUserId } from "@/lib/chat-session";
 import type { ScienceLabLink } from "@/lib/science-lab-links";
 import type { ConversationMessage } from "@/lib/types";
 
@@ -23,8 +23,7 @@ export function FloatingChat() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [difyUserId] = useState(createDifyWebUserId);
-  const difyConversationIdRef = useRef<string | undefined>(undefined);
+  const [webUserId] = useState(createWebUserId);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
@@ -56,8 +55,8 @@ export function FloatingChat() {
         body: JSON.stringify({
           message: content,
           history,
-          userId: difyUserId,
-          conversationId: difyConversationIdRef.current,
+          userId: webUserId,
+
         }),
       });
       if (!response.ok) throw new Error("Assistant request failed");
@@ -97,7 +96,7 @@ export function FloatingChat() {
           });
         }
       });
-      if (data.conversationId) difyConversationIdRef.current = data.conversationId;
+
 
       setMessages((current) => {
         const index = current.length - 1;
